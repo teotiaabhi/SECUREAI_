@@ -1,0 +1,1466 @@
+rules:
+
+  # ==========================================================================
+  # TS-INJ-001: TypeORM Raw Query Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-001
+    title: TypeORM Raw Query Injection
+    description: >
+      Detects SQL injection vulnerabilities in TypeORM raw query methods where
+      user-controlled input is interpolated via template literals or string
+      concatenation instead of using parameterized queries. Covers query(),
+      createQueryBuilder().where(), manager.query(), and getRepository() raw
+      methods with unsafe variable interpolation.
+    language: typescript
+    category: injection
+    severity: Critical
+    confidence: 0.93
+    cwe: CWE-89
+    owasp: "A03:2021-Injection"
+    tags:
+      - sql-injection
+      - typeorm
+      - template-literal
+      - raw-query
+      - orm-bypass
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:query|execute)\s*(?:<[^>]*>)?\s*\(\s*`(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: '(?:getRepository|getManager|createQueryBuilder)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*\.(?:query|where)\s*\(\s*`[^`]*\$\{'
+      - type: regex
+        pattern: '\.(?:raw|query|execute)\s*(?:<[^>]*>)?\s*\(\s*`[^`]*\$\{(?:req|ctx|request|params|args)\.'
+      - type: regex
+        pattern: 'pool\.query\s*\(\s*`(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: 'connection\.query\s*\(\s*`[^`]*\$\{(?:req|ctx|request|params|body|query)\.'
+      - type: regex
+        pattern: 'manager\.query\s*\(\s*[''"][^''"]*[''"]\s*\+\s*(?:req|ctx|request|params|body)\.'
+      - type: regex
+        pattern: 'dataSource\.query\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: '\.where\s*\(\s*`\w+\s*=\s*''\$\{[^}]+\}''`'
+    anti_patterns:
+      - ".where(\"user.id = :id\", { id"
+      - "parameterized"
+      - "prepared"
+      - "$1"
+      - "placeholder"
+      - ".escape("
+      - "createParamQuery"
+      - "sql.fragment"
+      - "setParameter"
+      - ".where(\"id = :id\""
+      - "QueryBuilder().where().setParameters"
+      - "getRepository().findOne({ where:"
+      - ".find({ where:"
+      - "z.parse("
+      - "@IsString()"
+    bypass_variants:
+      - pattern: 'createQueryBuilder\s*\(\s*\)\s*\.(?:select|where|andWhere|orWhere)\s*\(\s*`[^`]*\$\{'
+        description: "TypeORM QueryBuilder methods with template literal interpolation instead of parameter binding"
+      - pattern: '\.query\s*\(\s*[''"]SELECT[^''"]*[''"]\s*\+\s*(?:String|JSON\.stringify)\s*\('
+        description: "String coercion before concatenation to bypass type checks while remaining injectable"
+      - pattern: '\.query\s*\(\s*`[^`]*\$\{.*\.toString\(\)\s*\}'
+        description: "toString() call within template literal giving false sense of type safety"
+    evasion_indicators:
+      - "toString() or String() coercion before interpolation"
+      - "variable assignment before template literal usage"
+      - "ternary expression hiding the interpolation"
+      - "spread operator merging user input into query object"
+      - "helper function wrapping raw query with hidden interpolation"
+      - "dynamic column or table name from user input"
+    encoding_variants:
+      - "template literal with nested expression"
+      - "tagged template without parameterization"
+      - "String.raw with interpolation"
+    multi_function_chain_patterns:
+      - "getRepository() -> .query(template literal) (repository raw query)"
+      - "createQueryBuilder() -> .where(template literal) -> .getMany() (unsafe builder chain)"
+      - "dataSource.createQueryRunner() -> queryRunner.query(interpolated) (runner pattern)"
+    privilege_context_flags:
+      - "Database connection credentials of the TypeORM DataSource"
+      - "SELECT/INSERT/UPDATE/DELETE based on query type"
+      - "Potential schema modification if connection has DDL privileges"
+    business_logic_indicator:
+      - "ORM-based API with custom query endpoints"
+      - "Search or filter functionality using raw SQL"
+      - "Report generation with dynamic query construction"
+      - "Admin panel with custom database queries"
+    probable_taint_paths:
+      - source: "req.body.userId"
+        through: "template literal interpolation in .query()"
+        sink: "TypeORM connection.query()"
+      - source: "req.query.search"
+        through: "string concatenation in createQueryBuilder().where()"
+        sink: "TypeORM QueryBuilder execution"
+      - source: "ctx.params.id"
+        through: "template literal in manager.query()"
+        sink: "TypeORM EntityManager.query()"
+    context_awareness:
+      surrounding_context_patterns:
+        - "import.*typeorm"
+        - "import.*TypeORM"
+        - "@Entity"
+        - "DataSource"
+        - "createConnection"
+        - "getConnection"
+        - "Repository"
+        - "EntityManager"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "ctx.request.body"
+        - "ctx.params"
+        - "event.queryStringParameters"
+        - "args."
+        - "input."
+      taint_sink_indicators:
+        - ".query("
+        - ".execute("
+        - ".raw("
+        - "createQueryBuilder"
+        - "manager.query"
+        - "dataSource.query"
+      sanitization_patterns:
+        - "parameterized query"
+        - "prepared statement"
+        - ".escape("
+        - "setParameter("
+        - ".where(\"id = :id\", { id })"
+        - "query builder with object parameters"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_sensitivity_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: >
+        An Express API endpoint uses TypeORM to search users:
+        const users = await connection.query(`SELECT * FROM users WHERE name
+        LIKE '%${req.query.search}%'`). An attacker sends search=' UNION SELECT
+        username,password,email FROM admin_users-- to extract admin credentials
+        through the search results.
+      example_payload: "' UNION SELECT username,password,email FROM admin_users--"
+      attacker_objective: "Exploit TypeORM raw query interpolation for SQL injection to exfiltrate, modify, or destroy database content."
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      SQL injection through TypeORM raw queries can lead to full database compromise
+      including data exfiltration, authentication bypass, data modification, and in
+      some configurations remote code execution via database features.
+    remediation: |
+      TypeORM Parameterized Queries:
+        - Use query builder: .where("user.id = :id", { id })
+        - Use parameterized raw query: connection.query("SELECT * FROM users WHERE id = $1", [id])
+        - Use Repository methods: repository.findOne({ where: { id } })
+        - Use QueryBuilder with setParameters: qb.where("name = :name").setParameters({ name })
+
+      Prevention:
+        - Never use template literals with raw SQL methods
+        - Enable ESLint rules to flag template literal SQL construction
+        - Use TypeORM entity methods (.find, .findOne, .save) instead of raw queries
+        - Implement input validation with class-validator or Zod at API boundaries
+    references:
+      - https://cwe.mitre.org/data/definitions/89.html
+      - https://typeorm.io/select-query-builder
+      - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "medium"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-002
+        - TS-INJ-006
+
+  # ==========================================================================
+  # TS-INJ-002: Prisma.$queryRawUnsafe Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-002
+    title: Prisma $queryRawUnsafe Injection
+    description: >
+      Detects SQL injection via Prisma's $queryRawUnsafe and $executeRawUnsafe
+      methods which explicitly bypass Prisma's built-in parameterization.
+      Also detects improper use of $queryRaw with template literals constructed
+      via string concatenation rather than Prisma.sql tagged templates. Prisma
+      provides safe tagged template support but developers sometimes bypass it.
+    language: typescript
+    category: injection
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-89
+    owasp: "A03:2021-Injection"
+    tags:
+      - sql-injection
+      - prisma
+      - queryRawUnsafe
+      - executeRawUnsafe
+      - orm-bypass
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\$queryRawUnsafe\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: '\$executeRawUnsafe\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: '\$queryRawUnsafe\s*\(\s*[''"][^''"]*[''"]\s*\+\s*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: '\$executeRawUnsafe\s*\(\s*[''"][^''"]*[''"]\s*\+\s*'
+      - type: regex
+        pattern: '\$queryRawUnsafe\s*\(\s*(?:sql|query|stmt)\w*\s*\)'
+      - type: regex
+        pattern: '\$queryRaw\s*\(\s*[''"](?:SELECT|INSERT|UPDATE|DELETE)\b[^''"]*[''"]\s*\+\s*'
+      - type: regex
+        pattern: 'prisma\.\w+\.(?:findRaw|aggregateRaw)\s*\(\s*\{[^}]*(?:req|ctx|input|args)\.'
+      - type: regex
+        pattern: '\$queryRawUnsafe\s*\(\s*(?:req|ctx|request|params|body|input)\.'
+    anti_patterns:
+      - "Prisma.$queryRaw`"
+      - "Prisma.sql`"
+      - "Prisma.join"
+      - "Prisma.raw"
+      - "parameterized"
+      - "prepared"
+      - "$1"
+      - "placeholder"
+      - "z.parse("
+      - "z.safeParse("
+      - "validate("
+      - "@IsString()"
+      - "class-validator"
+      - "prisma.$queryRaw(Prisma.sql"
+      - "tagged template"
+    bypass_variants:
+      - pattern: '\$queryRaw\s*\(\s*String\.raw`[^`]*\$\{[^}]+\}'
+        description: "String.raw tagged template that bypasses Prisma's safe tagged template parameterization"
+      - pattern: 'const\s+\w+\s*=\s*`[^`]*\$\{[^}]+\}`;\s*(?:.*\n)*?.*\$queryRawUnsafe\s*\(\s*\w+'
+        description: "Pre-constructed template literal stored in variable then passed to $queryRawUnsafe"
+      - pattern: '\$queryRaw\s*\(\s*(?:Prisma\.)?raw\s*\(\s*`[^`]*\$\{[^}]+\}'
+        description: "Prisma.raw() with interpolated template literal defeating safe raw usage"
+    evasion_indicators:
+      - "variable indirection hiding the unsafe call"
+      - "helper function wrapping $queryRawUnsafe"
+      - "String.raw template defeating Prisma parameterization"
+      - "dynamic query construction before passing to Prisma"
+      - "Prisma.raw() with pre-interpolated string"
+      - "conditional query building with string concatenation"
+    encoding_variants:
+      - "pre-built SQL string passed as variable"
+      - "array.join() constructing SQL"
+      - "template literal assigned to intermediate variable"
+    multi_function_chain_patterns:
+      - "buildQuery(input) -> $queryRawUnsafe(builtQuery) (helper function pattern)"
+      - "string concat -> variable -> $queryRawUnsafe(variable) (indirect injection)"
+      - "findRaw({ filter: userInput }) -> MongoDB injection via Prisma (NoSQL variant)"
+    privilege_context_flags:
+      - "Prisma client database connection privileges"
+      - "SELECT/INSERT/UPDATE/DELETE based on query"
+      - "Schema modification if Prisma migrations user is reused"
+    business_logic_indicator:
+      - "Complex queries not expressible via Prisma Client API"
+      - "Report or analytics endpoints needing raw SQL"
+      - "Search functionality with dynamic WHERE clauses"
+      - "Legacy migration with raw SQL compatibility"
+    probable_taint_paths:
+      - source: "req.query.filter"
+        through: "template literal interpolation"
+        sink: "prisma.$queryRawUnsafe()"
+      - source: "req.body.searchTerm"
+        through: "string concatenation into SQL"
+        sink: "prisma.$executeRawUnsafe()"
+      - source: "args.input.where"
+        through: "dynamic query construction"
+        sink: "prisma.$queryRaw() with non-tagged template"
+    context_awareness:
+      surrounding_context_patterns:
+        - "import.*@prisma/client"
+        - "import.*Prisma"
+        - "PrismaClient"
+        - "prisma."
+        - "new PrismaClient"
+        - "prisma.$"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "ctx.request.body"
+        - "args."
+        - "input."
+        - "@Query()"
+        - "@Body()"
+      taint_sink_indicators:
+        - "$queryRawUnsafe"
+        - "$executeRawUnsafe"
+        - "$queryRaw"
+        - "$executeRaw"
+        - "findRaw"
+        - "aggregateRaw"
+      sanitization_patterns:
+        - "Prisma.$queryRaw`"
+        - "Prisma.sql`"
+        - "Prisma.join"
+        - "z.parse("
+        - "validate("
+        - "class-validator decorators"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + unsafe_method_usage_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: >
+        A NestJS analytics endpoint uses Prisma for custom reporting:
+        const results = await prisma.$queryRawUnsafe(`SELECT * FROM orders WHERE
+        status = '${input.status}' AND date > '${input.startDate}'`). An attacker
+        sends status='; DROP TABLE orders;-- to destroy the orders table, or
+        uses UNION SELECT to extract sensitive data from other tables.
+      example_payload: "'; DROP TABLE orders;--"
+      attacker_objective: "Exploit Prisma's unsafe raw query methods to bypass ORM protections and perform arbitrary SQL operations."
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      Using $queryRawUnsafe or $executeRawUnsafe with interpolated user input
+      completely bypasses Prisma's SQL injection protections. This can lead to
+      full database compromise, data exfiltration, and data destruction.
+    remediation: |
+      Prisma Safe Alternatives:
+        - Tagged template: prisma.$queryRaw`SELECT * FROM users WHERE id = ${userId}`
+        - Prisma.sql: prisma.$queryRaw(Prisma.sql`SELECT * FROM users WHERE id = ${userId}`)
+        - Client API: prisma.user.findMany({ where: { id: userId } })
+        - Prisma.join for IN clauses: Prisma.join([1, 2, 3])
+
+      Prevention:
+        - Ban $queryRawUnsafe and $executeRawUnsafe via ESLint rules
+        - Use Prisma Client API methods (.findMany, .create, .update) whenever possible
+        - Validate all inputs with Zod or class-validator before any raw query usage
+        - Code review all $queryRaw calls for proper tagged template usage
+    references:
+      - https://cwe.mitre.org/data/definitions/89.html
+      - https://www.prisma.io/docs/concepts/components/prisma-client/raw-database-access
+      - https://www.prisma.io/docs/concepts/components/prisma-client/raw-database-access#sql-injection-prevention
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "medium"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-001
+        - TS-INJ-006
+
+  # ==========================================================================
+  # TS-INJ-003: NestJS Pipe Bypass Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-003
+    title: NestJS Validation Pipe Bypass Injection
+    description: >
+      Detects injection vulnerabilities in NestJS applications where validation
+      pipes are missing, misconfigured, or bypassed. Covers controllers using
+      @Body(), @Query(), @Param() decorators without ValidationPipe, use of
+      'as any' to bypass type safety, missing class-validator decorators on DTOs,
+      and direct use of raw request objects that skip the pipe pipeline entirely.
+    language: typescript
+    category: injection
+    severity: High
+    confidence: 0.82
+    cwe: CWE-20
+    owasp: "A03:2021-Injection"
+    tags:
+      - nestjs
+      - validation-pipe
+      - input-validation
+      - type-assertion
+      - dto-bypass
+      - nosql-injection
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:req|request|ctx|params|args)\.[^;]*\s+as\s+any\b'
+      - type: regex
+        pattern: '(?:req|request|ctx|params|args)\.[^;]*\s+as\s+string\b'
+      - type: regex
+        pattern: '(?:body|query|params)\s+as\s+any\b[^;]*\.(?:find|findOne|aggregate|update|delete)\s*\('
+      - type: regex
+        pattern: '<any>\s*(?:req|request|ctx|params|body)\.'
+      - type: regex
+        pattern: '@(?:Body|Query|Param)\s*\(\s*\)\s+\w+\s*:\s*any\b'
+      - type: regex
+        pattern: '@(?:Body|Query|Param)\s*\(\s*\)\s+\w+\s*:\s*Record<string,\s*any>'
+      - type: regex
+        pattern: '\bas\s+any\b[^;]*(?:\.exec\(|\.evaluate\(|child_process|spawn|fork)\b'
+      - type: regex
+        pattern: '@(?:Body|Query|Param)\s*\(\s*\)\s+(?!.*(?:ValidationPipe|ParseIntPipe|ParseUUIDPipe))[^:]*:\s*(?:any|object|Record)\b'
+    anti_patterns:
+      - "unknown"
+      - "Zod"
+      - "zodSchema"
+      - "validate"
+      - "class-validator"
+      - "io-ts"
+      - "yup.object"
+      - "ajv.compile"
+      - "runtypes"
+      - "superstruct"
+      - "@IsString()"
+      - "@IsInt()"
+      - "plainToInstance"
+      - "ValidationPipe"
+      - "ParseIntPipe"
+    bypass_variants:
+      - pattern: '@Body\s*\(\s*\)\s+\w+\s*:\s*\w+Dto\b(?!.*@IsString|@IsInt|@IsNumber|@IsEmail|@IsUUID)'
+        description: "DTO class referenced but without class-validator decorators, providing false sense of validation"
+      - pattern: '@Body\s*\(\s*(?:new\s+ValidationPipe\s*\(\s*\{[^}]*whitelist\s*:\s*false)'
+        description: "ValidationPipe configured with whitelist: false, allowing extra properties"
+      - pattern: 'this\.(?:request|req)\.\w+\b(?!.*(?:validate|pipe|transform))'
+        description: "Direct access to raw request object bypassing NestJS pipe pipeline"
+    evasion_indicators:
+      - "type assertion to any bypassing compile-time checks"
+      - "DTO without class-validator decorators"
+      - "ValidationPipe with whitelist disabled"
+      - "direct request object access bypassing pipes"
+      - "custom pipe that does not validate input"
+      - "interface-only DTO without runtime validation"
+    encoding_variants:
+      - "JSON with nested operator objects for NoSQL injection"
+      - "prototype pollution via __proto__ in body"
+      - "array in place of expected string parameter"
+    multi_function_chain_patterns:
+      - "@Body() as any -> .find(body) (NoSQL injection via unvalidated body)"
+      - "@Query() as Record -> dynamic SQL construction (SQL injection)"
+      - "raw req.body -> JSON.parse -> eval/exec (command injection)"
+    privilege_context_flags:
+      - "Controller-level access permissions"
+      - "Guard-level authorization (does not validate input shapes)"
+      - "Database operation privileges through injected service"
+    business_logic_indicator:
+      - "NestJS controller accepting complex objects"
+      - "API endpoints with dynamic filtering"
+      - "Admin endpoints with flexible query parameters"
+      - "GraphQL resolvers with unvalidated args"
+    probable_taint_paths:
+      - source: "@Body() body: any"
+        through: "passed directly to database service method"
+        sink: "MongoDB .find() or .aggregate()"
+      - source: "@Query() query as Record<string, any>"
+        through: "spread into query filter object"
+        sink: "Prisma .findMany({ where: query })"
+      - source: "@Param() id: string (unvalidated)"
+        through: "template literal in raw SQL"
+        sink: "TypeORM .query()"
+    context_awareness:
+      surrounding_context_patterns:
+        - "import.*@nestjs"
+        - "@Controller"
+        - "@Get"
+        - "@Post"
+        - "@Put"
+        - "@Delete"
+        - "@Injectable"
+        - "NestFactory"
+      taint_source_indicators:
+        - "@Body()"
+        - "@Query()"
+        - "@Param()"
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "ctx.request.body"
+      taint_sink_indicators:
+        - ".find("
+        - ".findOne("
+        - ".aggregate("
+        - ".exec("
+        - "eval("
+        - ".query("
+        - "child_process"
+        - ".execute("
+      sanitization_patterns:
+        - "z.parse("
+        - "z.safeParse("
+        - "validate("
+        - "plainToInstance"
+        - "@IsString()"
+        - "transform("
+        - "pipe("
+        - "ValidationPipe"
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * proximity_to_user_input_factor"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: >
+        A NestJS controller has: @Post() async findUsers(@Body() body: any) {
+        return this.userService.find(body); }. The body is passed directly to
+        MongoDB's find(). An attacker sends {"username": {"$ne": null},
+        "password": {"$ne": null}} to bypass authentication and return all users,
+        as the MongoDB query operators are not filtered by any validation pipe.
+      example_payload: '{"username": {"$ne": null}, "password": {"$ne": null}}'
+      attacker_objective: "Bypass TypeScript type safety and NestJS validation to inject malicious payloads into downstream sinks."
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "medium"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      Missing or bypassed validation pipes allow unvalidated user input to reach
+      injection-sensitive functions. This can enable NoSQL injection, SQL injection,
+      prototype pollution, or command injection depending on the downstream sink.
+    remediation: |
+      NestJS Validation:
+        - Use class-validator decorators on all DTOs (@IsString, @IsInt, @IsUUID)
+        - Enable global ValidationPipe: app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+        - Use ParseIntPipe, ParseUUIDPipe for path/query parameters
+        - Never use 'as any' on request input
+
+      Runtime Validation:
+        - Use Zod schemas: const schema = z.object({ id: z.string().uuid() }); schema.parse(body)
+        - Use class-transformer: plainToInstance(CreateUserDto, body)
+        - Enable strict TypeScript: noImplicitAny, strictNullChecks
+    references:
+      - https://cwe.mitre.org/data/definitions/20.html
+      - https://docs.nestjs.com/techniques/validation
+      - https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "high"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-004
+        - TS-INJ-005
+        - TS-INJ-001
+
+  # ==========================================================================
+  # TS-INJ-004: GraphQL Resolver Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-004
+    title: GraphQL Resolver Injection
+    description: >
+      Detects injection vulnerabilities in TypeScript GraphQL resolvers where
+      user-supplied arguments are interpolated into database queries, system
+      commands, or evaluated dynamically. Covers Apollo Server, TypeGraphQL,
+      Nexus, and Mercurius resolver patterns where args or input types flow
+      unsafely into SQL, NoSQL, or OS command sinks.
+    language: typescript
+    category: injection
+    severity: High
+    confidence: 0.84
+    cwe: CWE-89
+    owasp: "A03:2021-Injection"
+    tags:
+      - graphql
+      - resolver-injection
+      - apollo-server
+      - typegraphql
+      - nosql-injection
+      - sql-injection
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:resolve|resolver)\w*\s*(?:=|:)\s*(?:async\s+)?(?:\([^)]*args[^)]*\)|[^=]*\(\s*\{[^}]*args[^}]*\})[^{]*\{[^}]*\.query\s*\(\s*`[^`]*\$\{args\.'
+      - type: regex
+        pattern: '(?:Query|Mutation|Resolver)\s*(?:=|:|\().*args\.\w+[^;]*(?:\.query|\.execute|\.raw)\s*\('
+      - type: regex
+        pattern: '@(?:Query|Mutation|Resolver)\s*\(\s*\).*\{[^}]*args\.\w+[^;]*(?:\.find|\.findOne|\.aggregate)\s*\('
+      - type: regex
+        pattern: 'args\.\w+\s*(?:as\s+any\b|as\s+string\b)[^;]*(?:query|execute|eval|exec)\s*\('
+      - type: regex
+        pattern: '(?:context|ctx)\.\w+\.(?:query|execute|raw)\s*\(\s*`[^`]*\$\{(?:args|input|parent)\.'
+      - type: regex
+        pattern: '@Arg\s*\([^)]*\)\s+\w+\s*:\s*(?:any|string|object)[^;]*(?:query|execute|find|exec)\s*\('
+    anti_patterns:
+      - "z.parse("
+      - "z.safeParse("
+      - "validate("
+      - "@IsString()"
+      - "@IsInt()"
+      - "class-validator"
+      - "InputType validation"
+      - "graphql-shield"
+      - "envelop"
+      - "parameterized"
+      - "prepared"
+      - "yup.object"
+      - ".escape("
+      - "graphql-scalars"
+      - "depthLimit"
+    bypass_variants:
+      - pattern: '(?:parent|root|source)\.\w+[^;]*(?:\.query|\.execute|\.raw|\.find)\s*\(\s*`[^`]*\$\{'
+        description: "Parent/root resolver data (potentially user-controlled) used in child resolver queries"
+      - pattern: 'context\.(?:req|request)\.\w+[^;]*(?:query|execute|eval|exec)\s*\('
+        description: "HTTP request data accessed through GraphQL context bypassing resolver arg validation"
+      - pattern: 'directive.*@(?:deprecated|auth).*args\.\w+[^;]*(?:query|execute|find)\s*\('
+        description: "Custom directive extracting args that bypass field-level validation"
+    evasion_indicators:
+      - "args passed through parent resolver chain"
+      - "context.req bypassing GraphQL arg validation"
+      - "custom directives extracting unvalidated input"
+      - "dataloader key from unvalidated args"
+      - "subscription payload containing injection"
+      - "batch query with injected variables"
+    encoding_variants:
+      - "GraphQL variable with nested injection payload"
+      - "base64-encoded input decoded in resolver"
+      - "JSON string in GraphQL String scalar"
+    multi_function_chain_patterns:
+      - "args.input -> spread into find query (NoSQL injection)"
+      - "args.filter -> template literal SQL -> db.query() (SQL injection)"
+      - "args.command -> child_process.exec() (command injection)"
+    privilege_context_flags:
+      - "GraphQL operation type (Query vs Mutation)"
+      - "Field-level authorization via directives"
+      - "Context-based auth checking"
+    business_logic_indicator:
+      - "GraphQL API with custom filtering/search resolvers"
+      - "GraphQL mutations that update database records"
+      - "Resolvers that delegate to raw database methods"
+      - "Admin GraphQL endpoints with dynamic query capabilities"
+    probable_taint_paths:
+      - source: "args.filter (GraphQL argument)"
+        through: "direct pass to MongoDB find()"
+        sink: "collection.find(args.filter)"
+      - source: "args.searchTerm (GraphQL argument)"
+        through: "template literal interpolation"
+        sink: "prisma.$queryRawUnsafe()"
+      - source: "input.command (GraphQL InputType)"
+        through: "passed to exec function"
+        sink: "child_process.exec()"
+    context_awareness:
+      surrounding_context_patterns:
+        - "import.*apollo"
+        - "import.*@apollo/server"
+        - "import.*type-graphql"
+        - "import.*nexus"
+        - "import.*mercurius"
+        - "@Resolver"
+        - "@Query"
+        - "@Mutation"
+        - "typeDefs"
+        - "resolvers"
+      taint_source_indicators:
+        - "args."
+        - "input."
+        - "parent."
+        - "context.req."
+        - "@Arg("
+        - "variables"
+      taint_sink_indicators:
+        - ".query("
+        - ".execute("
+        - ".find("
+        - ".findOne("
+        - ".aggregate("
+        - "eval("
+        - "exec("
+        - "$queryRawUnsafe"
+      sanitization_patterns:
+        - "graphql-shield"
+        - "class-validator"
+        - "z.parse("
+        - "InputType validation"
+        - "custom scalar validation"
+        - "envelop plugin validation"
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * resolver_depth_factor"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: >
+        A GraphQL resolver searches users: users(filter: JSON): [User]. The
+        resolver does: return db.users.find(args.filter). An attacker sends
+        the query: { users(filter: "{\"$or\": [{}, {\"admin\": true}]}") { id
+        email role } } exploiting NoSQL injection to return admin user data
+        through the filter argument.
+      example_payload: '{"$or": [{}, {"admin": true}]}'
+      attacker_objective: "Inject malicious payloads through GraphQL resolver arguments into backend database or system operations."
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      GraphQL resolver injection can enable SQL injection, NoSQL injection, or
+      command injection depending on the downstream sink. The GraphQL introspection
+      system can help attackers discover injection-vulnerable resolvers and craft
+      targeted payloads.
+    remediation: |
+      GraphQL Validation:
+        - Use TypeGraphQL @InputType with class-validator decorators
+        - Use graphql-shield for resolver-level validation rules
+        - Use custom GraphQL scalars (EmailAddress, UUID, DateTime) from graphql-scalars
+        - Never pass raw args directly to database queries
+
+      Parameterization:
+        - Use ORM methods: prisma.user.findMany({ where: { id: args.id } })
+        - Use parameterized queries for raw SQL
+        - Validate and whitelist filter operators for dynamic queries
+        - Implement query depth and complexity limits
+    references:
+      - https://cwe.mitre.org/data/definitions/89.html
+      - https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html
+      - https://the-guild.dev/graphql/envelop
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "high"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-003
+        - TS-INJ-005
+        - TS-INJ-001
+
+  # ==========================================================================
+  # TS-INJ-005: tRPC Input Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-005
+    title: tRPC Input Injection
+    description: >
+      Detects injection vulnerabilities in tRPC procedures where input validation
+      is missing, uses permissive schemas (z.any(), z.unknown(), z.record()),
+      or is bypassed through type assertions. tRPC provides built-in Zod
+      integration for input validation, but unvalidated or loosely validated
+      inputs can flow into database queries, file operations, or command
+      execution sinks.
+    language: typescript
+    category: injection
+    severity: High
+    confidence: 0.80
+    cwe: CWE-20
+    owasp: "A03:2021-Injection"
+    tags:
+      - trpc
+      - input-validation
+      - zod
+      - procedure-injection
+      - type-safety
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.(?:query|mutation)\s*\(\s*(?:async\s+)?\(\s*\{\s*(?:input|ctx)[^}]*\}\s*\)\s*=>\s*\{[^}]*\.(?:query|execute|raw|find|exec)\s*\(\s*`[^`]*\$\{input\.'
+      - type: regex
+        pattern: '\.input\s*\(\s*z\.any\s*\(\s*\)\s*\)'
+      - type: regex
+        pattern: '\.input\s*\(\s*z\.unknown\s*\(\s*\)\s*\)'
+      - type: regex
+        pattern: '\.input\s*\(\s*z\.record\s*\(\s*z\.any\s*\(\s*\)\s*\)\s*\)'
+      - type: regex
+        pattern: '(?:procedure|router)\.\w+\s*(?:\.query|\.mutation)\s*\([^)]*\)(?:(?!\.input\s*\().)*\.(?:query|execute|find)\s*\('
+      - type: regex
+        pattern: 'input\s+as\s+any\b[^;]*(?:query|execute|find|exec)\s*\('
+      - type: regex
+        pattern: '\.(?:query|mutation)\s*\(\s*(?:async\s+)?\(\s*\{\s*input[^}]*\}\s*\)\s*=>[^;]*child_process'
+    anti_patterns:
+      - "z.object("
+      - "z.string()"
+      - "z.number()"
+      - "z.enum("
+      - ".input(z.object({"
+      - "z.string().uuid()"
+      - "z.string().email()"
+      - "z.coerce.number()"
+      - "z.nativeEnum("
+      - "superjson"
+      - "parameterized"
+      - "prepared"
+      - ".escape("
+      - "z.string().min("
+      - "z.array(z.string())"
+    bypass_variants:
+      - pattern: '\.input\s*\(\s*z\.object\s*\(\s*\{\s*\}\s*\)\.passthrough\s*\(\s*\)\s*\)'
+        description: "Empty Zod object with .passthrough() allowing all additional properties unvalidated"
+      - pattern: '\.input\s*\(\s*z\.preprocess\s*\([^)]*\)\s*\)'
+        description: "Zod preprocess that transforms but does not validate, potentially allowing injection payloads"
+      - pattern: '\.input\s*\(\s*z\.object\s*\(\s*\{[^}]*z\.string\s*\(\s*\)[^}]*\}\s*\)\s*\)(?:(?!\.(refine|transform|pipe)).)*\.(?:query|mutation)'
+        description: "Zod schema with bare z.string() without length/pattern constraints on injection-sensitive fields"
+    evasion_indicators:
+      - "z.any() or z.unknown() as input schema"
+      - "empty z.object({}) with passthrough"
+      - "missing .input() on procedure definition"
+      - "type assertion on input within procedure"
+      - "z.preprocess without validation"
+      - "z.string() without regex or length constraints"
+    encoding_variants:
+      - "superjson serialization with nested objects"
+      - "base64-encoded payload in string field"
+      - "JSON string containing SQL/NoSQL operators"
+    multi_function_chain_patterns:
+      - "input (unvalidated) -> prisma.$queryRawUnsafe(input.sql) (SQL injection)"
+      - "input (z.any()) -> collection.find(input.filter) (NoSQL injection)"
+      - "input (z.string()) -> exec(input.command) (command injection)"
+    privilege_context_flags:
+      - "tRPC middleware context authorization"
+      - "Procedure-level access control"
+      - "Database connection privileges through injected services"
+    business_logic_indicator:
+      - "tRPC API endpoints with complex query operations"
+      - "tRPC mutations that modify database records"
+      - "Admin tRPC procedures with dynamic capabilities"
+      - "File operation procedures accepting paths from input"
+    probable_taint_paths:
+      - source: "input.filter (tRPC input)"
+        through: "direct pass to database method"
+        sink: "prisma.user.findMany({ where: input.filter })"
+      - source: "input.query (tRPC input, z.string())"
+        through: "template literal interpolation"
+        sink: "db.query(`SELECT * FROM ${input.query}`)"
+      - source: "input.path (tRPC input)"
+        through: "passed to file system operation"
+        sink: "fs.readFile(input.path)"
+    context_awareness:
+      surrounding_context_patterns:
+        - "import.*@trpc"
+        - "import.*trpc"
+        - "createTRPCRouter"
+        - "publicProcedure"
+        - "protectedProcedure"
+        - "t.procedure"
+        - "t.router"
+        - "initTRPC"
+      taint_source_indicators:
+        - "input."
+        - "ctx.input"
+        - "opts.input"
+        - "rawInput"
+      taint_sink_indicators:
+        - ".query("
+        - ".execute("
+        - ".find("
+        - ".findOne("
+        - "exec("
+        - "$queryRawUnsafe"
+        - "fs.readFile"
+        - "fs.writeFile"
+      sanitization_patterns:
+        - "z.object({"
+        - "z.string().uuid()"
+        - "z.number().int()"
+        - "z.enum(["
+        - ".refine("
+        - ".transform("
+        - "z.coerce."
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * input_validation_absence_factor"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: >
+        A tRPC router has: searchUsers: publicProcedure.input(z.any()).query(
+        async ({ input }) => { return prisma.$queryRawUnsafe(
+        `SELECT * FROM users WHERE name LIKE '%${input.search}%'`); }). The
+        z.any() schema validates nothing. An attacker sends input.search as
+        "' UNION SELECT * FROM secrets--" to extract data from other tables.
+      example_payload: "' UNION SELECT * FROM secrets--"
+      attacker_objective: "Exploit missing or permissive tRPC input validation to inject payloads into database or system operations."
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      Missing or permissive tRPC input validation allows arbitrary user input to
+      reach injection-sensitive sinks. Combined with Prisma $queryRawUnsafe or
+      direct database operations, this enables SQL injection, NoSQL injection,
+      or system command execution.
+    remediation: |
+      tRPC Input Validation:
+        - Always use strict Zod schemas: .input(z.object({ id: z.string().uuid(), search: z.string().max(100) }))
+        - Never use z.any(), z.unknown(), or z.record(z.any())
+        - Use z.enum() for known value sets
+        - Use z.string().regex() for pattern-constrained inputs
+
+      Prevention:
+        - Use Prisma Client API instead of raw queries
+        - Parameterize all database queries
+        - Add ESLint rule to flag z.any() in .input() calls
+        - Use tRPC middleware for additional input sanitization
+    references:
+      - https://cwe.mitre.org/data/definitions/20.html
+      - https://trpc.io/docs/server/validators
+      - https://zod.dev/
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "medium"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-003
+        - TS-INJ-002
+        - TS-INJ-004
+
+  # ==========================================================================
+  # TS-INJ-006: Drizzle ORM Raw SQL Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-006
+    title: Drizzle ORM Raw SQL Injection
+    description: >
+      Detects SQL injection in Drizzle ORM usage where sql.raw(), sql.unsafe(),
+      or template literal interpolation is used instead of Drizzle's safe sql``
+      tagged template literal. Drizzle provides sql`` for parameterized queries
+      but developers may use unsafe alternatives when constructing dynamic
+      queries with user input.
+    language: typescript
+    category: injection
+    severity: High
+    confidence: 0.90
+    cwe: CWE-89
+    owasp: "A03:2021-Injection"
+    tags:
+      - sql-injection
+      - drizzle-orm
+      - raw-sql
+      - template-literal
+      - orm-bypass
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'sql\.raw\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: 'sql\.raw\s*\(\s*[''"][^''"]*[''"]\s*\+\s*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'sql\.unsafe\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: 'db\.execute\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: 'db\.(?:select|insert|update|delete)\s*\([^)]*\)\s*\.where\s*\(\s*sql\.raw\s*\(\s*`[^`]*\$\{'
+      - type: regex
+        pattern: 'db\.run\s*\(\s*sql\.raw\s*\(\s*(?:req|ctx|input|args|body)\.'
+      - type: regex
+        pattern: 'sql\s*\(\s*[''"](?:SELECT|INSERT|UPDATE|DELETE)\b[^''"]*[''"]\s*\+\s*'
+    anti_patterns:
+      - "sql`"
+      - "sql.placeholder"
+      - "sql.param"
+      - "eq("
+      - "and("
+      - "or("
+      - "like("
+      - "inArray("
+      - "prepared"
+      - "parameterized"
+      - ".where(eq("
+      - "drizzle-zod"
+      - "createInsertSchema"
+      - "createSelectSchema"
+      - "z.parse("
+    bypass_variants:
+      - pattern: 'sql`[^`]*\$\{sql\.raw\s*\(\s*(?:req|input|args|body)\.[^)]+\)\s*\}'
+        description: "sql.raw() nested inside safe sql`` tagged template, injecting raw user input into parameterized query"
+      - pattern: 'db\.execute\s*\(\s*sql\.raw\s*\(\s*\w+\s*\)\s*\)(?=.*(?:req|input|args|body)\.)'
+        description: "Variable containing user input passed to sql.raw() then db.execute()"
+      - pattern: 'sql\.join\s*\(\s*\[.*sql\.raw\s*\(\s*(?:req|input|args|body)\.'
+        description: "sql.join with sql.raw elements containing user input"
+    evasion_indicators:
+      - "sql.raw() nested inside sql`` template"
+      - "variable indirection from user input to sql.raw()"
+      - "sql.join() combining safe and unsafe fragments"
+      - "helper function returning sql.raw() with user input"
+      - "dynamic where clause construction via sql.raw()"
+      - "conditional sql.raw() based on user-controlled flag"
+    encoding_variants:
+      - "variable assignment before sql.raw() call"
+      - "array.map() producing sql.raw() fragments"
+      - "spread operator combining query parts"
+    multi_function_chain_patterns:
+      - "sql.raw(userInput) -> db.execute() (direct raw injection)"
+      - "sql`` template with embedded sql.raw(input) (nested injection)"
+      - "dynamic WHERE via sql.raw() -> db.select().where() (filter injection)"
+    privilege_context_flags:
+      - "Drizzle database connection privileges"
+      - "Operation type determines required privileges"
+      - "Migration user credentials if reused"
+    business_logic_indicator:
+      - "Complex dynamic queries not expressible via Drizzle query builder"
+      - "Search endpoints with dynamic column selection"
+      - "Report generation with user-defined aggregations"
+      - "Multi-tenant filtering with dynamic schema selection"
+    probable_taint_paths:
+      - source: "req.query.search"
+        through: "sql.raw() call"
+        sink: "db.execute(sql.raw(...))"
+      - source: "input.filter"
+        through: "template literal to sql.raw()"
+        sink: "db.select().where(sql.raw(...))"
+      - source: "args.column"
+        through: "sql.raw() for dynamic column"
+        sink: "db.select().orderBy(sql.raw(...))"
+    context_awareness:
+      surrounding_context_patterns:
+        - "import.*drizzle-orm"
+        - "import.*drizzle"
+        - "drizzle("
+        - "sql.raw"
+        - "db.select"
+        - "db.insert"
+        - "db.update"
+        - "db.delete"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "input."
+        - "args."
+        - "ctx.request.body"
+      taint_sink_indicators:
+        - "sql.raw("
+        - "sql.unsafe("
+        - "db.execute("
+        - "db.run("
+        - ".where(sql.raw"
+        - ".orderBy(sql.raw"
+      sanitization_patterns:
+        - "sql`"
+        - "sql.placeholder"
+        - "eq("
+        - "like("
+        - "inArray("
+        - "drizzle-zod schema"
+        - "createInsertSchema"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * raw_usage_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: >
+        An API endpoint uses Drizzle for user search: const results = await
+        db.execute(sql.raw(`SELECT * FROM users WHERE name LIKE '%${req.query.q}%'`)).
+        An attacker sends q=' UNION SELECT * FROM credentials-- to extract
+        credential data through the search results.
+      example_payload: "' UNION SELECT * FROM credentials--"
+      attacker_objective: "Exploit Drizzle ORM sql.raw() to bypass ORM parameterization and execute arbitrary SQL."
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      sql.raw() and sql.unsafe() in Drizzle ORM bypass parameterization, enabling
+      full SQL injection. This can lead to data exfiltration, data modification,
+      and depending on database configuration, remote code execution.
+    remediation: |
+      Drizzle Safe Alternatives:
+        - Tagged template: sql`SELECT * FROM users WHERE id = ${userId}`
+        - Query builder: db.select().from(users).where(eq(users.id, userId))
+        - Placeholder: sql.placeholder('id') with prepared statements
+        - Filter operators: eq(), like(), and(), or(), inArray()
+
+      Prevention:
+        - Ban sql.raw() and sql.unsafe() via ESLint rules
+        - Use drizzle-zod for input validation: createInsertSchema(users).parse(input)
+        - Use Drizzle query builder methods exclusively
+        - Code review all sql.raw() and db.execute() calls
+    references:
+      - https://cwe.mitre.org/data/definitions/89.html
+      - https://orm.drizzle.team/docs/sql
+      - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "medium"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-001
+        - TS-INJ-002
+
+  # ==========================================================================
+  # TS-INJ-007: Deno Subprocess Command Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-007
+    title: Deno Subprocess Command Injection
+    description: >
+      Detects command injection vulnerabilities in Deno TypeScript applications
+      where user-controlled input is passed to Deno.Command, Deno.run (deprecated),
+      or subprocess APIs without sanitization. Deno's permission system controls
+      subprocess access but does not prevent injection within allowed commands.
+    language: typescript
+    category: injection
+    severity: Critical
+    confidence: 0.88
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - command-injection
+      - deno
+      - subprocess
+      - rce
+      - shell-injection
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Deno\.Command\s*\(\s*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'new\s+Deno\.Command\s*\(\s*[''"][^''"]+[''"].*args\s*:\s*\[[^\]]*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'new\s+Deno\.Command\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: 'Deno\.run\s*\(\s*\{\s*cmd\s*:\s*\[[^\]]*(?:req|ctx|request|params|body|input)\.'
+      - type: regex
+        pattern: 'Deno\.run\s*\(\s*\{\s*cmd\s*:\s*\[\s*[''"](?:sh|bash|cmd|powershell)[''"].*(?:req|ctx|input|args|body)\.'
+      - type: regex
+        pattern: 'new\s+Deno\.Command\s*\(\s*[''"](?:sh|bash|cmd|powershell)[''"].*\[\s*[''"](?:-c|/c)[''"].*(?:req|ctx|input|args|body)\.'
+      - type: regex
+        pattern: 'Deno\.(?:run|Command)\s*\([^)]*(?:eval|exec|shell)\s*[=:]\s*(?:true|1)'
+    anti_patterns:
+      - "Deno.permissions"
+      - "Deno.env.get("
+      - "allowlist"
+      - "whitelist"
+      - "hardcoded command"
+      - "sanitize("
+      - "escape("
+      - "validate("
+      - "z.parse("
+      - "z.enum("
+      - "@IsString()"
+      - "class-validator"
+      - "shlex.quote"
+      - "shell-escape"
+      - "-- test"
+    bypass_variants:
+      - pattern: 'Deno\.(?:readTextFile|readFile|writeTextFile|writeFile)\s*\(\s*(?:req|ctx|input|args|body)\.'
+        description: "Path traversal via Deno file system APIs with user-controlled paths"
+      - pattern: 'new\s+Deno\.Command\s*\(\s*\w+\s*\)(?=.*(?:req|input|args|body)\.)'
+        description: "Command from variable containing user input with one level of indirection"
+      - pattern: 'Deno\.(?:env\.set|env\.delete)\s*\(\s*(?:req|input|args|body)\.'
+        description: "Environment variable manipulation via user input for indirect command influence"
+    evasion_indicators:
+      - "variable indirection from user input to command"
+      - "shell metacharacters in user-controlled args"
+      - "Deno.run with shell: true and user input"
+      - "command constructed via array.concat with user data"
+      - "environment variable injection influencing command behavior"
+      - "path traversal in file operation arguments"
+    encoding_variants:
+      - "URL-decoded paths passed to file operations"
+      - "base64-decoded commands"
+      - "hex-encoded shell metacharacters"
+    multi_function_chain_patterns:
+      - "user input -> args array -> new Deno.Command(cmd, { args }) (argument injection)"
+      - "user input -> sh -c '...' via Deno.Command (shell injection)"
+      - "user path -> Deno.readTextFile -> Deno.Command (file read then execute)"
+    privilege_context_flags:
+      - "Deno --allow-run permission required"
+      - "Deno --allow-read/--allow-write for file operations"
+      - "Deno --allow-env for environment manipulation"
+      - "Deno --allow-net for network-based command delivery"
+    business_logic_indicator:
+      - "Deno server accepting command parameters from API"
+      - "Build/CI tool processing user-supplied arguments"
+      - "File processing service with user-controlled paths"
+      - "Developer tools exposing shell access via API"
+    probable_taint_paths:
+      - source: "req.body.filename"
+        through: "passed as argument to Deno.Command"
+        sink: "new Deno.Command('convert', { args: [input.filename] })"
+      - source: "ctx.params.id"
+        through: "template literal in shell command"
+        sink: "new Deno.Command('sh', { args: ['-c', `process ${id}`] })"
+      - source: "request.url searchParams"
+        through: "extracted and passed to file operation"
+        sink: "Deno.readTextFile()"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Deno.serve"
+        - "Deno.listen"
+        - "import.*oak"
+        - "import.*hono"
+        - "import.*fresh"
+        - "Deno.Command"
+        - "Deno.run"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "ctx.request.body"
+        - "ctx.params"
+        - "Deno.args"
+        - "URL.searchParams"
+      taint_sink_indicators:
+        - "Deno.Command"
+        - "Deno.run"
+        - "Deno.readTextFile"
+        - "Deno.writeTextFile"
+        - "Deno.remove"
+        - "Deno.mkdir"
+      sanitization_patterns:
+        - "Deno.permissions.request"
+        - "allowlist check"
+        - "whitelist validation"
+        - "shell-escape"
+        - "z.enum("
+        - "path.resolve() with base check"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * deno_permissions_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: >
+        A Deno image processing API accepts filenames: const cmd = new
+        Deno.Command("convert", { args: [req.body.input, "-resize", "100x100",
+        req.body.output] }). An attacker sends input as "; rm -rf /" which, when
+        the args are improperly joined with shell execution, results in
+        command injection.
+      example_payload: "input.jpg; rm -rf /"
+      attacker_objective: "Execute arbitrary system commands through Deno subprocess APIs to achieve remote code execution."
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      Command injection in Deno applications enables arbitrary code execution
+      within the bounds of Deno's permission flags. If --allow-run is granted
+      without restrictions, attackers gain full system access. Even with
+      restricted permissions, data exfiltration and denial of service are possible.
+    remediation: |
+      Deno Security:
+        - Use minimal Deno permissions: --allow-run=specific-command
+        - Validate all subprocess arguments against allowlists
+        - Never use shell mode (sh -c) with user input
+        - Use Deno.Command with array args (not shell string)
+
+      Prevention:
+        - Validate inputs with Zod: z.string().regex(/^[a-zA-Z0-9_.-]+$/)
+        - Use z.enum() for known command values
+        - Implement path validation for file operations
+        - Use Deno.permissions.request() for least-privilege
+    references:
+      - https://cwe.mitre.org/data/definitions/78.html
+      - https://deno.land/api@latest?s=Deno.Command
+      - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "medium"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-008
+        - TS-INJ-003
+
+  # ==========================================================================
+  # TS-INJ-008: Bun Shell Command Injection
+  # ==========================================================================
+  - rule_id: TS-INJ-008
+    title: Bun Shell Command Injection
+    description: >
+      Detects command injection vulnerabilities in Bun TypeScript applications
+      through Bun.spawn(), Bun.spawnSync(), Bun.$``, and Bun.file() APIs
+      where user-controlled input is interpolated into commands or file paths.
+      Bun's shell template literal (Bun.$``) provides some escaping but can
+      still be vulnerable to injection when misused.
+    language: typescript
+    category: injection
+    severity: Critical
+    confidence: 0.87
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - command-injection
+      - bun
+      - shell-injection
+      - subprocess
+      - rce
+      - path-traversal
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'Bun\.spawn\s*\(\s*\[\s*[''"][^''"]+[''"].*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'Bun\.spawnSync\s*\(\s*\[\s*[''"](?:sh|bash|cmd|powershell)[''"].*(?:req|ctx|input|args|body)\.'
+      - type: regex
+        pattern: 'Bun\.\$`[^`]*\$\{(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'Bun\.spawn\s*\(\s*`[^`]*\$\{[^}]+\}'
+      - type: regex
+        pattern: 'Bun\.file\s*\(\s*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'Bun\.write\s*\(\s*(?:req|ctx|request|params|body|input|args)\.'
+      - type: regex
+        pattern: 'Bun\.spawn\s*\(\s*\[\s*[''"](?:sh|bash|cmd)[''"],\s*[''"](?:-c|/c)[''"],\s*(?:req|ctx|input|args|body)\.'
+      - type: regex
+        pattern: 'Bun\.(?:spawn|spawnSync)\s*\(\s*(?:req|ctx|input|args|body)\.'
+    anti_patterns:
+      - "allowlist"
+      - "whitelist"
+      - "sanitize("
+      - "escape("
+      - "validate("
+      - "z.parse("
+      - "z.enum("
+      - "z.string().regex("
+      - "@IsString()"
+      - "class-validator"
+      - "shell-escape"
+      - "hardcoded command"
+      - "path.resolve() with base"
+      - "path.join() with base"
+      - "-- test"
+    bypass_variants:
+      - pattern: 'Bun\.\$`[^`]*\$\{[^}]*\.split\s*\([^)]*\)[^}]*\}'
+        description: "User input split by delimiter within Bun shell template, potentially injecting additional arguments"
+      - pattern: 'Bun\.spawn\s*\(\s*\w+\.(?:split|concat)\s*\('
+        description: "Command array constructed via split/concat from user-controlled string"
+      - pattern: 'Bun\.file\s*\(\s*(?:path\.join|path\.resolve)\s*\(\s*\w+\s*,\s*(?:req|input|args|body)\.'
+        description: "Path traversal via path.join with user input and insufficient base path validation"
+    evasion_indicators:
+      - "Bun shell template with unescaped user input"
+      - "command array from user-controlled string split"
+      - "path traversal in Bun.file() arguments"
+      - "environment variable injection via Bun.spawn env option"
+      - "Bun.write() to user-controlled path"
+      - "stdin piping user data into shell command"
+    encoding_variants:
+      - "URL-decoded paths in file operations"
+      - "null bytes in file paths"
+      - "unicode normalization bypasses"
+    multi_function_chain_patterns:
+      - "user input -> Bun.spawn(['sh', '-c', input]) (shell injection)"
+      - "user path -> Bun.file(path) -> .text() (path traversal file read)"
+      - "user data -> Bun.write(path, data) (arbitrary file write)"
+    privilege_context_flags:
+      - "Bun runs without permission sandbox by default"
+      - "No --allow-run equivalent in Bun"
+      - "Full OS access unless containerized"
+    business_logic_indicator:
+      - "Bun server with file processing endpoints"
+      - "API endpoints that execute system tools"
+      - "Build/development servers with shell access"
+      - "File upload/download services"
+    probable_taint_paths:
+      - source: "req.body.command"
+        through: "array construction for Bun.spawn"
+        sink: "Bun.spawn(['sh', '-c', command])"
+      - source: "req.query.file"
+        through: "path construction"
+        sink: "Bun.file(filePath)"
+      - source: "input.script"
+        through: "template literal in Bun.$``"
+        sink: "Bun.$`${input.script}`"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Bun.serve"
+        - "import.*bun"
+        - "Bun.spawn"
+        - "Bun.spawnSync"
+        - "Bun.file"
+        - "Bun.write"
+        - "Bun.$"
+        - "bunfig.toml"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "request.json()"
+        - "request.formData()"
+        - "URL.searchParams"
+        - "ctx.params"
+      taint_sink_indicators:
+        - "Bun.spawn"
+        - "Bun.spawnSync"
+        - "Bun.$"
+        - "Bun.file"
+        - "Bun.write"
+        - "Bun.openFile"
+      sanitization_patterns:
+        - "allowlist check"
+        - "whitelist validation"
+        - "shell-escape"
+        - "z.enum("
+        - "z.string().regex("
+        - "path.resolve() with startsWith base check"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * bun_sandbox_absence_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: >
+        A Bun serve handler processes files: server.fetch(req) {
+        const file = new URL(req.url).searchParams.get('file');
+        return new Response(Bun.file(`./uploads/${file}`)); }. An attacker
+        sends file=../../../etc/passwd to read arbitrary system files via
+        path traversal. Or a different endpoint: Bun.$`convert ${inputFile}
+        -resize 100x100 output.jpg` where inputFile contains shell metacharacters.
+      example_payload: "../../../etc/passwd"
+      attacker_objective: "Execute arbitrary commands or read/write arbitrary files through Bun APIs with user-controlled parameters."
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    impact: |
+      Bun applications run without a permission sandbox (unlike Deno), so command
+      injection provides unrestricted OS access. File operation injection enables
+      reading sensitive files, overwriting application code, or planting webshells.
+      Combined with Bun's performance focus, exploitation can be rapid and
+      difficult to detect.
+    remediation: |
+      Bun Security:
+        - Use Bun.spawn with array args (not shell string): Bun.spawn(['convert', input, '-resize', '100x100', output])
+        - Validate all file paths against base directory: path.resolve(base, input).startsWith(base)
+        - Never use Bun.$`` with unvalidated user input
+        - Use Bun.file() only with validated, resolved paths
+
+      Prevention:
+        - Validate inputs with Zod: z.string().regex(/^[a-zA-Z0-9_.-]+$/)
+        - Use z.enum() for known command/file values
+        - Run Bun applications in containers with minimal privileges
+        - Implement path allowlisting for file operations
+        - Use seccomp/AppArmor profiles to restrict system calls
+    references:
+      - https://cwe.mitre.org/data/definitions/78.html
+      - https://bun.sh/docs/api/spawn
+      - https://bun.sh/docs/api/file-io
+      - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+    metadata:
+      rule_version: "2.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "stable"
+      detection_complexity: "medium"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - TS-INJ-007
+        - TS-INJ-003

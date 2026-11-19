@@ -1,0 +1,1249 @@
+# ============================================================================
+# Path Traversal Detection Rules - Java
+# Language: Java
+# Rule IDs: PT-JAVA-001 through PT-JAVA-006
+# Schema Version: 3.0.0
+# Last Reviewed: 2025-01-15
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # PT-JAVA-001: FileInputStream with User-Controlled Path
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-JAVA-001"
+    title: "FileInputStream with User-Controlled Path"
+    description: >
+      Detects usage of Java's FileInputStream, FileOutputStream, FileReader,
+      and FileWriter constructors where the file path argument originates from
+      user-controlled input such as servlet request parameters, HTTP headers,
+      path variables, or multipart form data. An attacker can inject path
+      traversal sequences like ../../etc/passwd to read or write arbitrary
+      files on the server filesystem, leading to information disclosure,
+      credential theft, or arbitrary file write for code execution.
+    language: java
+    category: path_traversal
+    severity: Critical
+    confidence: 0.92
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - file-input-stream
+      - file-output-stream
+      - java
+      - servlet
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+FileInputStream\s*\(\s*(?:request\s*\.\s*getParameter\s*\(\s*"[^"]*"\s*\)|req\s*\.\s*getParameter\s*\()'
+        description: "FileInputStream with servlet request parameter"
+      - type: regex
+        pattern: 'new\s+FileInputStream\s*\(\s*(?:new\s+File\s*\(\s*[^)]*(?:request|req)\s*\.\s*getParameter)'
+        description: "FileInputStream wrapping File object with request parameter"
+      - type: regex
+        pattern: 'new\s+FileInputStream\s*\(\s*(?:filePath|fileName|userPath|inputPath|docPath|targetFile)\s*\)'
+        description: "FileInputStream with common user-controlled variable names"
+      - type: regex
+        pattern: 'new\s+File(?:Output|Input)Stream\s*\(\s*(?:path|file)\s*\+\s*(?:request|req|fileName|userInput)'
+        description: "FileInputStream/FileOutputStream with string concatenation"
+      - type: regex
+        pattern: 'new\s+File(?:Reader|Writer)\s*\(\s*(?:request\s*\.\s*getParameter|filePath|fileName|userPath)\b'
+        description: "FileReader/FileWriter with user-controlled path"
+      - type: regex
+        pattern: 'new\s+FileInputStream\s*\(\s*(?:String\.format\s*\(\s*"[^"]*"\s*,\s*[^)]*(?:request|req|fileName|userInput))'
+        description: "FileInputStream with String.format interpolating user data"
+      - type: regex
+        pattern: 'new\s+File(?:Input|Output)Stream\s*\(\s*(?:Paths\.get\s*\(\s*[^)]*(?:request|param|input))'
+        description: "FileInputStream with Paths.get containing user input"
+      - type: regex
+        pattern: 'new\s+BufferedReader\s*\(\s*new\s+FileReader\s*\(\s*(?:request\s*\.\s*getParameter|filePath|fileName|userPath)\b'
+        description: "BufferedReader wrapping FileReader with user-controlled path"
+    anti_patterns:
+      - 'new\s+File\s*\([^)]+\)\s*\.\s*getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'if\s*\(\s*!?\s*\w+\s*\.\s*startsWith\s*\(\s*(?:baseDir|allowedDir|rootDir)'
+      - 'if\s*\(\s*\w+\s*\.\s*contains\s*\(\s*"\.\."\s*\)\s*\)'
+      - 'Path\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'FilenameUtils\s*\.\s*getName\s*\('
+      - 'sanitize(?:Path|FileName|Input)\s*\('
+      - 'SecurityManager\s*\.\s*check(?:Read|Write)\s*\('
+      - 'new\s+FileInputStream\s*\(\s*"[^"]*"\s*\)'
+      - 'AccessController\s*\.\s*doPrivileged\s*\('
+      - 'if\s*\(\s*!?\s*canonicalPath\s*\.\s*startsWith\s*\('
+      - 'whitelistedPaths\s*\.\s*contains\s*\('
+      - 'allowedFiles\s*\.\s*contains\s*\('
+      - 'Paths\s*\.\s*get\s*\(\s*"[^"]*"\s*\)\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith'
+      - 'new\s+File\s*\(\s*baseDir\s*,\s*\w+\s*\)\s*\.\s*getCanonicalPath'
+      - 'Pattern\s*\.\s*matches\s*\(\s*"[^"]*"\s*,\s*\w+\s*\)'
+    bypass_variants:
+      - description: "URL-encoded dot-dot-slash traversal"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c)'
+      - description: "Double URL-encoded traversal"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection to bypass extension checks"
+        pattern: '(?:%00|\\x00|\\u0000)(?:\.(?:jpg|txt|pdf))?$'
+      - description: "Unicode/overlong UTF-8 encoded traversal"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae%e0%80%ae)'
+      - description: "Backslash traversal on Windows JVM"
+        pattern: '(?:\.\.\\\\|\.\.%5c|\.\.%5C)'
+    evasion_indicators:
+      - "URL-encoded traversal in servlet parameters"
+      - "Double encoding to bypass servlet container decode"
+      - "Null byte injection before file extension"
+      - "Unicode/overlong UTF-8 encoding"
+      - "Backslash on Windows JVM deployments"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae|\\u002e\\u002e)'
+    multi_function_chain_patterns:
+      - "request.getParameter() -> new FileInputStream()"
+      - "request.getParameter() -> new File() -> new FileInputStream()"
+      - "request.getParameter() -> String.format -> new FileInputStream()"
+      - "@PathVariable -> Paths.get() -> new FileInputStream()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary file read/write through FileInputStream/FileOutputStream exposes credentials, keys, and enables code injection"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('file')"
+        sink: "new FileInputStream(path)"
+        through: "direct parameter or string concatenation"
+      - source: "request.getParameter('name')"
+        sink: "new File(baseDir, name)"
+        through: "File constructor"
+      - source: "@PathVariable String filename"
+        sink: "new FileInputStream(Paths.get(dir, filename))"
+        through: "Spring path variable"
+    impact: |
+      Successful exploitation reads arbitrary files from the server, including
+      /etc/passwd, application.properties, web.xml, persistence.xml, private
+      keys, and database credentials. Write variants via FileOutputStream can
+      overwrite JSP/servlet files for code execution, modify configuration for
+      privilege escalation, or corrupt application data. In Java EE environments,
+      this can expose JNDI datasource passwords and application server credentials.
+    remediation: |
+      1. Use canonical path validation:
+
+         File baseDir = new File("/app/uploads").getCanonicalFile();
+         File requested = new File(baseDir, userInput).getCanonicalFile();
+         if (!requested.getPath().startsWith(baseDir.getPath() + File.separator)) {
+             throw new SecurityException("Path traversal detected");
+         }
+         FileInputStream fis = new FileInputStream(requested);
+
+      2. Use NIO Path normalization with startsWith:
+
+         Path base = Paths.get("/app/uploads").normalize().toAbsolutePath();
+         Path target = base.resolve(userInput).normalize().toAbsolutePath();
+         if (!target.startsWith(base)) {
+             throw new SecurityException("Path traversal detected");
+         }
+
+      3. Use FilenameUtils.getName() from Apache Commons IO.
+      4. Implement SecurityManager policies for file access.
+      5. Use allowlists for permitted file access.
+    references:
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+      - "https://docs.oracle.com/javase/8/docs/api/java/io/FileInputStream.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'protected\s+void\s+do(?:Get|Post|Put|Delete)\s*\('
+        - '@(?:Get|Post|Put|Delete)Mapping'
+        - '@RequestMapping'
+        - 'public\s+\w+\s+\w+\s*\(\s*HttpServletRequest'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - 'request\.getHeader\s*\('
+        - '@PathVariable'
+        - '@RequestParam'
+        - 'request\.getPart\s*\('
+        - 'request\.getQueryString\s*\('
+      taint_sink_indicators:
+        - 'new\s+FileInputStream\s*\('
+        - 'new\s+FileOutputStream\s*\('
+        - 'new\s+FileReader\s*\('
+        - 'new\s+FileWriter\s*\('
+        - 'new\s+File\s*\('
+      sanitization_patterns:
+        - '\.getCanonicalPath\s*\(\s*\)\s*\.startsWith'
+        - 'Paths\.get\s*\([^)]+\)\s*\.normalize\s*\(\s*\)\s*\.startsWith'
+        - 'FilenameUtils\.getName\s*\('
+        - '\.contains\s*\(\s*"\.\."\s*\)'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Java servlet handles file downloads via GET /download?file=report.pdf.
+        The handler uses new FileInputStream(uploadDir + request.getParameter("file")).
+        The attacker sends GET /download?file=../../../../etc/passwd. The FileInputStream
+        resolves the traversal and reads /etc/passwd. For Java applications, the
+        attacker targets application.properties for database credentials and
+        WEB-INF/web.xml for deployment configuration.
+      example_payload: "../../../../etc/passwd"
+      attacker_objective: "Read arbitrary files including application.properties, web.xml, and private keys from the Java application server"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-JAVA-002"
+        - "PT-JAVA-005"
+        - "PT-JS-001"
+        - "PT-PY-001"
+
+  # --------------------------------------------------------------------------
+  # PT-JAVA-002: Paths.get with Unsanitized Input
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-JAVA-002"
+    title: "Paths.get with Unsanitized User Input"
+    description: >
+      Detects usage of java.nio.file.Paths.get() or Path.of() where path
+      segments incorporate user-controlled input without validation. While
+      Path.normalize() removes redundant elements, it does NOT prevent
+      traversal if the result is not validated against a base directory.
+      Paths.get("/base", "../../etc/passwd").normalize() resolves to
+      /etc/passwd. This pattern is common in modern Java applications using
+      NIO.2 file APIs and is often found in Spring Boot and Jakarta EE
+      applications.
+    language: java
+    category: path_traversal
+    severity: High
+    confidence: 0.90
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - nio-paths
+      - java-nio
+      - java
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'Paths\s*\.\s*get\s*\(\s*[^)]*(?:request\s*\.\s*getParameter\s*\(|req\s*\.\s*getParameter\s*\()'
+        description: "Paths.get with servlet request parameter"
+      - type: regex
+        pattern: 'Paths\s*\.\s*get\s*\(\s*[^)]*(?:filePath|fileName|userPath|inputPath|docPath|targetFile)\s*[,\)]'
+        description: "Paths.get with common user-controlled variable names"
+      - type: regex
+        pattern: 'Path\s*\.\s*of\s*\(\s*[^)]*(?:request|req|filePath|fileName|userPath|userInput)\b'
+        description: "Path.of (Java 11+) with user-controlled input"
+      - type: regex
+        pattern: 'Paths\s*\.\s*get\s*\(\s*(?:uploadDir|baseDir|rootDir)\s*\)\s*\.\s*resolve\s*\(\s*(?:request|req|filePath|fileName|userInput)\b'
+        description: "Path.resolve with user-controlled segment"
+      - type: regex
+        pattern: '\.resolve\s*\(\s*(?:request\s*\.\s*getParameter|filePath|fileName|userPath|userInput)\b'
+        description: "Path.resolve() with user input on existing Path"
+      - type: regex
+        pattern: 'Paths\s*\.\s*get\s*\(\s*[^)]*\+\s*(?:request|req|fileName|filePath|userInput)\b'
+        description: "Paths.get with string concatenation of user data"
+      - type: regex
+        pattern: 'Files\s*\.\s*(?:readAllBytes|readAllLines|readString|write|copy|move|newInputStream)\s*\(\s*Paths\s*\.\s*get\s*\(\s*[^)]*(?:request|param|input|file)'
+        description: "Files utility methods with Paths.get containing user input"
+      - type: regex
+        pattern: 'Files\s*\.\s*(?:readAllBytes|readAllLines|readString|write|copy|move)\s*\(\s*(?:path|filePath|userPath|inputPath)\s*[,\)]'
+        description: "Files utility methods with common user-controlled Path variables"
+    anti_patterns:
+      - 'Paths\s*\.\s*get\s*\([^)]+\)\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - '\.toAbsolutePath\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'if\s*\(\s*!?\s*\w+\s*\.\s*startsWith\s*\(\s*(?:basePath|allowedPath|rootPath)'
+      - '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'if\s*\(\s*\w+\s*\.\s*contains\s*\(\s*"\.\."\s*\)\s*\)'
+      - 'FilenameUtils\s*\.\s*getName\s*\('
+      - 'sanitize(?:Path|FileName|Input)\s*\('
+      - 'Paths\s*\.\s*get\s*\(\s*"[^"]*"\s*\)\s*;'
+      - 'Path\s*\.\s*of\s*\(\s*"[^"]*"\s*\)'
+      - 'SecurityManager\s*\.\s*check'
+      - 'allowedPaths\s*\.\s*contains\s*\('
+      - '\.toRealPath\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'if\s*\(\s*\w+\s*\.\s*isAbsolute\s*\(\s*\)\s*\)'
+      - 'Pattern\s*\.\s*matches\s*\(\s*"[^"]*\[\\^/\\\\\\\\\][^"]*"\s*,'
+      - 'validate(?:Path|File|Input)\s*\('
+    bypass_variants:
+      - description: "URL-encoded traversal in servlet parameters"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass container decode"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte to truncate path comparison"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - description: "Backslash on Windows JVM"
+        pattern: '(?:\.\.\\\\|\.\.%5c|\.\.%5C)'
+      - description: "Unicode/overlong encoding bypass"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    evasion_indicators:
+      - "URL encoding in servlet request parameters"
+      - "Double encoding to bypass Tomcat/Jetty URL decode"
+      - "Null byte injection in Java path strings"
+      - "Windows backslash on cross-platform deployments"
+      - "Unicode normalization differences in JVM"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "request.getParameter() -> Paths.get() -> Files.readAllBytes()"
+      - "@RequestParam -> Path.of() -> Files.readString()"
+      - "@PathVariable -> basePath.resolve() -> Files.newInputStream()"
+      - "request.getParameter() -> Paths.get() -> Files.copy()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "NIO Path operations can access any file on the filesystem readable by the JVM process"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('file')"
+        sink: "Paths.get(baseDir, param)"
+        through: "direct parameter pass"
+      - source: "@RequestParam String filename"
+        sink: "basePath.resolve(filename)"
+        through: "Spring annotation injection"
+      - source: "@PathVariable String name"
+        sink: "Files.readAllBytes(Paths.get(dir, name))"
+        through: "path variable binding"
+    impact: |
+      Exploitation allows reading arbitrary files through NIO Path APIs,
+      including application.properties/yml with database credentials and API
+      keys, WEB-INF/web.xml deployment descriptors, keystore files with
+      private keys, and system files like /etc/passwd. Write operations via
+      Files.write() can modify application class files, configuration, or
+      inject JSP web shells. In Spring Boot applications, actuator endpoints
+      and auto-configuration secrets are high-value targets.
+    remediation: |
+      1. Normalize and validate against base directory:
+
+         Path base = Paths.get("/app/uploads").normalize().toAbsolutePath();
+         Path target = base.resolve(userInput).normalize().toAbsolutePath();
+         if (!target.startsWith(base)) {
+             throw new SecurityException("Path traversal attempt");
+         }
+         byte[] data = Files.readAllBytes(target);
+
+      2. Use toRealPath() for symlink-safe validation:
+
+         Path real = base.resolve(userInput).toRealPath();
+         if (!real.startsWith(base.toRealPath())) {
+             throw new SecurityException("Path traversal detected");
+         }
+
+      3. Reject input containing '..' or separator characters.
+      4. Use Path.getFileName() for filename-only extraction.
+      5. Implement Spring Resource abstraction with classpath: prefix.
+    references:
+      - "https://docs.oracle.com/javase/8/docs/api/java/nio/file/Paths.html"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@(?:Get|Post|Put|Delete)Mapping'
+        - '@RequestMapping'
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+        - '@RestController'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam'
+        - '@PathVariable'
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - 'Paths\.get\s*\('
+        - 'Path\.of\s*\('
+        - '\.resolve\s*\('
+        - 'Files\.readAllBytes\s*\('
+        - 'Files\.write\s*\('
+      sanitization_patterns:
+        - '\.normalize\s*\(\s*\)\s*\.\s*startsWith'
+        - '\.toAbsolutePath\s*\(\s*\)\s*\.startsWith'
+        - '\.toRealPath\s*\(\s*\)\s*\.startsWith'
+        - '\.getFileName\s*\(\s*\)'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot controller serves files via GET /api/docs/{name}. The
+        handler uses Files.readAllBytes(Paths.get(docsDir, name)). An attacker
+        sends GET /api/docs/..%2f..%2f..%2fapplication.properties. The servlet
+        container decodes the URL encoding, Paths.get resolves the traversal,
+        and the response contains application.properties with
+        spring.datasource.password, jwt.secret, and other sensitive properties.
+      example_payload: "..%2f..%2f..%2fapplication.properties"
+      attacker_objective: "Read application configuration files containing database credentials, JWT secrets, and API keys"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-JAVA-001"
+        - "PT-JAVA-003"
+        - "PT-JS-002"
+
+  # --------------------------------------------------------------------------
+  # PT-JAVA-003: Spring Resource Loading Path Traversal
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-JAVA-003"
+    title: "Spring Resource Loading Path Traversal"
+    description: >
+      Detects path traversal vulnerabilities in Spring Framework resource loading
+      mechanisms where user-controlled input is used to construct resource paths.
+      This includes ResourceLoader.getResource(), ClassPathResource,
+      FileSystemResource, UrlResource, and ResponseEntity with Resource bodies.
+      Spring's resource abstraction does not inherently prevent traversal, and
+      user input in resource identifiers such as file:, classpath:, or direct
+      paths can be exploited to access arbitrary files.
+    language: java
+    category: path_traversal
+    severity: High
+    confidence: 0.88
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - spring
+      - spring-boot
+      - resource-loading
+      - java
+      - web-framework
+      - cwe-22
+      - owasp-a01
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'resourceLoader\s*\.\s*getResource\s*\(\s*(?:"file:"\s*\+|"classpath:"\s*\+)\s*(?:request|param|fileName|filePath|userInput)\b'
+        description: "ResourceLoader.getResource with user-controlled path"
+      - type: regex
+        pattern: 'new\s+FileSystemResource\s*\(\s*(?:request\s*\.\s*getParameter|filePath|fileName|userPath|userInput|param)\b'
+        description: "FileSystemResource constructor with user-controlled path"
+      - type: regex
+        pattern: 'new\s+ClassPathResource\s*\(\s*(?:request\s*\.\s*getParameter|filePath|fileName|userPath|userInput|param)\b'
+        description: "ClassPathResource constructor with user-controlled path"
+      - type: regex
+        pattern: 'new\s+UrlResource\s*\(\s*(?:"file:"\s*\+\s*(?:request|param|filePath|fileName|userInput))'
+        description: "UrlResource with file: protocol and user input"
+      - type: regex
+        pattern: 'ResponseEntity\s*(?:\.\s*ok\s*\(\s*\))?\s*[\s\S]{0,100}(?:new\s+(?:FileSystemResource|UrlResource|InputStreamResource)\s*\(\s*(?:request|filePath|fileName|userInput))'
+        description: "ResponseEntity returning resource from user-controlled path"
+      - type: regex
+        pattern: 'resourceLoader\s*\.\s*getResource\s*\(\s*(?:String\.format\s*\(\s*"[^"]*"\s*,\s*[^)]*(?:request|param|input))'
+        description: "ResourceLoader.getResource with String.format interpolation"
+      - type: regex
+        pattern: '(?:Resource|InputStreamResource)\s+\w+\s*=\s*(?:new\s+)?(?:FileSystemResource|UrlResource)\s*\(\s*(?!")[^)]*(?:Path|path|file|name|input)\w*\s*\)'
+        description: "Resource assignment with non-literal user-influenced path"
+      - type: regex
+        pattern: 'servletContext\s*\.\s*getResource\s*\(\s*(?:request|param|filePath|fileName|userInput)\b'
+        description: "ServletContext.getResource with user-controlled path"
+    anti_patterns:
+      - 'new\s+FileSystemResource\s*\(\s*"[^"]*"\s*\)'
+      - 'new\s+ClassPathResource\s*\(\s*"[^"]*"\s*\)'
+      - '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - '\.normalize\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'if\s*\(\s*\w+\s*\.\s*contains\s*\(\s*"\.\."\s*\)\s*\)'
+      - 'FilenameUtils\s*\.\s*getName\s*\('
+      - 'sanitize(?:Path|Resource|FileName)\s*\('
+      - 'resourceLoader\s*\.\s*getResource\s*\(\s*"classpath:[^"]*"\s*\)'
+      - 'if\s*\(\s*!?\s*\w+\s*\.\s*startsWith\s*\(\s*(?:basePath|baseDir|allowedDir)'
+      - 'validateResource\s*\('
+      - 'Path\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith'
+      - '@Value\s*\(\s*"[^"]*"\s*\)'
+      - 'ResourceUtils\s*\.\s*getFile\s*\(\s*"[^"]*"\s*\)'
+      - 'whitelistedResources\s*\.\s*contains'
+      - '\.toRealPath\s*\(\s*\)\s*\.\s*startsWith'
+    bypass_variants:
+      - description: "URL-encoded traversal in resource path"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass Spring URL decode"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte in resource path"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - description: "file: protocol with traversal"
+        pattern: '(?:file:\/?\/?\.\.\/|file:%2e%2e%2f)'
+      - description: "Backslash in resource identifier"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "URL encoding in Spring resource identifiers"
+      - "Double encoding to bypass Spring Security filters"
+      - "Protocol switching (file: instead of classpath:)"
+      - "Null byte in resource paths"
+      - "Backslash on Windows Spring deployments"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af)'
+    multi_function_chain_patterns:
+      - "@RequestParam -> resourceLoader.getResource('file:' + param)"
+      - "@PathVariable -> new FileSystemResource(baseDir + name)"
+      - "request.getParameter() -> new UrlResource('file:' + param)"
+      - "request param -> ResponseEntity.ok(new InputStreamResource(fis))"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Spring resource loading with file: protocol can access any file on the filesystem"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "@RequestParam String filename"
+        sink: "new FileSystemResource(path)"
+        through: "Spring parameter binding"
+      - source: "@PathVariable String name"
+        sink: "resourceLoader.getResource('file:' + name)"
+        through: "path variable and string concatenation"
+      - source: "request.getParameter('doc')"
+        sink: "new UrlResource('file:' + param)"
+        through: "servlet parameter extraction"
+    impact: |
+      Exploitation of Spring resource loading enables access to sensitive files
+      through the framework's resource abstraction. Attackers can read
+      application.properties/yml with all configured secrets, Spring Boot
+      actuator credentials, database connection strings, JWT signing keys,
+      and OAuth2 client secrets. In Spring Boot fat-jar deployments, classpath
+      traversal can expose embedded configuration. FileSystemResource-based
+      attacks access the entire filesystem.
+    remediation: |
+      1. Validate resource paths using Spring's ResourceUtils:
+
+         @GetMapping("/files/{name}")
+         public ResponseEntity<Resource> getFile(@PathVariable String name) {
+             Path base = Paths.get(uploadDir).normalize().toAbsolutePath();
+             Path target = base.resolve(name).normalize().toAbsolutePath();
+             if (!target.startsWith(base)) {
+                 return ResponseEntity.status(403).build();
+             }
+             Resource resource = new FileSystemResource(target);
+             return ResponseEntity.ok(resource);
+         }
+
+      2. Use classpath: resources with static paths only.
+      3. Never concatenate user input with file: protocol.
+      4. Use Spring Content or database-backed file storage.
+      5. Implement Spring Security method-level authorization.
+    references:
+      - "https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/core/io/Resource.html"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@(?:Get|Post|Put|Delete)Mapping'
+        - '@RequestMapping'
+        - '@RestController'
+        - '@Controller'
+      taint_source_indicators:
+        - '@RequestParam'
+        - '@PathVariable'
+        - 'request\.getParameter\s*\('
+        - '@RequestBody'
+      taint_sink_indicators:
+        - 'resourceLoader\.getResource\s*\('
+        - 'new\s+FileSystemResource\s*\('
+        - 'new\s+ClassPathResource\s*\('
+        - 'new\s+UrlResource\s*\('
+      sanitization_patterns:
+        - '\.normalize\s*\(\s*\)\s*\.startsWith'
+        - '\.getCanonicalPath\s*\(\s*\)\s*\.startsWith'
+        - 'FilenameUtils\.getName\s*\('
+        - '\.toRealPath\s*\(\s*\)\s*\.startsWith'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot controller at GET /api/resources/{name} serves resources
+        using new FileSystemResource(resourceDir + "/" + name). The attacker
+        sends GET /api/resources/..%2f..%2f..%2fapplication.yml. Spring decodes
+        the URL, the FileSystemResource resolves to the application root, and
+        the response contains application.yml with spring.datasource.password,
+        jwt.secret-key, and management.endpoint credentials.
+      example_payload: "..%2f..%2f..%2fapplication.yml"
+      attacker_objective: "Access Spring application configuration and secrets through resource loading endpoints"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-JAVA-001"
+        - "PT-JAVA-002"
+        - "PT-JAVA-004"
+        - "PT-PY-003"
+
+  # --------------------------------------------------------------------------
+  # PT-JAVA-004: ServletContext.getResourceAsStream Bypass
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-JAVA-004"
+    title: "ServletContext.getResourceAsStream Path Traversal Bypass"
+    description: >
+      Detects path traversal vulnerabilities in Java Servlet applications using
+      ServletContext.getResourceAsStream() or ServletContext.getResource() where
+      the resource path contains user-controlled input. These methods are
+      designed to access resources within the web application context but can
+      be exploited to access files outside the web root through traversal
+      sequences. The servlet container's path normalization may not provide
+      complete protection, especially with encoded sequences.
+    language: java
+    category: path_traversal
+    severity: High
+    confidence: 0.87
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - servlet-context
+      - java-ee
+      - jakarta-ee
+      - java
+      - web-framework
+      - cwe-22
+      - owasp-a01
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'getServletContext\s*\(\s*\)\s*\.\s*getResourceAsStream\s*\(\s*(?:request\s*\.\s*getParameter|"/"\s*\+\s*(?:request|param|fileName|userInput))'
+        description: "getResourceAsStream with request parameter or user-controlled concatenation"
+      - type: regex
+        pattern: 'getServletContext\s*\(\s*\)\s*\.\s*getResource\s*\(\s*(?:request\s*\.\s*getParameter|"/"\s*\+\s*(?:request|param|fileName|userInput))'
+        description: "getResource with request parameter or user-controlled concatenation"
+      - type: regex
+        pattern: 'servletContext\s*\.\s*getResourceAsStream\s*\(\s*(?:request|path|filePath|fileName|userInput|resourcePath)\b'
+        description: "servletContext.getResourceAsStream with user-controlled path variable"
+      - type: regex
+        pattern: 'servletContext\s*\.\s*getResource\s*\(\s*(?:request|path|filePath|fileName|userInput|resourcePath)\b'
+        description: "servletContext.getResource with user-controlled path variable"
+      - type: regex
+        pattern: 'getServletContext\s*\(\s*\)\s*\.\s*(?:getResourceAsStream|getResource)\s*\(\s*String\.format\s*\(\s*"[^"]*"\s*,\s*[^)]*(?:request|param|input)\b'
+        description: "getResourceAsStream with String.format using request data"
+      - type: regex
+        pattern: 'getRealPath\s*\(\s*(?:request\s*\.\s*getParameter|"/"\s*\+\s*(?:request|param|fileName|userInput))'
+        description: "getRealPath with user-controlled path component"
+      - type: regex
+        pattern: 'getServletContext\s*\(\s*\)\s*\.\s*getRealPath\s*\(\s*(?:filePath|fileName|userPath|resourcePath)\b'
+        description: "getRealPath with common user-controlled variable names"
+      - type: regex
+        pattern: 'this\s*\.\s*getClass\s*\(\s*\)\s*\.\s*getResourceAsStream\s*\(\s*(?:request|param|filePath|fileName|userInput)\b'
+        description: "Class.getResourceAsStream with user-controlled path"
+    anti_patterns:
+      - 'getResourceAsStream\s*\(\s*"[^"]*"\s*\)'
+      - 'getResource\s*\(\s*"[^"]*"\s*\)'
+      - 'getRealPath\s*\(\s*"[^"]*"\s*\)'
+      - 'if\s*\(\s*\w+\s*\.\s*contains\s*\(\s*"\.\."\s*\)\s*\)'
+      - 'if\s*\(\s*!?\s*\w+\s*\.\s*startsWith\s*\(\s*"/WEB-INF'
+      - '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith'
+      - 'FilenameUtils\s*\.\s*getName\s*\('
+      - 'sanitize(?:Path|Resource|FileName)\s*\('
+      - 'SecurityManager\s*\.\s*check'
+      - 'allowedResources\s*\.\s*contains'
+      - 'Pattern\s*\.\s*matches\s*\(\s*"[^"]*"\s*,\s*\w+\s*\)'
+      - 'if\s*\(\s*\w+\s*\.\s*matches\s*\(\s*"[^"]*"\s*\)\s*\)'
+      - 'validPaths\s*\.\s*contains\s*\('
+      - 'if\s*\(\s*path\s*!=\s*null\s*&&\s*path\s*\.\s*startsWith'
+      - 'throw\s+new\s+(?:SecurityException|AccessDeniedException|ForbiddenException)'
+    bypass_variants:
+      - description: "URL-encoded traversal in servlet resource path"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass servlet container normalization"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte to terminate path early"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - description: "WEB-INF traversal to access configuration"
+        pattern: '(?:\/WEB-INF\/|\/META-INF\/)'
+      - description: "Semicolon path parameter injection"
+        pattern: '(?:;[^/]*\/\.\.\/|;\.\.\/)'
+    evasion_indicators:
+      - "URL encoding in servlet resource paths"
+      - "Double encoding to bypass Tomcat/Jetty normalization"
+      - "Null byte in resource identifier"
+      - "Semicolon-based path parameter injection"
+      - "Direct WEB-INF/META-INF path access"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "request.getParameter() -> getServletContext().getResourceAsStream()"
+      - "request.getPathInfo() -> servletContext.getResource()"
+      - "request param -> String concat -> getRealPath()"
+      - "@PathVariable -> getServletContext().getRealPath() -> new FileInputStream()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ServletContext resource access can expose WEB-INF contents including web.xml, class files, and property files"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('resource')"
+        sink: "getServletContext().getResourceAsStream(path)"
+        through: "string concatenation"
+      - source: "request.getPathInfo()"
+        sink: "servletContext.getResource(pathInfo)"
+        through: "direct path info pass"
+      - source: "request.getParameter('page')"
+        sink: "getServletContext().getRealPath(param)"
+        through: "parameter to real path resolution"
+    impact: |
+      ServletContext resource access exploitation exposes WEB-INF directory
+      contents including web.xml (servlet mappings, security constraints, init
+      parameters), application class files (potential decompilation for source
+      exposure), persistence.xml (database credentials), context.xml (JNDI
+      resource definitions), and property files. getRealPath traversal can
+      access any file on the filesystem. This information enables further
+      targeted attacks against the application and infrastructure.
+    remediation: |
+      1. Validate resource paths against allowed prefixes:
+
+         String path = request.getParameter("resource");
+         if (path == null || path.contains("..") || !path.startsWith("/public/")) {
+             response.sendError(403, "Forbidden");
+             return;
+         }
+         InputStream is = getServletContext().getResourceAsStream(path);
+
+      2. Use an allowlist for accessible resources:
+
+         Set<String> allowed = Set.of("/templates/header.html", "/templates/footer.html");
+         if (!allowed.contains(path)) {
+             response.sendError(403);
+             return;
+         }
+
+      3. Never use getRealPath() with user input.
+      4. Reject paths containing '..' sequences.
+      5. Use servlet filters to block WEB-INF/META-INF access.
+    references:
+      - "https://docs.oracle.com/javaee/7/api/javax/servlet/ServletContext.html"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+        - 'public\s+void\s+service\s*\('
+        - 'extends\s+HttpServlet'
+        - 'implements\s+Servlet'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - 'request\.getPathInfo\s*\('
+        - 'request\.getServletPath\s*\('
+        - 'request\.getRequestURI\s*\('
+      taint_sink_indicators:
+        - 'getResourceAsStream\s*\('
+        - 'getResource\s*\('
+        - 'getRealPath\s*\('
+      sanitization_patterns:
+        - '\.contains\s*\(\s*"\.\."\s*\)'
+        - '\.startsWith\s*\(\s*"/public"'
+        - 'allowedResources\s*\.\s*contains'
+        - 'Pattern\.matches\s*\('
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A servlet includes dynamic content using getServletContext()
+        .getResourceAsStream("/" + request.getParameter("page")). The attacker
+        sends ?page=WEB-INF/web.xml to access the deployment descriptor. Next,
+        ?page=WEB-INF/classes/application.properties reveals database credentials.
+        Using traversal ?page=../../etc/passwd accesses system files outside
+        the web application root.
+      example_payload: "WEB-INF/web.xml"
+      attacker_objective: "Access protected WEB-INF contents and system files through servlet context resource resolution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-JAVA-001"
+        - "PT-JAVA-003"
+        - "PT-JAVA-005"
+
+  # --------------------------------------------------------------------------
+  # PT-JAVA-005: ZIP Slip via ZipInputStream
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-JAVA-005"
+    title: "ZIP Slip via ZipInputStream"
+    description: >
+      Detects ZIP Slip vulnerabilities in Java applications extracting ZIP
+      archives using ZipInputStream, ZipFile, or JarInputStream without
+      validating that entry paths remain within the target directory. Java's
+      ZIP API does not prevent path traversal by default, and maliciously
+      crafted archives can contain entries with ../../ paths that write files
+      to arbitrary filesystem locations. This vulnerability class has
+      affected major Java libraries including Apache Commons Compress, Spring
+      Integration, and various build tools.
+    language: java
+    category: path_traversal
+    severity: High
+    confidence: 0.91
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - zip-slip
+      - archive-extraction
+      - zip-input-stream
+      - java
+      - rce-potential
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+ZipInputStream\s*\(\s*(?:request\s*\.\s*(?:getInputStream|getPart)|new\s+(?:FileInputStream|BufferedInputStream)\s*\(\s*(?:filePath|uploadPath|archivePath|userInput))'
+        description: "ZipInputStream with user-uploaded data"
+      - type: regex
+        pattern: 'entry\s*\.\s*getName\s*\(\s*\)[\s\S]{0,200}new\s+File(?:OutputStream)?\s*\(\s*(?:new\s+File\s*\(\s*[^)]*entry\s*\.\s*getName|destDir\s*\+\s*[^)]*entry\s*\.\s*getName)'
+        description: "ZipEntry getName used to construct output file without validation"
+      - type: regex
+        pattern: '(?:ZipEntry|JarEntry)\s+\w+\s*=[\s\S]{0,300}(?:new\s+File\s*\(\s*[^)]*\w+\s*\.\s*getName\s*\(\s*\))'
+        description: "ZipEntry/JarEntry name used in File constructor"
+      - type: regex
+        pattern: 'new\s+ZipFile\s*\(\s*(?:filePath|uploadPath|archivePath|userInput|file|request\b)'
+        description: "ZipFile constructor with user-controlled path"
+      - type: regex
+        pattern: 'Enumeration\s*<\s*\?\s+extends\s+ZipEntry\s*>[\s\S]{0,500}(?:entry|ze)\s*\.\s*getName\s*\(\s*\)[\s\S]{0,200}(?:FileOutputStream|Files\.copy|Files\.write)'
+        description: "ZipFile enumeration extracting entries without path validation"
+      - type: regex
+        pattern: 'new\s+JarInputStream\s*\(\s*(?:request|new\s+(?:FileInputStream|BufferedInputStream)\s*\(\s*(?:filePath|uploadPath|archivePath|userInput))'
+        description: "JarInputStream with user-controlled input"
+      - type: regex
+        pattern: 'Files\s*\.\s*copy\s*\(\s*(?:zis|zipIn|jarIn|zipInputStream)\s*,\s*(?:Paths\.get\s*\(\s*[^)]*(?:entry|ze)\s*\.\s*getName)'
+        description: "Files.copy from zip stream to path built from entry name"
+      - type: regex
+        pattern: 'TarArchiveEntry[\s\S]{0,300}getName\s*\(\s*\)[\s\S]{0,200}(?:new\s+File|Files\.copy|FileOutputStream)'
+        description: "Apache Commons Compress TarArchiveEntry extraction without validation"
+    anti_patterns:
+      - 'entry\s*\.\s*getName\s*\(\s*\)\s*\.\s*contains\s*\(\s*"\.\."\s*\)'
+      - 'if\s*\(\s*!?\s*destFile\s*\.\s*getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*destDir\s*\.\s*getCanonicalPath'
+      - 'if\s*\(\s*!?\s*\w+\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'FilenameUtils\s*\.\s*getName\s*\(\s*entry\s*\.\s*getName\s*\(\s*\)\s*\)'
+      - 'if\s*\(\s*entry\s*\.\s*getName\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*(?:"/"|"\.\.")'
+      - 'throw\s+new\s+(?:SecurityException|IOException|IllegalArgumentException)\s*\(\s*"[^"]*(?:traversal|malicious|invalid path)'
+      - 'sanitize(?:Entry|Path|FileName)\s*\('
+      - 'if\s*\(\s*entry\s*\.\s*isDirectory\s*\(\s*\)\s*\)\s*(?:continue|return)'
+      - 'Paths\s*\.\s*get\s*\([^)]+\)\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith'
+      - 'new\s+File\s*\([^)]+\)\s*\.\s*toPath\s*\(\s*\)\s*\.\s*normalize\s*\(\s*\)\s*\.\s*startsWith'
+      - 'ZipSecurity\s*\.\s*check'
+      - 'path\s*\.\s*toRealPath\s*\(\s*\)\s*\.\s*startsWith'
+      - 'if\s*\(\s*name\s*\.\s*indexOf\s*\(\s*"\.\."\s*\)\s*(?:!=\s*-1|>=\s*0)'
+      - 'StringUtils\s*\.\s*cleanPath\s*\('
+      - 'validateEntryName\s*\('
+    bypass_variants:
+      - description: "ZIP entry with URL-encoded traversal filename"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "ZIP entry with double encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "ZIP entry with null byte in name"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - description: "ZIP entry with absolute filesystem path"
+        pattern: '(?:^\/|^[A-Za-z]:\\\\)'
+      - description: "ZIP entry with backslash separators"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "ZIP entries with relative traversal paths"
+      - "ZIP entries with absolute paths"
+      - "Backslash separators in ZIP entry names"
+      - "Mixed path separator styles"
+      - "Symbolic links within archives"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af)'
+    multi_function_chain_patterns:
+      - "uploaded file -> new ZipInputStream() -> entry.getName() -> new FileOutputStream()"
+      - "file path -> new ZipFile() -> entries() -> new File(destDir, entry.getName())"
+      - "request.getInputStream() -> new ZipInputStream() -> Files.copy()"
+      - "uploaded archive -> Apache Commons ZipArchiveInputStream -> entry.getName() -> write"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ZIP Slip writes files to arbitrary locations enabling RCE through JSP/class file overwrite, cron injection, or WAR deployment"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user-uploaded ZIP/JAR file"
+        sink: "new FileOutputStream(new File(destDir, entry.getName()))"
+        through: "ZipInputStream iteration"
+      - source: "ZIP entry getName()"
+        sink: "Files.copy(zipInput, Paths.get(dest, entryName))"
+        through: "extraction loop"
+      - source: "uploaded archive"
+        sink: "new File(destDir + '/' + entry.getName())"
+        through: "string concatenation"
+    impact: |
+      ZIP Slip in Java enables writing arbitrary files during archive extraction.
+      Common attack vectors include: overwriting JSP/Servlet class files for
+      remote code execution, deploying WAR files to application server auto-deploy
+      directories, modifying application.properties for configuration injection,
+      overwriting JAR files in the classpath for persistent backdoor, and writing
+      to cron directories or systemd paths for scheduled execution. This
+      vulnerability class has resulted in CVEs in Apache Ant, Spring Integration,
+      Gradle, and many other Java tools.
+    remediation: |
+      1. Validate every entry's canonical path against the destination:
+
+         File destDir = new File(outputPath).getCanonicalFile();
+         ZipInputStream zis = new ZipInputStream(inputStream);
+         ZipEntry entry;
+         while ((entry = zis.getNextEntry()) != null) {
+             File destFile = new File(destDir, entry.getName()).getCanonicalFile();
+             if (!destFile.getPath().startsWith(destDir.getPath() + File.separator)) {
+                 throw new SecurityException("ZIP Slip: " + entry.getName());
+             }
+             // Safe to extract
+         }
+
+      2. Use libs with built-in ZIP Slip protection (Apache Commons Compress 1.21+).
+      3. Reject entries with '..' components or absolute paths.
+      4. Extract to a temporary sandboxed directory and validate.
+      5. Set filesystem permissions to restrict write scope.
+    references:
+      - "https://snyk.io/research/zip-slip-vulnerability"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://docs.oracle.com/javase/8/docs/api/java/util/zip/ZipInputStream.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+java\.util\.zip\.'
+        - 'import\s+java\.util\.jar\.'
+        - 'import\s+org\.apache\.commons\.compress'
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+      taint_source_indicators:
+        - 'request\.getInputStream\s*\('
+        - 'request\.getPart\s*\('
+        - 'multipartFile\.\w+'
+        - 'entry\.getName\s*\('
+      taint_sink_indicators:
+        - 'new\s+FileOutputStream\s*\('
+        - 'Files\.copy\s*\('
+        - 'Files\.write\s*\('
+        - 'new\s+File\s*\([^)]*entry'
+      sanitization_patterns:
+        - '\.getCanonicalPath\s*\(\s*\)\s*\.startsWith'
+        - 'entry\.getName\s*\(\.\s*\)\s*\.contains\s*\(\s*"\.\."\s*\)'
+        - '\.normalize\s*\(\s*\)\s*\.startsWith'
+        - 'FilenameUtils\.getName\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker crafts a ZIP archive with an entry named
+        ../../../tomcat/webapps/ROOT/shell.jsp containing a JSP web shell.
+        A file processing endpoint accepts ZIP uploads and extracts them using
+        ZipInputStream with new File(destDir, entry.getName()). The malicious
+        entry is written to the Tomcat webapps directory. The attacker accesses
+        /shell.jsp to execute arbitrary OS commands with Tomcat's privileges.
+      example_payload: "../../../tomcat/webapps/ROOT/shell.jsp"
+      attacker_objective: "Deploy a web shell or overwrite application code by writing files outside the archive extraction directory"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-JAVA-001"
+        - "PT-JS-005"
+        - "PT-PY-005"
+        - "PT-GO-005"
+        - "PT-PHP-003"
+
+  # --------------------------------------------------------------------------
+  # PT-JAVA-006: File.getCanonicalPath Bypass Attempts
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-JAVA-006"
+    title: "File.getCanonicalPath Bypass Attempts"
+    description: >
+      Detects patterns where File.getCanonicalPath() or Path.toRealPath() are
+      used for path traversal validation but implemented incorrectly, creating
+      a false sense of security. Common bypasses include: checking canonical
+      path without proper prefix comparison, TOCTOU (time-of-check/time-of-use)
+      race conditions where the filesystem changes between validation and access,
+      symlink resolution differences between getCanonicalPath and actual file
+      access, and incomplete startsWith checks that match directory name
+      prefixes (e.g., /uploads-backup matching /uploads).
+    language: java
+    category: path_traversal
+    severity: High
+    confidence: 0.85
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - bypass
+      - canonical-path
+      - toctou
+      - java
+      - server-side
+      - cwe-22
+      - cwe-367
+      - owasp-a01
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*(?:baseDir|rootDir|uploadDir)\s*\)(?!\s*\+\s*File\.separator)'
+        description: "getCanonicalPath startsWith without appending File.separator (prefix match vulnerability)"
+      - type: regex
+        pattern: '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*"[^"]*[^/\\\\]"\s*\)'
+        description: "getCanonicalPath startsWith with base path not ending in separator"
+      - type: regex
+        pattern: 'getCanonicalPath\s*\(\s*\)[\s\S]{5,50}(?:new\s+File(?:Input|Output)Stream|Files\.(?:read|write|copy|move))\s*\(\s*(?!.*getCanonicalFile)'
+        description: "Canonical path check followed by file operation on original (non-canonical) File object"
+      - type: regex
+        pattern: '\.getAbsolutePath\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*(?:baseDir|rootDir|uploadDir)\s*\)'
+        description: "Using getAbsolutePath instead of getCanonicalPath (does not resolve symlinks)"
+      - type: regex
+        pattern: 'if\s*\(\s*!?\s*\w+\s*\.\s*contains\s*\(\s*"\.\."\s*\)\s*\)[\s\S]{0,200}(?:new\s+File(?:Input|Output)Stream|Files\.(?:read|write))'
+        description: "Simple string contains check for .. without canonical resolution"
+      - type: regex
+        pattern: '\.normalize\s*\(\s*\)(?!\s*\.\s*(?:toAbsolutePath|startsWith))\s*[;\s][\s\S]{0,100}(?:Files\.|new\s+File)'
+        description: "Path.normalize() without subsequent startsWith validation"
+      - type: regex
+        pattern: '(?:filePath|fileName|userPath)\s*=\s*(?:filePath|fileName|userPath)\s*\.\s*replace\s*\(\s*"\.\."\s*,\s*""\s*\)\s*;[\s\S]{0,200}(?:new\s+File|Paths\.get|Files\.)'
+        description: "Blacklist replacement of .. without recursive/canonical check"
+      - type: regex
+        pattern: 'if\s*\(\s*\w+\s*\.\s*indexOf\s*\(\s*"\.\."\s*\)\s*(?:==\s*-1|<\s*0)\s*\)[\s\S]{0,200}(?:new\s+File|Paths\.get|Files\.)'
+        description: "indexOf check for .. without handling encoded variants"
+    anti_patterns:
+      - '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*\w+\s*\+\s*File\.separator\s*\)'
+      - '\.getCanonicalFile\s*\(\s*\)\s*[\s\S]{0,50}(?:new\s+File(?:Input|Output)Stream\s*\(\s*\w+\s*\.\s*getCanonicalFile)'
+      - '\.toRealPath\s*\(\s*\)\s*\.\s*startsWith\s*\('
+      - 'Paths\s*\.\s*get\s*\([^)]+\)\s*\.\s*normalize\s*\(\s*\)\s*\.\s*toAbsolutePath\s*\(\s*\)\s*\.\s*startsWith'
+      - '\.getCanonicalPath\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*\w+\s*\.\s*getCanonicalPath\s*\(\s*\)\s*\+\s*File\.separator'
+      - 'synchronized\s*\([^)]+\)\s*\{[\s\S]{0,500}getCanonicalPath'
+      - 'Files\.setAttribute\s*\([^)]*LinkOption\.NOFOLLOW_LINKS'
+      - 'AccessController\.doPrivileged'
+      - 'if\s*\(\s*Files\.isSymbolicLink\s*\('
+      - 'SecurityManager'
+      - 'String\s+canonicalBase\s*=\s*\w+\s*\.\s*getCanonicalPath\s*\(\s*\)\s*\+\s*File\.separator'
+      - 'Files\.readSymbolicLink\s*\('
+      - 'LinkOption\.NOFOLLOW_LINKS'
+      - 'new\s+File\s*\([^)]+\)\s*\.\s*getCanonicalFile\s*\(\s*\)\s*\.(?:getPath|toString)\s*\(\s*\)\s*\.\s*startsWith\s*\(\s*\w+\s*\.\s*getCanonicalFile'
+      - 'AtomicFileOperation|FileChannel.*lock'
+    bypass_variants:
+      - description: "Symlink creation after canonical path check (TOCTOU)"
+        pattern: '(?:ln\s+-s|Files\.createSymbolicLink|symlink)'
+      - description: "Directory prefix collision without separator suffix"
+        pattern: '(?:\/uploads-backup|\/uploads-old|\/uploadstemp)'
+      - description: "Double dot replacement bypass with triple dots"
+        pattern: '(?:\.\.\.\/|\.%2e\/|%2e\.\/)'
+      - description: "Null byte after canonical check"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - description: "Race condition between check and file access"
+        pattern: '(?:Thread\.sleep|TimeUnit\.MILLISECONDS\.sleep|wait\s*\()'
+    evasion_indicators:
+      - "TOCTOU race condition between canonical check and file access"
+      - "Symlink manipulation after validation"
+      - "Directory name prefix collision"
+      - "Non-recursive blacklist replacement of .."
+      - "Using getAbsolutePath instead of getCanonicalPath"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\u0000)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "user input -> new File() -> getCanonicalPath() check -> FileInputStream(original file)"
+      - "user input -> File.getAbsolutePath() -> startsWith check -> FileInputStream()"
+      - "user input -> replace('..', '') -> Paths.get() -> Files.read()"
+      - "user input -> indexOf('..') check -> new File() -> FileInputStream()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Bypassing canonical path validation enables full path traversal despite apparent security controls"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user input"
+        sink: "new FileInputStream(file) after flawed canonical check"
+        through: "incorrect startsWith without separator"
+      - source: "user input"
+        sink: "Files.readAllBytes() after replace('..', '')"
+        through: "non-recursive blacklist"
+      - source: "user input"
+        sink: "FileInputStream(original) after getCanonicalPath check"
+        through: "TOCTOU between validation and access"
+    impact: |
+      Bypassing canonical path validation nullifies the intended security
+      control while giving developers false confidence. This enables the same
+      impacts as unprotected file access: reading sensitive configuration,
+      credentials, and keys; writing to arbitrary locations for code execution;
+      and filesystem manipulation. The TOCTOU variant is particularly dangerous
+      in multi-threaded Java applications where race conditions between
+      validation and file access can be exploited reliably.
+    remediation: |
+      1. Use canonical path with proper separator suffix comparison:
+
+         File baseDir = new File("/app/uploads").getCanonicalFile();
+         String basePath = baseDir.getPath() + File.separator;
+         File target = new File(baseDir, userInput).getCanonicalFile();
+         if (!target.getPath().startsWith(basePath) && !target.equals(baseDir)) {
+             throw new SecurityException("Path traversal detected");
+         }
+         // Use target (canonical file) for operations, NOT the original
+
+      2. Operate on the canonical file object, not the original:
+
+         FileInputStream fis = new FileInputStream(target); // Use canonical
+
+      3. Check for symlinks with Files.isSymbolicLink().
+      4. Use NIO Path with toRealPath() for symlink resolution.
+      5. Avoid blacklist replacement of '..'; use canonical validation.
+      6. Implement synchronized blocks for TOCTOU-sensitive operations.
+    references:
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://cwe.mitre.org/data/definitions/367.html"
+      - "https://docs.oracle.com/javase/8/docs/api/java/io/File.html#getCanonicalPath--"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+        - '@(?:Get|Post|Put|Delete)Mapping'
+        - 'public\s+\w+\s+\w+\s*\(\s*HttpServletRequest'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam'
+        - '@PathVariable'
+      taint_sink_indicators:
+        - '\.getCanonicalPath\s*\('
+        - '\.getAbsolutePath\s*\('
+        - '\.indexOf\s*\(\s*"\.\."\s*\)'
+        - '\.replace\s*\(\s*"\.\."\s*,'
+      sanitization_patterns:
+        - '\.getCanonicalPath\s*\(\s*\)\s*\.startsWith\s*\(\s*\w+\s*\+\s*File\.separator'
+        - '\.toRealPath\s*\(\s*\)\s*\.startsWith'
+        - 'Files\.isSymbolicLink'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A file serving endpoint validates paths using:
+        if (file.getCanonicalPath().startsWith(uploadsDir)) { serve(file); }
+        The uploadsDir is "/app/uploads" without trailing separator. The attacker
+        creates a request for a file in "/app/uploads-backup/secret.conf". The
+        canonical path "/app/uploads-backup/secret.conf" starts with
+        "/app/uploads", passing the validation. The attacker accesses files in
+        an unintended directory sharing a common prefix.
+      example_payload: "../uploads-backup/secret.conf"
+      attacker_objective: "Bypass canonical path validation through prefix collision, TOCTOU races, or incomplete sanitization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "medium"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-JAVA-001"
+        - "PT-JAVA-002"
+        - "PT-JAVA-003"

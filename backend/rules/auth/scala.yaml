@@ -1,0 +1,262 @@
+rules:
+
+  - rule_id: SCALA-AUTH-001
+    title: Hardcoded Password in Source
+    description: >
+      Detects hardcoded passwords, secrets, or API keys in Scala source code.
+    language: scala
+    category: auth
+    severity: High
+    confidence: 0.90
+    cwe: CWE-798
+    owasp: A07:2021-Identification-and-Authentication-Failures
+    detection_layer: 1
+    tags: [hardcoded-credentials, secrets]
+    patterns:
+      - type: regex
+        pattern: '(?:val|var|def)\s+(?:password|passwd|secret|apiKey|api_key|token|auth_token)\s*[=:]\s*"[^"]{4,}'
+      - type: regex
+        pattern: '(?:password|passwd|secret|apiKey|api_key|token)\s*=\s*"[^"]{4,}'
+      - type: regex
+        pattern: 'BasicCredentials\s*\(\s*"[^"]+"\s*,\s*"[^"]+"'
+      - type: regex
+        pattern: 'Authorization.*Basic\s+[A-Za-z0-9+/=]{10,}'
+    anti_patterns:
+      - "sys.env"
+      - "config.get"
+      - "ConfigFactory"
+      - "\"${}"
+      - "placeholder"
+      - "example"
+      - "changeme"
+      - "xxx"
+      - "test"
+    impact: |
+      Hardcoded credentials can be extracted from source code, version control,
+      or compiled artifacts, leading to unauthorized access.
+    remediation: |
+      Use environment variables or configuration management:
+        val password = sys.env("DB_PASSWORD")
+        val secret = config.getString("app.secret")
+
+  - rule_id: SCALA-AUTH-002
+    title: Missing Authentication Check in Play Controller
+    description: >
+      Detects Play Framework controller actions without authentication.
+    language: scala
+    category: auth
+    severity: High
+    confidence: 0.75
+    cwe: CWE-306
+    owasp: A07:2021-Identification-and-Authentication-Failures
+    detection_layer: 2
+    tags: [missing-auth, play-framework]
+    patterns:
+      - type: regex
+        pattern: 'def\s+\w+\s*(?:\([^)]*\))?\s*=\s*Action\s*\{'
+      - type: regex
+        pattern: 'def\s+\w+\s*=\s*Action\.async\s*\{'
+    anti_patterns:
+      - "Authenticated"
+      - "SecuredAction"
+      - "AuthenticatedAction"
+      - "silhouette.SecuredAction"
+      - "deadbolt"
+      - "Security"
+      - "authorize"
+      - "withAuth"
+    impact: |
+      Missing authentication allows unauthorized access to controller endpoints.
+    remediation: |
+      Use Play's authentication action builders:
+        def securedEndpoint = AuthenticatedAction { request =>
+          Ok("authenticated")
+        }
+
+  - rule_id: SCALA-AUTH-003
+    title: Insecure Session Configuration
+    description: >
+      Detects insecure session or cookie settings in Play Framework.
+    language: scala
+    category: auth
+    severity: Medium
+    confidence: 0.85
+    cwe: CWE-614
+    owasp: A07:2021-Identification-and-Authentication-Failures
+    detection_layer: 1
+    tags: [session-security, cookies]
+    patterns:
+      - type: regex
+        pattern: 'play\.http\.session\.secure\s*=\s*false'
+      - type: regex
+        pattern: 'play\.http\.session\.httpOnly\s*=\s*false'
+      - type: regex
+        pattern: 'session\.maxAge\s*=\s*(?:None|null)'
+      - type: regex
+        pattern: 'Cookie\s*\([^)]*httpOnly\s*=\s*false'
+      - type: regex
+        pattern: 'Cookie\s*\([^)]*secure\s*=\s*false'
+    anti_patterns:
+      - "// test"
+      - "// dev"
+    impact: |
+      Insecure session configuration can lead to session hijacking via XSS or MITM.
+    remediation: |
+      Enable secure and httpOnly flags on all session cookies:
+        play.http.session.secure = true
+        play.http.session.httpOnly = true
+
+  - rule_id: SCALA-AUTH-004
+    title: Weak Password Hashing
+    description: >
+      Detects weak password hashing algorithms (MD5, SHA1) in Scala.
+    language: scala
+    category: auth
+    severity: High
+    confidence: 0.90
+    cwe: CWE-916
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [password-hashing, weak-hash]
+    patterns:
+      - type: regex
+        pattern: 'MessageDigest\.getInstance\s*\(\s*"(?:MD5|SHA-1|SHA1)"\s*\)'
+      - type: regex
+        pattern: '(?:DigestUtils|Hashing)\.(?:md5|sha1)\s*\('
+      - type: regex
+        pattern: '(?:password|passwd).*(?:md5|sha1|sha_1)\b'
+    anti_patterns:
+      - "bcrypt"
+      - "scrypt"
+      - "argon2"
+      - "PBKDF2"
+    impact: |
+      Weak hashing allows password cracking via rainbow tables or brute force.
+    remediation: |
+      Use bcrypt, scrypt, or Argon2 for password hashing:
+        import org.mindrot.jbcrypt.BCrypt
+        val hashed = BCrypt.hashpw(password, BCrypt.gensalt(12))
+
+  - rule_id: SCALA-AUTH-005
+    title: JWT Without Signature Verification
+    description: >
+      Detects JWT token handling without proper signature verification.
+    language: scala
+    category: auth
+    severity: Critical
+    confidence: 0.85
+    cwe: CWE-347
+    owasp: A07:2021-Identification-and-Authentication-Failures
+    detection_layer: 2
+    tags: [jwt, signature-verification]
+    patterns:
+      - type: regex
+        pattern: 'Jwt\.decode\s*\([^)]*JwtOptions\s*\(\s*signature\s*=\s*false'
+      - type: regex
+        pattern: 'JwtJson\.decode\s*\([^)]*JwtOptions\s*\(\s*signature\s*=\s*false'
+      - type: regex
+        pattern: '(?:unsafeParseSignature|withoutSignatureVerification|noVerification)'
+      - type: regex
+        pattern: 'algorithm\s*=\s*JwtAlgorithm\.NONE'
+    anti_patterns:
+      - "verify"
+      - "validate"
+      - "JwtAlgorithm.HS256"
+      - "JwtAlgorithm.RS256"
+    impact: |
+      JWT without signature verification allows token forgery and authentication bypass.
+    remediation: |
+      Always verify JWT signatures:
+        Jwt.decode(token, secretKey, Seq(JwtAlgorithm.HS256))
+
+  - rule_id: SCALA-AUTH-006
+    title: Broken Access Control - Missing Authorization
+    description: >
+      Detects endpoints handling sensitive operations without authorization checks.
+    language: scala
+    category: auth
+    severity: High
+    confidence: 0.75
+    cwe: CWE-862
+    owasp: A01:2021-Broken-Access-Control
+    detection_layer: 2
+    tags: [access-control, authorization]
+    patterns:
+      - type: regex
+        pattern: 'def\s+(?:delete|remove|admin|update|modify|create)\w*\s*(?:\([^)]*\))?\s*=\s*Action\b'
+      - type: regex
+        pattern: '(?:DELETE|PUT|PATCH)\s+\w*(?:admin|user|account|config|setting)'
+    anti_patterns:
+      - "authorize"
+      - "hasRole"
+      - "hasPermission"
+      - "isAdmin"
+      - "AuthorizedAction"
+      - "deadbolt"
+    impact: |
+      Missing authorization allows privilege escalation and unauthorized data modification.
+    remediation: |
+      Add authorization checks to all sensitive operations:
+        def deleteUser(id: Long) = AuthorizedAction(AdminRole) { ... }
+
+  - rule_id: SCALA-AUTH-007
+    title: CSRF Protection Disabled
+    description: >
+      Detects disabled CSRF protection in Play Framework.
+    language: scala
+    category: auth
+    severity: High
+    confidence: 0.90
+    cwe: CWE-352
+    owasp: A01:2021-Broken-Access-Control
+    detection_layer: 1
+    tags: [csrf, play-framework]
+    patterns:
+      - type: regex
+        pattern: 'play\.filters\.csrf\..*(?:disabled|false|none)'
+      - type: regex
+        pattern: 'csrf\.filter\.enabled\s*=\s*false'
+      - type: regex
+        pattern: '@AddCSRFTokenAction.*NoCheck'
+      - type: regex
+        pattern: 'play\.filters\.disabled\s*\+=\s*".*CSRFFilter"'
+    anti_patterns:
+      - "// test"
+      - "test.conf"
+    impact: |
+      Disabled CSRF protection allows cross-site request forgery attacks.
+    remediation: |
+      Enable CSRF protection in Play Framework:
+        play.filters.csrf.token.name = "csrfToken"
+        play.filters.csrf.cookie.name = "PLAY_CSRF_TOKEN"
+
+  - rule_id: SCALA-AUTH-008
+    title: Open Redirect
+    description: >
+      Detects potential open redirect vulnerabilities in Scala web apps.
+    language: scala
+    category: auth
+    severity: Medium
+    confidence: 0.80
+    cwe: CWE-601
+    owasp: A01:2021-Broken-Access-Control
+    detection_layer: 1
+    tags: [open-redirect]
+    patterns:
+      - type: regex
+        pattern: 'Redirect\s*\(\s*(?:request\.getQueryString|request\.queryString|params\.get)\s*\('
+      - type: regex
+        pattern: 'Redirect\s*\(\s*(?:url|redirectUrl|returnUrl|next|goto|destination)\b'
+      - type: regex
+        pattern: '(?:MovedPermanently|TemporaryRedirect|SeeOther)\s*\(\s*(?:request|param|input|user)\b'
+    anti_patterns:
+      - "startsWith(\"/\")"
+      - "isRelative"
+      - "isSafeUrl"
+      - "allowedDomains"
+      - "whitelist"
+    impact: |
+      Open redirects enable phishing attacks by redirecting users to malicious sites.
+    remediation: |
+      Validate redirect URLs against an allowlist of trusted domains.
+      Only allow relative URLs or check the domain matches your application.

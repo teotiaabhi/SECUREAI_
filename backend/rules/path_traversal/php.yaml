@@ -1,0 +1,1290 @@
+# ============================================================================
+# Path Traversal Detection Rules - PHP
+# Language: PHP
+# Rule IDs: PT-PHP-001 through PT-PHP-006
+# Schema Version: 3.0.0
+# Last Reviewed: 2025-01-15
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # PT-PHP-001: file_get_contents / fopen with User-Controlled Path
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PHP-001"
+    title: "file_get_contents / fopen with User-Controlled Path"
+    description: >
+      Detects usage of PHP's file_get_contents(), fopen(), fread(), fwrite(),
+      and file_put_contents() where the file path argument originates from
+      user-controlled input such as $_GET, $_POST, $_REQUEST, $_COOKIE, or
+      $_SERVER variables. An attacker can inject path traversal sequences like
+      ../../etc/passwd to read or write arbitrary files on the server filesystem.
+      PHP's file functions also support stream wrappers (php://, data://,
+      file://) which can amplify the attack surface beyond simple path traversal
+      to include SSRF and code execution vectors.
+    language: php
+    category: path_traversal
+    severity: Critical
+    confidence: 0.92
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - file-read
+      - file-write
+      - file-get-contents
+      - fopen
+      - php
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'file_get_contents\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE|SERVER)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "file_get_contents with superglobal parameter"
+      - type: regex
+        pattern: 'fopen\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE|SERVER)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "fopen with superglobal parameter"
+      - type: regex
+        pattern: 'file_put_contents\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "file_put_contents with superglobal parameter as path"
+      - type: regex
+        pattern: 'file_get_contents\s*\(\s*(?:\$file_?path|\$file_?name|\$user_?path|\$input_?path|\$doc_?path|\$target)\s*[,\)]'
+        description: "file_get_contents with common user-controlled variable names"
+      - type: regex
+        pattern: 'fopen\s*\(\s*(?:\$file_?path|\$file_?name|\$user_?path|\$input_?path|\$doc_?path|\$target)\s*,'
+        description: "fopen with common user-controlled variable names"
+      - type: regex
+        pattern: 'file_get_contents\s*\(\s*(?:\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)\s*\[\s*|"[^"]*"\s*\.\s*\$_(?:GET|POST|REQUEST)\s*\[)'
+        description: "file_get_contents with string concatenation of superglobal"
+      - type: regex
+        pattern: 'file_get_contents\s*\(\s*"[^"]*\{\s*\$(?:_GET|_POST|_REQUEST|file|path|name)\b[^"]*"'
+        description: "file_get_contents with variable interpolation in double-quoted string"
+      - type: regex
+        pattern: 'fopen\s*\(\s*(?:\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)|"[^"]*\$_(?:GET|POST|REQUEST))'
+        description: "fopen with concatenation or interpolation of superglobal"
+    anti_patterns:
+      - 'realpath\s*\(\s*[^)]+\)\s*!==\s*false\s*&&\s*strpos\s*\(\s*realpath\s*\('
+      - 'if\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*!==\s*false\s*\)'
+      - 'basename\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\['
+      - 'if\s*\(\s*!?\s*(?:str_starts_with|strncmp|substr)\s*\(\s*(?:realpath|readlink)\s*\('
+      - 'in_array\s*\(\s*\$\w+\s*,\s*\$(?:allowed|whitelist|valid)'
+      - 'preg_match\s*\(\s*[''"]\/\^\[a-zA-Z0-9'
+      - 'sanitize_(?:path|filename|input)\s*\('
+      - 'filter_var\s*\([^)]*FILTER_SANITIZE'
+      - 'file_get_contents\s*\(\s*[''"][^''"]*[''"]\s*\)'
+      - 'if\s*\(\s*!\s*is_file\s*\(\s*\$base\w*\s*\.\s*DIRECTORY_SEPARATOR'
+      - 'str_replace\s*\(\s*[''"]\.\.[''"]\s*,\s*[''"][''"]'
+      - 'if\s*\(\s*!\s*file_exists\s*\(\s*\$\w+\s*\)\s*\)'
+      - 'ctype_alnum\s*\('
+      - 'pathinfo\s*\([^)]+,\s*PATHINFO_BASENAME\s*\)'
+      - 'open_basedir'
+    bypass_variants:
+      - description: "URL-encoded dot-dot-slash traversal"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c)'
+      - description: "Double URL-encoded traversal"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection to bypass extension checks (PHP < 5.3.4)"
+        pattern: '(?:%00|\\x00|\\0)(?:\.(?:php|txt|jpg|png))?$'
+      - description: "PHP stream wrapper traversal (php://filter)"
+        pattern: '(?:php:\/\/filter\/|php:\/\/input|data:\/\/|expect:\/\/|zip:\/\/)'
+      - description: "Backslash traversal on Windows PHP"
+        pattern: '(?:\.\.\\\\|\.\.%5c|\.\.%5C)'
+    evasion_indicators:
+      - "URL-encoded traversal in GET/POST parameters"
+      - "Double encoding to bypass urldecode"
+      - "Null byte injection (PHP < 5.3.4) to truncate path"
+      - "PHP stream wrappers for protocol-level traversal"
+      - "Backslash on Windows PHP installations"
+      - "PHP filter chains for arbitrary read"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "$_GET['file'] -> file_get_contents()"
+      - "$_POST['path'] -> string concat -> fopen()"
+      - "$_REQUEST['name'] -> file_put_contents()"
+      - "$_GET['doc'] -> interpolation -> file_get_contents()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary file read exposes PHP source code, database credentials, and application secrets; stream wrappers enable SSRF and RCE"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET['file']"
+        sink: "file_get_contents()"
+        through: "direct superglobal access"
+      - source: "$_POST['path']"
+        sink: "fopen()"
+        through: "string concatenation"
+      - source: "$_REQUEST['name']"
+        sink: "file_put_contents()"
+        through: "variable assignment"
+    impact: |
+      Successful exploitation reads arbitrary files from the PHP server including
+      configuration files (config.php, wp-config.php, .env), database credentials,
+      PHP source code (revealing additional vulnerabilities), private keys, and
+      system files (/etc/passwd, /etc/shadow). PHP stream wrappers amplify the
+      attack: php://filter can base64-encode source code to bypass binary
+      detection, php://input enables request body injection, and data:// can
+      execute arbitrary code. file_put_contents exploitation enables writing
+      PHP web shells for persistent RCE.
+    remediation: |
+      1. Use realpath() and validate against base directory:
+
+         $baseDir = realpath('/var/www/uploads');
+         $requestedFile = realpath($baseDir . '/' . $_GET['file']);
+         if ($requestedFile === false || strpos($requestedFile, $baseDir . DIRECTORY_SEPARATOR) !== 0) {
+             http_response_code(403);
+             die('Access denied');
+         }
+         $content = file_get_contents($requestedFile);
+
+      2. Use basename() for filename-only access:
+
+         $safeName = basename($_GET['file']);
+         $content = file_get_contents($uploadsDir . '/' . $safeName);
+
+      3. Disable dangerous stream wrappers via allow_url_fopen/allow_url_include.
+      4. Configure open_basedir in php.ini to restrict filesystem scope.
+      5. Use allowlists for permitted files.
+    references:
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+      - "https://www.php.net/manual/en/function.file-get-contents.php"
+      - "https://www.php.net/manual/en/wrappers.php"
+    context_awareness:
+      surrounding_context_patterns:
+        - '<\?php'
+        - 'function\s+\w+\s*\('
+        - 'class\s+\w+'
+        - 'Route::(?:get|post|put|delete)\s*\('
+      taint_source_indicators:
+        - '\$_GET\s*\['
+        - '\$_POST\s*\['
+        - '\$_REQUEST\s*\['
+        - '\$_COOKIE\s*\['
+        - '\$_SERVER\s*\[\s*[''"](?:PATH_INFO|QUERY_STRING|REQUEST_URI)[''"]'
+        - '\$request->(?:get|input|query)\s*\('
+      taint_sink_indicators:
+        - 'file_get_contents\s*\('
+        - 'fopen\s*\('
+        - 'fread\s*\('
+        - 'file_put_contents\s*\('
+        - 'fwrite\s*\('
+        - 'readfile\s*\('
+      sanitization_patterns:
+        - 'realpath\s*\([^)]+\)[\s\S]{0,100}strpos'
+        - 'basename\s*\('
+        - 'str_starts_with\s*\('
+        - 'in_array\s*\(\s*\$\w+\s*,\s*\$allowed'
+        - 'open_basedir'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP script at download.php accepts a GET parameter:
+        $content = file_get_contents('uploads/' . $_GET['file']);
+        The attacker sends GET /download.php?file=../../../../etc/passwd.
+        The function reads /etc/passwd. For PHP source exposure:
+        GET /download.php?file=php://filter/convert.base64-encode/resource=../config.php
+        returns base64-encoded PHP source code containing database credentials
+        and API keys.
+      example_payload: "../../../../etc/passwd"
+      attacker_objective: "Read arbitrary files including PHP source code, configuration, and credentials; use stream wrappers for advanced attacks"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PHP-002"
+        - "PT-PHP-004"
+        - "PT-JS-001"
+        - "PT-PY-001"
+
+  # --------------------------------------------------------------------------
+  # PT-PHP-002: include / require with User-Controlled Input (LFI/RFI)
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PHP-002"
+    title: "include / require with User-Controlled Input (LFI/RFI)"
+    description: >
+      Detects Local File Inclusion (LFI) and Remote File Inclusion (RFI)
+      vulnerabilities where PHP's include, include_once, require, or
+      require_once statements use paths derived from user-controlled input.
+      Unlike simple file read, include/require executes the included file as
+      PHP code, making this a direct remote code execution vector. Combined
+      with log poisoning, PHP filter chains, or uploaded files, even local-only
+      inclusion achieves full RCE. This is among the most critical PHP
+      vulnerability patterns.
+    language: php
+    category: path_traversal
+    severity: High
+    confidence: 0.93
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - lfi
+      - rfi
+      - include
+      - require
+      - rce
+      - php
+      - server-side
+      - cwe-22
+      - cwe-98
+      - owasp-a01
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "include/require with direct superglobal access"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)\s*\['
+        description: "include/require with string concatenation of superglobal"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*"[^"]*\$(?:_GET|_POST|_REQUEST|page|view|template|lang|module|file|path)\b'
+        description: "include/require with variable interpolation"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\s+\$_(?:GET|POST|REQUEST|COOKIE)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "include/require statement syntax (without parens) with superglobal"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*(?:\$page|\$view|\$template|\$lang|\$module|\$file|\$path|\$controller|\$action)\s*\)'
+        description: "include/require with common user-controlled variable names"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*(?:\$\w+\s*\.\s*[''"][^''"]*[''"]\s*\.\s*[''"]\.php[''"]\s*)'
+        description: "include with variable plus extension appending"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*(?:\$request->(?:get|input|query)\s*\(\s*[''"][^''"]*[''"]\s*\))'
+        description: "include/require with Laravel/framework request input"
+      - type: regex
+        pattern: '(?:include|include_once|require|require_once)\s*\(\s*(?:filter_input\s*\(\s*INPUT_(?:GET|POST))'
+        description: "include/require with filter_input (often insufficiently filtered)"
+    anti_patterns:
+      - '(?:include|require)\s*\(\s*[''"][^''"]*[''"]\s*\)\s*;'
+      - 'if\s*\(\s*in_array\s*\(\s*\$\w+\s*,\s*\$(?:allowed|whitelist|valid)'
+      - 'switch\s*\(\s*\$\w+\s*\)\s*\{\s*case'
+      - '(?:include|require)\s*\(\s*__DIR__\s*\.\s*[''"][^''"]*[''"]\s*\)'
+      - 'if\s*\(\s*file_exists\s*\(\s*\$base\w*\s*\.\s*DIRECTORY_SEPARATOR'
+      - 'basename\s*\(\s*\$_(?:GET|POST|REQUEST)'
+      - 'if\s*\(\s*preg_match\s*\(\s*[''"]\/\^\[a-zA-Z0-9'
+      - 'if\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*!==\s*false'
+      - 'realpath\s*\(\s*[^)]+\)\s*[\s\S]{0,50}strpos'
+      - 'sanitize_(?:path|filename|input)\s*\('
+      - 'ctype_alpha\s*\(\s*\$'
+      - '\$allowed\w*\s*=\s*(?:array\s*\(|\[)\s*[''"]'
+      - 'filter_var\s*\([^)]*FILTER_SANITIZE'
+      - 'str_replace\s*\(\s*(?:array\s*\(|\[)\s*[''"]\.\.[''"]\s*,'
+      - 'open_basedir'
+    bypass_variants:
+      - description: "URL-encoded traversal for LFI"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass URL decode"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte to truncate appended extension (PHP < 5.3.4)"
+        pattern: '(?:%00|\\x00|\\0)$'
+      - description: "PHP filter chain for RCE via LFI"
+        pattern: '(?:php:\/\/filter\/(?:convert\.base64-|read=|string\.))'
+      - description: "Log poisoning via User-Agent for LFI to RCE"
+        pattern: '(?:\/var\/log\/(?:apache2?|nginx|httpd)\/(?:access|error)\.log)'
+    evasion_indicators:
+      - "URL-encoded traversal in include parameter"
+      - "Null byte to remove appended .php extension"
+      - "PHP filter chains for arbitrary code execution"
+      - "Log poisoning via manipulated headers"
+      - "data:// or php://input wrappers"
+      - "Double encoding to bypass decode filters"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "$_GET['page'] -> include()"
+      - "$_GET['lang'] -> string concat -> include(lang . '.php')"
+      - "$_REQUEST['template'] -> include(templates_dir . '/' . template)"
+      - "$_GET['module'] -> require_once()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "LFI directly executes included file as PHP code; combined with log poisoning or filter chains achieves immediate RCE"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET['page']"
+        sink: "include()"
+        through: "direct superglobal or variable assignment"
+      - source: "$_REQUEST['template']"
+        sink: "require(templates_dir . '/' . $template)"
+        through: "string concatenation"
+      - source: "$_GET['lang']"
+        sink: "include($lang . '.php')"
+        through: "variable with extension append"
+    impact: |
+      LFI/RFI through include/require is among the most critical PHP
+      vulnerabilities. Impact includes: direct remote code execution by including
+      uploaded files, log files with injected PHP code, or PHP filter chains;
+      full source code disclosure of the application; database credential
+      extraction from configuration files; session hijacking by reading
+      session files; and with allow_url_include enabled, remote file inclusion
+      from attacker-controlled servers for instant RCE. This vulnerability
+      pattern has been the root cause of countless major web application
+      compromises.
+    remediation: |
+      1. Use a strict allowlist for includable files:
+
+         $allowedPages = ['home', 'about', 'contact', 'faq'];
+         $page = $_GET['page'] ?? 'home';
+         if (!in_array($page, $allowedPages, true)) {
+             http_response_code(404);
+             die('Page not found');
+         }
+         include __DIR__ . '/templates/' . $page . '.php';
+
+      2. Use a switch statement for known values:
+
+         switch ($_GET['page']) {
+             case 'home': include 'templates/home.php'; break;
+             case 'about': include 'templates/about.php'; break;
+             default: include 'templates/404.php'; break;
+         }
+
+      3. Set allow_url_include = Off in php.ini.
+      4. Configure open_basedir to restrict include scope.
+      5. Never use user input directly in include/require.
+    references:
+      - "https://cwe.mitre.org/data/definitions/98.html"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+      - "https://www.php.net/manual/en/function.include.php"
+    context_awareness:
+      surrounding_context_patterns:
+        - '<\?php'
+        - 'function\s+\w+\s*\('
+        - '\$_GET\s*\['
+        - 'if\s*\(\s*isset\s*\(\s*\$_GET'
+      taint_source_indicators:
+        - '\$_GET\s*\['
+        - '\$_POST\s*\['
+        - '\$_REQUEST\s*\['
+        - '\$_COOKIE\s*\['
+        - '\$request->(?:get|input|query)\s*\('
+      taint_sink_indicators:
+        - 'include\s*\('
+        - 'include_once\s*\('
+        - 'require\s*\('
+        - 'require_once\s*\('
+      sanitization_patterns:
+        - 'in_array\s*\(\s*\$\w+\s*,\s*\$allowed'
+        - 'basename\s*\('
+        - 'ctype_alpha\s*\('
+        - 'preg_match\s*\(\s*[''"]\/\^\[a-zA-Z'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP application uses include('pages/' . $_GET['page'] . '.php') for
+        page routing. The attacker sends GET /?page=../../../var/log/apache2/access.
+        With PHP < 5.3.4, adding a null byte (?page=../../../etc/passwd%00)
+        truncates the .php extension. For RCE, the attacker first poisons
+        Apache's access log by sending a request with User-Agent:
+        <?php system($_GET['cmd']); ?>, then includes the log file:
+        ?page=../../../var/log/apache2/access, executing arbitrary commands.
+      example_payload: "../../../var/log/apache2/access"
+      attacker_objective: "Execute arbitrary PHP code through local file inclusion, achieving full remote code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PHP-001"
+        - "PT-PHP-004"
+        - "PT-PHP-005"
+
+  # --------------------------------------------------------------------------
+  # PT-PHP-003: ZipArchive Extraction Path Traversal
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PHP-003"
+    title: "ZipArchive Extraction Path Traversal (ZIP Slip)"
+    description: >
+      Detects ZIP Slip vulnerabilities when using PHP's ZipArchive class to
+      extract archives without validating that extracted file paths remain
+      within the target directory. The ZipArchive::extractTo() method does not
+      prevent path traversal, and maliciously crafted ZIP files can contain
+      entries with ../../ paths that write files outside the extraction
+      directory. Manual extraction loops using ZipArchive::getFromIndex() or
+      ZipArchive::getStream() are similarly vulnerable. This can lead to
+      PHP web shell deployment and remote code execution.
+    language: php
+    category: path_traversal
+    severity: High
+    confidence: 0.90
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - zip-slip
+      - archive-extraction
+      - zip-archive
+      - php
+      - rce-potential
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '\$\w+\s*->\s*extractTo\s*\(\s*(?:\$_(?:GET|POST|REQUEST)\s*\[\s*|(?:\$extract_?dir|\$output_?dir|\$dest_?dir|\$target_?dir))\b'
+        description: "ZipArchive::extractTo with user-controlled or common destination"
+      - type: regex
+        pattern: 'new\s+ZipArchive[\s\S]{0,200}open\s*\(\s*(?:\$_(?:GET|POST|REQUEST|FILES)|(?:\$file_?path|\$upload_?path|\$archive_?path|\$zip_?path))\b'
+        description: "ZipArchive::open with user-controlled path"
+      - type: regex
+        pattern: '\$\w+\s*->\s*extractTo\s*\(\s*(?:\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)\s*\[)'
+        description: "extractTo with concatenation of user-controlled data in destination"
+      - type: regex
+        pattern: 'getNameIndex\s*\(\s*\$\w+\s*\)[\s\S]{0,300}(?:file_put_contents|fwrite|copy)\s*\('
+        description: "Manual extraction using getNameIndex without path validation"
+      - type: regex
+        pattern: 'statIndex\s*\(\s*\$\w+\s*\)[\s\S]{0,200}\[?\s*[''"]name[''"]\s*\][\s\S]{0,200}(?:file_put_contents|fwrite)'
+        description: "statIndex name used for file write without validation"
+      - type: regex
+        pattern: 'getFromIndex\s*\(\s*\$\w+\s*\)[\s\S]{0,200}file_put_contents\s*\(\s*(?:\$\w+\s*\.\s*\$?\w*name)'
+        description: "getFromIndex content written to file with entry name in path"
+      - type: regex
+        pattern: 'for\s*\(\s*\$\w+\s*=\s*0[\s\S]{0,200}getNameIndex[\s\S]{0,300}(?:file_put_contents|copy|rename|mkdir)\s*\('
+        description: "Loop extracting ZIP entries to filesystem"
+      - type: regex
+        pattern: '\$\w+\s*->\s*extractTo\s*\(\s*(?:sys_get_temp_dir\s*\(\s*\)\s*\.\s*|\/tmp\/)'
+        description: "extractTo to temp directory without validation"
+    anti_patterns:
+      - 'if\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*!==\s*false\s*\)'
+      - 'realpath\s*\([^)]+\)\s*[\s\S]{0,50}strpos\s*\(\s*\$\w+\s*,\s*\$(?:dest|target|base)'
+      - 'basename\s*\(\s*\$\w+\s*->\s*(?:getNameIndex|statName|name)\b'
+      - 'if\s*\(\s*str_starts_with\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*\)'
+      - 'if\s*\(\s*!\s*str_starts_with\s*\(\s*realpath\s*\('
+      - '\$\w+\s*->\s*extractTo\s*\(\s*[''"][^''"]*[''"]\s*,\s*\[\s*[''"][^''"]*[''"]\s*\]\s*\)'
+      - 'preg_match\s*\(\s*[''"]\/\\\.\\\.\/[''"]\s*,\s*\$'
+      - 'sanitize_(?:path|entry|filename)\s*\('
+      - 'if\s*\(\s*preg_match\s*\(\s*[''"]\/\^\[a-zA-Z0-9'
+      - 'substr\s*\(\s*\$\w+\s*,\s*0\s*,\s*strlen\s*\(\s*\$\w*dir'
+      - 'is_dir\s*\(\s*dirname\s*\(\s*\$\w+\s*\)\s*\)[\s\S]{0,50}mkdir'
+      - 'if\s*\(\s*str_contains\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*\)'
+      - '\$entry\s*=\s*basename\s*\('
+      - 'move_uploaded_file\s*\('
+      - 'open_basedir'
+    bypass_variants:
+      - description: "ZIP entry with URL-encoded traversal"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "ZIP entry with double encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "ZIP entry with null byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - description: "ZIP entry with absolute path"
+        pattern: '(?:^\/|^[A-Za-z]:\\\\)'
+      - description: "ZIP entry with backslash path separators"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "ZIP entries with relative traversal paths"
+      - "ZIP entries with absolute paths"
+      - "Mixed path separators in ZIP entry names"
+      - "Symbolic links in archives"
+      - "Nested ZIP archives for recursive extraction"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af)'
+    multi_function_chain_patterns:
+      - "$_FILES upload -> new ZipArchive() -> open() -> extractTo()"
+      - "uploaded ZIP -> ZipArchive::open -> for loop -> getNameIndex -> file_put_contents"
+      - "user path -> ZipArchive::open -> extractTo(user_dest)"
+      - "file upload -> ZipArchive -> getFromIndex -> file_put_contents(dest . name)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ZIP Slip writes PHP files to web-accessible directories enabling immediate RCE via web shell"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user-uploaded ZIP file"
+        sink: "ZipArchive::extractTo()"
+        through: "ZipArchive::open with uploaded file"
+      - source: "ZIP entry name"
+        sink: "file_put_contents(dest . entryName)"
+        through: "manual extraction loop"
+      - source: "uploaded archive"
+        sink: "extractTo(destination)"
+        through: "ZipArchive extraction"
+    impact: |
+      ZIP Slip in PHP enables writing files to arbitrary locations on the web
+      server. The most common and impactful exploit is deploying a PHP web
+      shell (<?php system($_GET['cmd']); ?>) into the document root for
+      immediate RCE. Other scenarios include: overwriting .htaccess for
+      configuration hijacking, modifying wp-config.php or equivalent files
+      for credential injection, placing backdoor code in existing PHP files,
+      and writing to cron directories for persistent access. PHP web
+      applications are particularly vulnerable because any .php file in the
+      document root is executable.
+    remediation: |
+      1. Validate every entry path before extraction:
+
+         $zip = new ZipArchive;
+         $zip->open($uploadedFile);
+         $destDir = realpath('/var/www/uploads');
+         for ($i = 0; $i < $zip->numFiles; $i++) {
+             $entryName = $zip->getNameIndex($i);
+             $fullPath = realpath($destDir . '/' . $entryName);
+             if ($fullPath === false || strpos($fullPath, $destDir . DIRECTORY_SEPARATOR) !== 0) {
+                 throw new Exception("Zip slip detected: " . $entryName);
+             }
+         }
+         $zip->extractTo($destDir);
+
+      2. Use basename() for flat extraction without directories.
+      3. Extract to a temporary directory and validate before moving.
+      4. Configure open_basedir in php.ini.
+      5. Set restrictive file permissions on extraction directories.
+    references:
+      - "https://snyk.io/research/zip-slip-vulnerability"
+      - "https://www.php.net/manual/en/class.ziparchive.php"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '<\?php'
+        - 'new\s+ZipArchive'
+        - '\$_FILES\s*\['
+        - 'move_uploaded_file\s*\('
+      taint_source_indicators:
+        - '\$_FILES\s*\[\s*[''"][^''"]*[''"]\s*\]\s*\[\s*[''"]tmp_name[''"]'
+        - '\$file_?path'
+        - '\$upload_?path'
+        - '\$archive_?path'
+        - '\$zip_?path'
+      taint_sink_indicators:
+        - '->extractTo\s*\('
+        - 'file_put_contents\s*\('
+        - 'fwrite\s*\('
+        - 'copy\s*\('
+      sanitization_patterns:
+        - 'realpath\s*\([^)]+\)[\s\S]{0,100}strpos'
+        - 'basename\s*\('
+        - 'strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)'
+        - 'str_starts_with\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker creates a ZIP file with an entry named
+        ../../../var/www/html/shell.php containing <?php system($_GET['cmd']); ?>.
+        A file upload handler accepts ZIP files and extracts them with
+        $zip->extractTo($uploadsDir). The shell.php file is written to the
+        document root. The attacker accesses /shell.php?cmd=id and executes
+        arbitrary OS commands as the web server user (www-data/apache).
+      example_payload: "../../../var/www/html/shell.php"
+      attacker_objective: "Deploy a PHP web shell by writing files outside the extraction directory for immediate remote code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PHP-001"
+        - "PT-JS-005"
+        - "PT-PY-005"
+        - "PT-JAVA-005"
+        - "PT-GO-005"
+
+  # --------------------------------------------------------------------------
+  # PT-PHP-004: readfile / file with User-Controlled Path
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PHP-004"
+    title: "readfile / file() with User-Controlled Path"
+    description: >
+      Detects usage of PHP's readfile(), file(), file_exists(), is_file(),
+      is_readable(), and similar file functions where the path argument
+      originates from user-controlled input. readfile() is particularly
+      dangerous as it reads a file and directly writes it to the output buffer,
+      making it ideal for file download endpoints. file() reads the entire file
+      into an array. Both functions honor PHP stream wrappers, amplifying the
+      attack surface. Even information-leaking functions like file_exists()
+      can be used for path enumeration and timing-based attacks.
+    language: php
+    category: path_traversal
+    severity: High
+    confidence: 0.89
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - readfile
+      - file-read
+      - file-download
+      - php
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'readfile\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "readfile() with superglobal parameter"
+      - type: regex
+        pattern: 'readfile\s*\(\s*(?:\$file_?path|\$file_?name|\$user_?path|\$doc_?path|\$target)\s*[,\)]'
+        description: "readfile() with common user-controlled variable names"
+      - type: regex
+        pattern: 'readfile\s*\(\s*(?:\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)\s*\[|"[^"]*\$_(?:GET|POST|REQUEST))'
+        description: "readfile() with concatenation or interpolation of superglobal"
+      - type: regex
+        pattern: '\bfile\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "file() function with superglobal parameter"
+      - type: regex
+        pattern: 'file_exists\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "file_exists() with superglobal for path enumeration"
+      - type: regex
+        pattern: '(?:is_file|is_readable|is_writable|filesize|filetype|stat)\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\['
+        description: "File info functions with superglobal parameter"
+      - type: regex
+        pattern: 'readfile\s*\(\s*(?:\$request->(?:get|input|query)\s*\(\s*[''"][^''"]*[''"]\s*\))'
+        description: "readfile() with Laravel/framework request input"
+      - type: regex
+        pattern: 'header\s*\(\s*[''"]Content-Type[\s\S]{0,200}readfile\s*\(\s*(?:\$(?:file|path|target|name)\w*)\s*\)'
+        description: "File download with Content-Type header followed by readfile with user-controlled path"
+    anti_patterns:
+      - 'realpath\s*\(\s*[^)]+\)\s*[\s\S]{0,50}strpos\s*\(\s*\$\w+\s*,\s*\$(?:base|allowed|root)'
+      - 'if\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*!==\s*false'
+      - 'basename\s*\(\s*\$_(?:GET|POST|REQUEST)'
+      - 'in_array\s*\(\s*\$\w+\s*,\s*\$(?:allowed|whitelist|valid)'
+      - 'if\s*\(\s*!\s*str_starts_with\s*\(\s*realpath'
+      - 'sanitize_(?:path|filename)\s*\('
+      - 'readfile\s*\(\s*[''"][^''"]*[''"]\s*\)'
+      - 'ctype_alnum\s*\(\s*\$'
+      - 'preg_match\s*\(\s*[''"]\/\^\[a-zA-Z0-9'
+      - 'filter_var\s*\([^)]*FILTER_SANITIZE'
+      - 'pathinfo\s*\([^)]+,\s*PATHINFO_BASENAME'
+      - 'substr\s*\(\s*realpath\s*\([^)]+\)\s*,\s*0\s*,\s*strlen'
+      - 'str_replace\s*\(\s*[''"]\.\.[''"]\s*,\s*[''"]'
+      - 'open_basedir'
+      - 'if\s*\(\s*preg_match\s*\(\s*[''"]\/\\\.\\\.\/[''"]\s*,'
+    bypass_variants:
+      - description: "URL-encoded traversal"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double URL encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection (PHP < 5.3.4)"
+        pattern: '(?:%00|\\x00|\\0)(?:\.(?:pdf|jpg|txt))?$'
+      - description: "PHP filter wrapper"
+        pattern: '(?:php:\/\/filter\/convert\.base64-encode\/resource=)'
+      - description: "Backslash traversal on Windows"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "URL-encoded traversal in download parameters"
+      - "Double encoding to bypass decode"
+      - "Null byte before extension (PHP < 5.3.4)"
+      - "PHP filter wrappers for base64 output"
+      - "Backslash on Windows PHP"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "$_GET['file'] -> readfile()"
+      - "$_GET['doc'] -> header() -> readfile()"
+      - "$_POST['path'] -> file()"
+      - "$_REQUEST['name'] -> file_exists() -> readfile()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "readfile() efficiently sends file contents to the output buffer for immediate exfiltration"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET['file']"
+        sink: "readfile()"
+        through: "direct superglobal or variable assignment"
+      - source: "$_REQUEST['document']"
+        sink: "file()"
+        through: "string concatenation"
+      - source: "$_GET['path']"
+        sink: "file_exists() + readfile()"
+        through: "existence check then read"
+    impact: |
+      readfile() directly outputs file contents to the browser, making it
+      the ideal function for file download exploitation. An attacker exfiltrates
+      configuration files (wp-config.php, config.php, .env), database credentials,
+      PHP source code, private keys, and system files. file() reads files into
+      arrays, enabling line-by-line processing of sensitive data. Even
+      file_exists() leaks information about the server filesystem, enabling
+      targeted attacks. With PHP stream wrappers, readfile() can also be used
+      for SSRF via http:// and https:// protocols.
+    remediation: |
+      1. Validate with realpath() before serving:
+
+         $baseDir = realpath('/var/www/downloads');
+         $filePath = realpath($baseDir . '/' . $_GET['file']);
+         if ($filePath === false || strpos($filePath, $baseDir . DIRECTORY_SEPARATOR) !== 0) {
+             http_response_code(403);
+             die('Forbidden');
+         }
+         header('Content-Type: application/octet-stream');
+         header('Content-Disposition: attachment; filename="' . basename($filePath) . '"');
+         readfile($filePath);
+
+      2. Use basename() for filename-only downloads.
+      3. Implement file ID-to-path mapping in database.
+      4. Configure open_basedir to restrict filesystem access.
+      5. Use allowlists for downloadable files.
+    references:
+      - "https://www.php.net/manual/en/function.readfile.php"
+      - "https://www.php.net/manual/en/function.file.php"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '<\?php'
+        - 'header\s*\(\s*[''"]Content-(?:Type|Disposition)'
+        - 'function\s+\w+\s*\('
+        - 'Route::(?:get|post)\s*\('
+      taint_source_indicators:
+        - '\$_GET\s*\['
+        - '\$_POST\s*\['
+        - '\$_REQUEST\s*\['
+        - '\$request->(?:get|input|query)\s*\('
+      taint_sink_indicators:
+        - 'readfile\s*\('
+        - '\bfile\s*\('
+        - 'file_exists\s*\('
+        - 'is_file\s*\('
+      sanitization_patterns:
+        - 'realpath\s*\([^)]+\)[\s\S]{0,100}strpos'
+        - 'basename\s*\('
+        - 'in_array\s*\(\s*\$\w+\s*,\s*\$allowed'
+        - 'pathinfo\s*\([^)]+,\s*PATHINFO_BASENAME'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP download script at download.php uses:
+        header('Content-Type: application/octet-stream');
+        readfile('uploads/' . $_GET['file']);
+        The attacker sends GET /download.php?file=../../../../wp-config.php.
+        The readfile() call resolves the traversal and outputs the WordPress
+        configuration file containing DB_NAME, DB_USER, DB_PASSWORD, AUTH_KEY,
+        and other security-sensitive constants directly to the browser.
+      example_payload: "../../../../wp-config.php"
+      attacker_objective: "Download sensitive configuration and credential files through PHP file serving functions"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PHP-001"
+        - "PT-PHP-002"
+        - "PT-PHP-006"
+
+  # --------------------------------------------------------------------------
+  # PT-PHP-005: realpath Bypass Techniques
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PHP-005"
+    title: "realpath() Bypass Techniques in PHP"
+    description: >
+      Detects patterns where PHP's realpath() function is used for path
+      traversal validation but implemented incorrectly, creating a false
+      sense of security. Common bypass scenarios include: not checking
+      realpath()'s false return for non-existent files, using strpos instead
+      of str_starts_with for prefix matching (allowing /uploads-backup to
+      match /uploads), TOCTOU race conditions between realpath() check and
+      actual file operation, not accounting for symlinks, and using
+      realpath() on the user input directly instead of the joined path.
+    language: php
+    category: path_traversal
+    severity: High
+    confidence: 0.85
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - realpath-bypass
+      - php
+      - server-side
+      - cwe-22
+      - cwe-367
+      - owasp-a01
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'realpath\s*\([^)]+\)\s*;\s*(?:\/\/[^\n]*)?\s*(?:file_get_contents|readfile|fopen|include|require)\s*\(\s*\$(?!.*realpath)'
+        description: "realpath() check followed by file operation on original (non-resolved) path"
+      - type: regex
+        pattern: 'strpos\s*\(\s*realpath\s*\([^)]+\)\s*,\s*\$\w+\s*\)\s*(?:===?\s*0|!==?\s*false)'
+        description: "strpos with realpath (prefix match without DIRECTORY_SEPARATOR suffix)"
+      - type: regex
+        pattern: 'if\s*\(\s*realpath\s*\([^)]+\)\s*\)\s*\{[\s\S]{0,200}(?:file_get_contents|readfile|fopen|include)\s*\(\s*\$(?!.*realpath)'
+        description: "realpath truthiness check followed by operation on original path"
+      - type: regex
+        pattern: 'str_replace\s*\(\s*(?:[''"]\.\.\/[''"]\s*,|[''"]\.\.\\\\[''"]\s*,|array\s*\(\s*[''"]\.\.[''"]\s*\)\s*,)\s*[''"][''"]'
+        description: "Blacklist str_replace of traversal sequences without recursive application"
+      - type: regex
+        pattern: 'if\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*===\s*false\s*\)[\s\S]{0,200}(?:file_get_contents|readfile|fopen|include)'
+        description: "Simple string check for .. without handling encoded variants"
+      - type: regex
+        pattern: 'if\s*\(\s*!\s*realpath\s*\(\s*\$\w+\s*\)\s*\)[\s\S]{0,50}(?:die|exit|return)[\s\S]{0,200}(?:file_get_contents|readfile|fopen)\s*\(\s*\$'
+        description: "realpath false check with immediate return but operation on original path"
+      - type: regex
+        pattern: '\$\w+\s*=\s*str_replace\s*\(\s*[''"]\.\.[''"]\s*,\s*[''"]["'']\s*,\s*\$_(?:GET|POST|REQUEST)[\s\S]{0,100}(?:include|require|file_get_contents|readfile|fopen)\s*\(\s*\$'
+        description: "Non-recursive blacklist replacement of .. from user input before file operation"
+      - type: regex
+        pattern: 'if\s*\(\s*preg_match\s*\(\s*[''"]\/\\\.\\\.\/.*\/[''"]'
+        description: "Regex check for ../ without handling encoded variants or backslash"
+    anti_patterns:
+      - 'realpath\s*\([^)]+\)\s*;\s*(?:\/\/[^\n]*)?\s*(?:file_get_contents|readfile|fopen)\s*\(\s*realpath\s*\('
+      - 'strpos\s*\(\s*realpath\s*\([^)]+\)\s*,\s*\$\w+\s*\.\s*DIRECTORY_SEPARATOR\s*\)'
+      - 'str_starts_with\s*\(\s*realpath\s*\('
+      - 'if\s*\(\s*realpath\s*\([^)]+\)\s*===\s*false\s*\)\s*\{\s*(?:throw|die|exit|return)'
+      - 'while\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*!==\s*false\s*\)'
+      - 'urldecode\s*\(\s*\$\w+\s*\)[\s\S]{0,100}strpos\s*\([^)]*[''"]\.\.[''"]\s*\)'
+      - 'if\s*\(\s*!\s*is_link\s*\('
+      - 'open_basedir'
+      - '\$\w+\s*=\s*realpath\s*\([^)]+\)\s*;\s*(?:\/\/[^\n]*)?\s*if\s*\(\s*\$\w+\s*===\s*false'
+      - 'preg_match\s*\(\s*[''"]\/\^\[a-zA-Z0-9._-\]+\$\/[''"]\s*,'
+      - 'basename\s*\('
+      - 'in_array\s*\(\s*\$\w+\s*,\s*\$allowed'
+      - 'substr\s*\(\s*\$\w+\s*,\s*0\s*,\s*strlen\s*\(\s*\$\w*dir\s*\)\s*\+\s*1\s*\)'
+      - 'filter_var\s*\([^)]+FILTER_VALIDATE'
+      - '\$\w+\s*=\s*realpath\s*\([^)]+\)\s*;\s*if\s*\(\s*\$\w+\s*&&\s*str_starts_with'
+    bypass_variants:
+      - description: "Non-existent file returns false from realpath, bypassing check"
+        pattern: '(?:realpath\s*\([^)]+\)\s*(?:===?\s*false|!==?\s*false))'
+      - description: "Directory prefix collision without DIRECTORY_SEPARATOR"
+        pattern: '(?:\/uploads-backup|\/uploads-old|\/uploadstemp)'
+      - description: "Double-dot replacement bypass with triple dots"
+        pattern: '(?:\.\.\.\/|\.%2e\/|%2e\.\/)'
+      - description: "Encoded traversal bypassing string check"
+        pattern: '(?:%2e%2e%2f|%252e%252e%252f)'
+      - description: "TOCTOU race between check and file operation"
+        pattern: '(?:symlink\s*\(|link\s*\(|rename\s*\()'
+    evasion_indicators:
+      - "realpath() returns false for non-existent target (null traverse)"
+      - "Directory name prefix collision without separator suffix"
+      - "Non-recursive string replacement of .."
+      - "TOCTOU race between validation and file access"
+      - "Symlink manipulation after realpath resolution"
+      - "Encoded traversal bypassing literal string check"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "user input -> realpath() check -> file_get_contents(original_input)"
+      - "user input -> str_replace('..', '') -> include()"
+      - "user input -> strpos('..') check -> fopen()"
+      - "user input -> preg_match('/\\.\\./') -> readfile()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Bypassing realpath validation nullifies path traversal defenses while giving false confidence"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET['file']"
+        sink: "file_get_contents($original_path) after flawed realpath check"
+        through: "realpath on different variable or missing false check"
+      - source: "$_POST['path']"
+        sink: "include() after str_replace('..', '')"
+        through: "non-recursive blacklist"
+      - source: "$_REQUEST['doc']"
+        sink: "readfile() after strpos(..) check"
+        through: "encoded traversal bypassing string check"
+    impact: |
+      Flawed realpath() validation provides no actual protection against path
+      traversal while giving developers a false sense of security. Bypasses
+      enable all the same impacts as unprotected file access: reading
+      configuration files, PHP source code with credentials, private keys,
+      and system files. The TOCTOU variant is exploitable in concurrent
+      request scenarios on shared hosting. Non-recursive blacklist replacement
+      is trivially bypassed with payloads like ....// which after replacement
+      become ../ again.
+    remediation: |
+      1. Correctly implement realpath validation:
+
+         $baseDir = realpath('/var/www/uploads');
+         $fullPath = $baseDir . DIRECTORY_SEPARATOR . $_GET['file'];
+         $resolvedPath = realpath($fullPath);
+
+         // Check realpath returned a valid path (file exists)
+         if ($resolvedPath === false) {
+             http_response_code(404);
+             die('File not found');
+         }
+
+         // Check resolved path is within base directory (with separator!)
+         if (strpos($resolvedPath, $baseDir . DIRECTORY_SEPARATOR) !== 0) {
+             http_response_code(403);
+             die('Access denied');
+         }
+
+         // Use the RESOLVED path, not the original
+         $content = file_get_contents($resolvedPath);
+
+      2. Use str_starts_with() (PHP 8.0+) instead of strpos:
+
+         if (!str_starts_with($resolvedPath, $baseDir . DIRECTORY_SEPARATOR)) {
+             die('Access denied');
+         }
+
+      3. Avoid blacklist str_replace; use allowlists.
+      4. Configure open_basedir as defense-in-depth.
+      5. Check is_link() to prevent symlink attacks.
+    references:
+      - "https://www.php.net/manual/en/function.realpath.php"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://cwe.mitre.org/data/definitions/367.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '<\?php'
+        - 'function\s+\w+\s*\('
+        - 'if\s*\(\s*(?:isset|!empty)\s*\(\s*\$_(?:GET|POST)'
+      taint_source_indicators:
+        - '\$_GET\s*\['
+        - '\$_POST\s*\['
+        - '\$_REQUEST\s*\['
+      taint_sink_indicators:
+        - 'realpath\s*\('
+        - 'strpos\s*\([^)]*realpath'
+        - 'str_replace\s*\(\s*[''"]\.\.[''"]\s*,'
+        - 'preg_match\s*\(\s*[''"]\/\\\.\\\.\/[''"]\s*,'
+      sanitization_patterns:
+        - 'realpath\s*\([^)]+\)[\s\S]{0,10}\.\s*DIRECTORY_SEPARATOR[\s\S]{0,50}strpos'
+        - 'str_starts_with\s*\(\s*realpath'
+        - 'basename\s*\('
+        - 'in_array\s*\(\s*\$\w+\s*,\s*\$allowed'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP script validates paths using:
+        if (strpos(realpath($baseDir . '/' . $file), $baseDir) === 0) { readfile(...); }
+        The $baseDir is '/var/www/uploads'. An attacker requests a file in
+        '/var/www/uploads-admin/secrets.conf'. The realpath resolves to
+        '/var/www/uploads-admin/secrets.conf' which starts with '/var/www/uploads',
+        passing the strpos check. Another bypass: str_replace('..', '', $input)
+        on input '....//....//etc/passwd' produces '../../etc/passwd' after
+        single-pass replacement.
+      example_payload: "....//....//etc/passwd"
+      attacker_objective: "Bypass flawed realpath validation through prefix collision, TOCTOU, or non-recursive sanitization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "medium"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PHP-001"
+        - "PT-PHP-002"
+        - "PT-PHP-004"
+        - "PT-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # PT-PHP-006: SplFileObject Path Traversal
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PHP-006"
+    title: "SplFileObject Path Traversal"
+    description: >
+      Detects path traversal vulnerabilities in PHP's SplFileObject,
+      SplFileInfo, DirectoryIterator, RecursiveDirectoryIterator, and
+      FilesystemIterator where the path argument originates from user-controlled
+      input. These SPL (Standard PHP Library) classes provide object-oriented
+      file operations and may be overlooked in security audits that focus on
+      traditional PHP file functions. SplFileObject in particular provides
+      read/write capabilities, making it equivalent to fopen() in terms of
+      risk but often not covered by static analysis tools.
+    language: php
+    category: path_traversal
+    severity: High
+    confidence: 0.87
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - spl-file-object
+      - spl-file-info
+      - directory-iterator
+      - php
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+SplFileObject\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "SplFileObject with superglobal parameter"
+      - type: regex
+        pattern: 'new\s+SplFileObject\s*\(\s*(?:\$file_?path|\$file_?name|\$user_?path|\$input_?path|\$doc_?path|\$target)\s*[,\)]'
+        description: "SplFileObject with common user-controlled variable names"
+      - type: regex
+        pattern: 'new\s+SplFileObject\s*\(\s*(?:\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)\s*\[|"[^"]*\$_(?:GET|POST|REQUEST))'
+        description: "SplFileObject with concatenation or interpolation of superglobal"
+      - type: regex
+        pattern: 'new\s+SplFileInfo\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\[\s*[''"][^''"]*[''"]\s*\]'
+        description: "SplFileInfo with superglobal parameter"
+      - type: regex
+        pattern: 'new\s+(?:DirectoryIterator|RecursiveDirectoryIterator|FilesystemIterator)\s*\(\s*\$_(?:GET|POST|REQUEST)\s*\['
+        description: "Directory iterator with superglobal parameter"
+      - type: regex
+        pattern: 'new\s+(?:DirectoryIterator|RecursiveDirectoryIterator|FilesystemIterator)\s*\(\s*(?:\$dir_?path|\$user_?dir|\$browse_?path|\$folder_?path)\b'
+        description: "Directory iterator with common user-controlled directory variables"
+      - type: regex
+        pattern: 'new\s+SplFileObject\s*\(\s*(?:\$request->(?:get|input|query)\s*\(\s*[''"][^''"]*[''"]\s*\))'
+        description: "SplFileObject with Laravel/framework request input"
+      - type: regex
+        pattern: 'new\s+(?:DirectoryIterator|RecursiveDirectoryIterator)\s*\(\s*(?:\$\w+\s*\.\s*\$_(?:GET|POST|REQUEST)|"[^"]*\$_(?:GET|POST|REQUEST))'
+        description: "Directory iterator with concatenation of superglobal"
+    anti_patterns:
+      - 'realpath\s*\(\s*[^)]+\)\s*[\s\S]{0,50}strpos\s*\(\s*\$\w+\s*,\s*\$(?:base|allowed|root)'
+      - 'if\s*\(\s*strpos\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)\s*!==\s*false'
+      - 'basename\s*\(\s*\$_(?:GET|POST|REQUEST)'
+      - 'in_array\s*\(\s*\$\w+\s*,\s*\$(?:allowed|whitelist|valid)'
+      - 'if\s*\(\s*!\s*str_starts_with\s*\(\s*realpath'
+      - 'sanitize_(?:path|filename)\s*\('
+      - 'new\s+SplFileObject\s*\(\s*[''"][^''"]*[''"]\s*[,\)]'
+      - 'new\s+(?:DirectoryIterator|RecursiveDirectoryIterator)\s*\(\s*[''"][^''"]*[''"]\s*\)'
+      - 'ctype_alnum\s*\('
+      - 'preg_match\s*\(\s*[''"]\/\^\[a-zA-Z0-9'
+      - 'filter_var\s*\([^)]*FILTER_SANITIZE'
+      - 'open_basedir'
+      - 'str_starts_with\s*\(\s*\$\w+\s*,\s*\$(?:base|allowed|root)'
+      - 'pathinfo\s*\([^)]+,\s*PATHINFO_BASENAME'
+      - 'if\s*\(\s*str_contains\s*\(\s*\$\w+\s*,\s*[''"]\.\.[''"]\s*\)'
+    bypass_variants:
+      - description: "URL-encoded traversal in path parameter"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double URL encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection"
+        pattern: '(?:%00|\\x00|\\0)'
+      - description: "PHP stream wrapper in path"
+        pattern: '(?:php:\/\/filter\/|data:\/\/|expect:\/\/)'
+      - description: "Backslash on Windows"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "URL-encoded traversal sequences"
+      - "Double encoding"
+      - "Null byte injection"
+      - "PHP stream wrappers"
+      - "Backslash on Windows PHP"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "$_GET['file'] -> new SplFileObject() -> fgets()"
+      - "$_GET['dir'] -> new DirectoryIterator() -> foreach loop"
+      - "$_POST['path'] -> new SplFileInfo() -> getPathname()"
+      - "$_REQUEST['folder'] -> new RecursiveDirectoryIterator() -> iteration"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SPL file classes bypass traditional function-based security checks while providing full file access"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET['file']"
+        sink: "new SplFileObject()"
+        through: "direct superglobal or variable assignment"
+      - source: "$_GET['dir']"
+        sink: "new DirectoryIterator()"
+        through: "direct superglobal or concatenation"
+      - source: "$_REQUEST['path']"
+        sink: "new SplFileInfo()"
+        through: "variable assignment"
+    impact: |
+      SplFileObject provides full file read/write capabilities equivalent to
+      fopen()/fread()/fwrite(). An attacker can read sensitive files, write
+      arbitrary content, and create new files. DirectoryIterator and
+      RecursiveDirectoryIterator enable complete filesystem enumeration,
+      revealing file names, sizes, permissions, and directory structure.
+      This information is critical for planning targeted file read/write
+      attacks. SPL file classes are often overlooked by WAFs and static
+      analysis tools, making them attractive for attackers bypassing file
+      function monitoring.
+    remediation: |
+      1. Validate paths before creating SPL objects:
+
+         $baseDir = realpath('/var/www/uploads');
+         $requestedPath = realpath($baseDir . '/' . $_GET['file']);
+         if ($requestedPath === false || strpos($requestedPath, $baseDir . DIRECTORY_SEPARATOR) !== 0) {
+             http_response_code(403);
+             die('Access denied');
+         }
+         $file = new SplFileObject($requestedPath);
+
+      2. Use basename() for filename-only access:
+
+         $safeName = basename($_GET['file']);
+         $file = new SplFileObject($uploadsDir . '/' . $safeName);
+
+      3. Restrict directory iteration to predefined directories.
+      4. Configure open_basedir to limit filesystem scope.
+      5. Use allowlists for accessible files and directories.
+    references:
+      - "https://www.php.net/manual/en/class.splfileobject.php"
+      - "https://www.php.net/manual/en/class.directoryiterator.php"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '<\?php'
+        - 'function\s+\w+\s*\('
+        - 'class\s+\w+'
+        - 'use\s+SplFile(?:Object|Info)'
+      taint_source_indicators:
+        - '\$_GET\s*\['
+        - '\$_POST\s*\['
+        - '\$_REQUEST\s*\['
+        - '\$request->(?:get|input|query)\s*\('
+      taint_sink_indicators:
+        - 'new\s+SplFileObject\s*\('
+        - 'new\s+SplFileInfo\s*\('
+        - 'new\s+DirectoryIterator\s*\('
+        - 'new\s+RecursiveDirectoryIterator\s*\('
+        - 'new\s+FilesystemIterator\s*\('
+      sanitization_patterns:
+        - 'realpath\s*\([^)]+\)[\s\S]{0,100}strpos'
+        - 'basename\s*\('
+        - 'in_array\s*\(\s*\$\w+\s*,\s*\$allowed'
+        - 'str_starts_with\s*\('
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP file browser uses new DirectoryIterator($baseDir . '/' .
+        $_GET['dir']) to list files. The attacker sends GET /browse.php?dir=../../etc.
+        The DirectoryIterator resolves to /etc and iterates over all entries,
+        returning filenames like passwd, shadow, hosts, and ssh/. The attacker
+        then uses a file read endpoint with SplFileObject to read individual
+        files: GET /read.php?file=../../etc/passwd.
+      example_payload: "../../etc"
+      attacker_objective: "Enumerate server filesystem and read arbitrary files through SPL file classes"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PHP-001"
+        - "PT-PHP-004"
+        - "PT-PHP-005"
+        - "PT-JS-006"

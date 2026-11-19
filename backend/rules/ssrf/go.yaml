@@ -1,0 +1,618 @@
+# ============================================================================
+# Server-Side Request Forgery Detection Rules - Go
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: SSRF (CWE-918)
+# Language: Go (net/http, Gin, Echo, Chi)
+# ============================================================================
+
+rules:
+
+  - rule_id: "SSRF-GO-001"
+    title: "SSRF via http.Get/Post with User-Controlled URL"
+    description: >
+      Detects SSRF where user-controlled URLs are passed directly to
+      http.Get, http.Post, or http.Head, enabling access to internal
+      services and cloud metadata endpoints.
+    language: go
+    category: ssrf
+    severity: High
+    confidence: 0.91
+    cwe: "CWE-918"
+    owasp: "A10:2021-Server-Side-Request-Forgery"
+    tags: [ssrf, url-injection, internal-access, go, net-http]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: 'http\.(?:Get|Post|Head|PostForm)\s*\(\s*(?:r\.|c\.|ctx\.|param|input|url|target|endpoint)\b'
+        description: "http.Get/Post with user-controlled URL variable"
+      - pattern: 'http\.(?:Get|Post|Head)\s*\(\s*(?:r\.FormValue|r\.URL\.Query|c\.Query|c\.Param|ctx\.QueryParam)\s*\('
+        description: "HTTP function with request parameter as URL"
+      - pattern: 'http\.(?:Get|Post|Head)\s*\(\s*fmt\.Sprintf\s*\(\s*"https?://[^"]*%s'
+        description: "HTTP function with Sprintf-constructed URL"
+    anti_patterns:
+      - "url.Parse("
+      - "ALLOWED_HOSTS"
+      - "isPrivateIP"
+      - "validateURL"
+      - "net.ParseIP"
+      - "allowlist"
+    bypass_variants:
+      - description: "DNS rebinding"
+        pattern: 'net\.LookupHost'
+      - description: "Decimal IP encoding"
+        pattern: '2130706433|0x7f000001'
+    evasion_indicators: ["DNS rebinding", "Decimal/hex IP encoding", "URL parser differentials"]
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: '2130706433'
+      - type: "octal_ip"
+        pattern: '0177\.0\.0\.1'
+    multi_function_chain_patterns:
+      - "r.FormValue('url') -> http.Get(url)"
+      - "c.Query('target') -> http.Post(target, ...)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Access internal services and cloud metadata"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.FormValue(), c.Query(), mux.Vars()"
+        sink: "http.Get(), http.Post()"
+        through: "Direct URL from user input"
+    impact: |
+      SSRF enables access to internal services (databases, admin panels),
+      cloud metadata (169.254.169.254), port scanning, and credential theft.
+    remediation: |
+      Validate URLs against an allowlist. Block private IP ranges:
+        u, _ := url.Parse(input)
+        ip := net.ParseIP(u.Hostname())
+        if ip != nil && (ip.IsPrivate() || ip.IsLoopback()) {
+            return errors.New("internal IP blocked")
+        }
+    references:
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['import "net/http"', 'http.Get(', 'http.Post(']
+      taint_source_indicators: ['r.FormValue(', 'c.Query(', 'c.Param(', 'r.URL.Query()']
+      taint_sink_indicators: ['http.Get(', 'http.Post(', 'http.Head(']
+      sanitization_patterns: ['url.Parse(', 'net.ParseIP(', 'IsPrivate()', 'allowlist']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - url_validation)"
+      exploitability_score: 8.5
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        Proxy endpoint: http.Get(r.FormValue("url")).
+        Attacker sends url=http://169.254.169.254/latest/meta-data/ to access AWS metadata.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Steal cloud IAM credentials via SSRF"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "simple"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["SSRF-GO-002", "SSRF-GO-005"]
+
+  - rule_id: "SSRF-GO-002"
+    title: "SSRF via http.Client.Do with User-Controlled Request"
+    description: >
+      Detects SSRF through http.Client.Do() or http.Client.Get() where the
+      request URL is constructed from user input, potentially with custom
+      HTTP clients that follow redirects.
+    language: go
+    category: ssrf
+    severity: High
+    confidence: 0.89
+    cwe: "CWE-918"
+    owasp: "A10:2021-Server-Side-Request-Forgery"
+    tags: [ssrf, http-client, redirect-following, go]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: '(?:client|httpClient)\s*\.\s*(?:Do|Get|Post|Head)\s*\([^)]*(?:url|target|endpoint|param|input|user)\b'
+        description: "http.Client method with user-controlled URL"
+      - pattern: 'http\.NewRequest\s*\(\s*[^,]+,\s*(?:url|target|param|input|user)\b'
+        description: "http.NewRequest with user-controlled URL"
+      - pattern: 'http\.NewRequestWithContext\s*\([^,]*,\s*[^,]+,\s*(?:url|target|param|input)\b'
+        description: "NewRequestWithContext with user-controlled URL"
+      - pattern: '(?:req|request)\s*,\s*(?:err|_)\s*:?=\s*http\.NewRequest\s*\([^)]*(?:r\.FormValue|c\.Query|c\.Param|ctx\.QueryParam)\s*\('
+        description: "NewRequest from framework request parameter"
+    anti_patterns:
+      - "url.Parse("
+      - "CheckRedirect"
+      - "isPrivateIP"
+      - "validateURL"
+      - "ALLOWED_HOSTS"
+    bypass_variants:
+      - description: "Redirect to internal URL"
+        pattern: 'CheckRedirect.*nil'
+      - description: "DNS rebinding via short TTL"
+        pattern: 'LookupHost'
+    evasion_indicators: ["Follow redirects to internal IPs", "DNS rebinding", "URL shortener abuse"]
+    encoding_variants:
+      - type: "redirect_chain"
+        pattern: '302.*Location.*127\.0\.0\.1'
+    multi_function_chain_patterns:
+      - "c.Query('url') -> http.NewRequest('GET', url, nil) -> client.Do(req)"
+      - "r.FormValue('endpoint') -> client.Get(endpoint)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Access internal services via redirect following"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "c.Query(), r.FormValue()"
+        sink: "client.Do(), client.Get()"
+        through: "User-controlled URL in HTTP request"
+    impact: |
+      SSRF via http.Client can follow redirects to internal services,
+      access cloud metadata, and exfiltrate data through the server.
+    remediation: |
+      Implement custom CheckRedirect to block internal redirects:
+        client := &http.Client{
+            CheckRedirect: func(req *http.Request, via []*http.Request) error {
+                if isInternalURL(req.URL) { return errors.New("blocked") }
+                return nil
+            },
+        }
+      Validate all URLs before and after redirect resolution.
+    references:
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://pkg.go.dev/net/http#Client"
+    context_awareness:
+      surrounding_context_patterns: ['http.Client{', 'client.Do(', 'http.NewRequest(']
+      taint_source_indicators: ['r.FormValue(', 'c.Query(', 'c.Param(']
+      taint_sink_indicators: ['client.Do(', 'client.Get(', 'client.Post(']
+      sanitization_patterns: ['CheckRedirect', 'url.Parse(', 'IsPrivate()', 'validateURL']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * redirect_risk"
+      exploitability_score: 8.0
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        URL preview feature uses client.Get(userURL). Attacker provides URL
+        that 302-redirects to http://127.0.0.1:8080/admin to access internal admin panel.
+      example_payload: "https://attacker.com/redirect-to-internal"
+      attacker_objective: "Access internal admin panel via redirect-based SSRF"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["SSRF-GO-001", "SSRF-GO-003"]
+
+  - rule_id: "SSRF-GO-003"
+    title: "SSRF via Reverse Proxy Configuration"
+    description: >
+      Detects SSRF through misconfigured reverse proxies (httputil.ReverseProxy)
+      where the target URL is derived from user input, allowing proxy to
+      internal services.
+    language: go
+    category: ssrf
+    severity: High
+    confidence: 0.86
+    cwe: "CWE-918"
+    owasp: "A10:2021-Server-Side-Request-Forgery"
+    tags: [ssrf, reverse-proxy, httputil, go]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: 'httputil\.NewSingleHostReverseProxy\s*\(\s*(?:url|target|backend|upstream)\b'
+        description: "ReverseProxy with variable target"
+      - pattern: 'ReverseProxy\s*\{[^}]*Director:\s*func\s*\([^)]*\)\s*\{[^}]*(?:r\.|c\.|param|input|user)'
+        description: "ReverseProxy Director with user-controlled routing"
+      - pattern: '\.URL\s*=\s*(?:url|target|param|input|user)\.(?:Parse|Host|Path)'
+        description: "Request URL rewritten from user input"
+      - pattern: 'httputil\.NewSingleHostReverseProxy\s*\(\s*(?:r\.FormValue|c\.Query|c\.Param)\s*\('
+        description: "ReverseProxy directly from request parameter"
+    anti_patterns:
+      - "allowedBackends["
+      - "validTargets["
+      - "isAllowedHost"
+      - "url.Parse.*switch"
+    bypass_variants:
+      - description: "Host header injection in proxy"
+        pattern: 'Host\s*=\s*(?:r\.|param|input)'
+    evasion_indicators: ["User-controlled proxy target", "Host header manipulation"]
+    encoding_variants:
+      - type: "url_path"
+        pattern: '/@target/'
+    multi_function_chain_patterns:
+      - "r.FormValue('backend') -> url.Parse(backend) -> NewSingleHostReverseProxy(target)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Full proxy to any internal service"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.FormValue(), r.URL.Path"
+        sink: "httputil.NewSingleHostReverseProxy()"
+        through: "User-controlled target URL"
+    impact: |
+      Misconfigured reverse proxy enables full SSRF with HTTP request
+      forwarding capabilities, accessing any internal service on any port.
+    remediation: |
+      Use a strict allowlist for proxy backends:
+        allowed := map[string]*url.URL{
+            "api": mustParse("http://internal-api:8080"),
+            "auth": mustParse("http://internal-auth:9090"),
+        }
+        target, ok := allowed[r.URL.Query().Get("service")]
+        if !ok { http.Error(w, "forbidden", 403); return }
+        httputil.NewSingleHostReverseProxy(target).ServeHTTP(w, r)
+    references:
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://pkg.go.dev/net/http/httputil#ReverseProxy"
+    context_awareness:
+      surrounding_context_patterns: ['import "net/http/httputil"', 'ReverseProxy', 'NewSingleHostReverseProxy']
+      taint_source_indicators: ['r.FormValue(', 'r.URL.Path', 'c.Param(']
+      taint_sink_indicators: ['NewSingleHostReverseProxy(', 'Director func', '.ServeHTTP(']
+      sanitization_patterns: ['allowedBackends[', 'validTargets[', 'isAllowedHost']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * proxy_exposure"
+      exploitability_score: 8.0
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        API gateway proxies requests based on path parameter:
+        NewSingleHostReverseProxy(url.Parse("http://" + r.URL.Query().Get("service"))).
+        Attacker sends service=127.0.0.1:6379 to access internal Redis.
+      example_payload: "127.0.0.1:6379"
+      attacker_objective: "Access internal Redis/database via proxy SSRF"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["SSRF-GO-001", "SSRF-GO-002"]
+
+  - rule_id: "SSRF-GO-004"
+    title: "SSRF via Webhook URL Processing"
+    description: >
+      Detects SSRF through webhook functionality where user-provided
+      callback URLs are fetched by the server without validation,
+      enabling access to internal services.
+    language: go
+    category: ssrf
+    severity: High
+    confidence: 0.87
+    cwe: "CWE-918"
+    owasp: "A10:2021-Server-Side-Request-Forgery"
+    tags: [ssrf, webhook, callback, go]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: '(?:webhook|callback|notify|hook)(?:URL|Url|_url)\s*(?::=|=)\s*(?:r\.|c\.|request\.|body\.|payload\.)'
+        description: "Webhook URL from user input"
+      - pattern: 'http\.(?:Get|Post)\s*\(\s*(?:webhook|callback|notify|hook)(?:URL|Url|_url)\b'
+        description: "HTTP request to webhook URL variable"
+      - pattern: '(?:client|httpClient)\s*\.\s*(?:Do|Post)\s*\([^)]*(?:webhook|callback|notify|hook)'
+        description: "Client request to webhook/callback"
+      - pattern: 'json\.(?:Unmarshal|NewDecoder)[^;]*(?:webhook|callback|url)[^;]*http\.(?:Get|Post|NewRequest)'
+        description: "URL from JSON body used in HTTP request"
+    anti_patterns:
+      - "ALLOWED_WEBHOOK_HOSTS"
+      - "isPrivateIP"
+      - "validateWebhookURL"
+      - "url.Parse.*switch"
+      - "allowlist"
+    bypass_variants:
+      - description: "Webhook to internal service"
+        pattern: 'webhook.*127\.0\.0\.1'
+      - description: "DNS rebinding on webhook"
+        pattern: 'webhook.*LookupHost'
+    evasion_indicators: ["Webhook to internal IP", "DNS rebinding", "URL shortener"]
+    encoding_variants:
+      - type: "json_field"
+        pattern: '"webhook_url".*"http'
+    multi_function_chain_patterns:
+      - "json.Decode(r.Body, &config) -> http.Post(config.WebhookURL, ...)"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "SSRF via webhook callback to internal services"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "JSON body webhook_url field"
+        sink: "http.Post(), client.Do()"
+        through: "User-specified callback URL"
+    impact: |
+      Webhook SSRF allows attackers to use the server as a proxy to
+      internal services, exfiltrate data via callback responses, and
+      scan internal networks.
+    remediation: |
+      Validate webhook URLs against an allowlist of domains:
+        u, _ := url.Parse(webhookURL)
+        if !isAllowedHost(u.Hostname()) { return errors.New("blocked") }
+        ip := net.ParseIP(u.Hostname())
+        if ip != nil && (ip.IsPrivate() || ip.IsLoopback()) {
+            return errors.New("internal IP blocked")
+        }
+    references:
+      - "https://cwe.mitre.org/data/definitions/918.html"
+    context_awareness:
+      surrounding_context_patterns: ['webhook', 'callback', 'http.Post(', 'notification']
+      taint_source_indicators: ['json.Unmarshal', 'json.NewDecoder', 'r.Body']
+      taint_sink_indicators: ['http.Post(', 'http.Get(', 'client.Do(']
+      sanitization_patterns: ['ALLOWED_WEBHOOK_HOSTS', 'isPrivateIP', 'validateWebhookURL']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * webhook_exposure"
+      exploitability_score: 7.5
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        User configures webhook for notifications: POST /api/webhooks {url: "..."}.
+        Attacker sets url to http://169.254.169.254/latest/meta-data/ to
+        receive cloud credentials via webhook response.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Steal cloud credentials via webhook SSRF"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["SSRF-GO-001", "SSRF-GO-005"]
+
+  - rule_id: "SSRF-GO-005"
+    title: "SSRF via Cloud Metadata Access"
+    description: >
+      Detects patterns where user-controlled URLs could target cloud
+      metadata endpoints (AWS, GCP, Azure) through SSRF, enabling
+      credential theft and infrastructure compromise.
+    language: go
+    category: ssrf
+    severity: Critical
+    confidence: 0.92
+    cwe: "CWE-918"
+    owasp: "A10:2021-Server-Side-Request-Forgery"
+    tags: [ssrf, cloud-metadata, aws, gcp, azure, iam, go]
+    detection_layer: 2
+    attack_surface_type: "cloud"
+    patterns:
+      - pattern: 'http\.(?:Get|NewRequest)\s*\([^)]*169\.254\.169\.254'
+        description: "Direct request to AWS/GCP metadata IP"
+      - pattern: 'http\.(?:Get|NewRequest)\s*\([^)]*metadata\.google\.internal'
+        description: "Direct request to GCP metadata hostname"
+      - pattern: 'http\.(?:Get|NewRequest)\s*\([^)]*169\.254\.170\.2'
+        description: "Request to AWS ECS metadata"
+      - pattern: '(?:url|target|endpoint)\b[^;]*(?:169\.254\.169\.254|metadata\.google\.internal|169\.254\.170\.2)'
+        description: "Metadata endpoint in URL variable"
+      - pattern: 'http\.(?:Get|Post)\s*\(\s*(?:r\.|c\.|param|input|url)\b(?:(?!IsPrivate|isPrivateIP|validateURL).)*$'
+        description: "HTTP request with user URL and no IP validation"
+    anti_patterns:
+      - "IsPrivate()"
+      - "IsLoopback()"
+      - "IsLinkLocalUnicast"
+      - "blockedIPs"
+      - "IMDSv2"
+      - "X-aws-ec2-metadata-token"
+    bypass_variants:
+      - description: "Decimal IP encoding for 169.254.169.254"
+        pattern: '2852039166'
+      - description: "IPv6 metadata access"
+        pattern: 'fd00::169\.254\.169\.254'
+    evasion_indicators: ["Decimal IP for metadata", "DNS rebinding to metadata", "IPv6 metadata"]
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: '2852039166'
+      - type: "hex_ip"
+        pattern: '0xa9fea9fe'
+    multi_function_chain_patterns:
+      - "user URL -> http.Get() -> reads IAM credentials from 169.254.169.254"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cloud IAM credential theft enabling full infrastructure access"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "User-controlled URL"
+        sink: "http.Get() to metadata endpoint"
+        through: "Missing IP range validation"
+    impact: |
+      Cloud metadata SSRF enables theft of IAM credentials (AWS roles,
+      GCP service accounts, Azure managed identities), providing full
+      access to cloud infrastructure, S3 buckets, databases, and more.
+    remediation: |
+      Block link-local and metadata IP ranges:
+        func isMetadataIP(host string) bool {
+            ips, _ := net.LookupIP(host)
+            for _, ip := range ips {
+                if ip.IsLinkLocalUnicast() || ip.IsLoopback() || ip.IsPrivate() {
+                    return true
+                }
+            }
+            return false
+        }
+      Enable IMDSv2 on AWS instances. Use metadata firewall rules.
+    references:
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+    context_awareness:
+      surrounding_context_patterns: ['http.Get(', 'http.NewRequest(', '169.254.169.254']
+      taint_source_indicators: ['r.FormValue(', 'c.Query(', 'r.URL.Query()']
+      taint_sink_indicators: ['http.Get(', 'client.Do(']
+      sanitization_patterns: ['IsPrivate()', 'IsLinkLocalUnicast()', 'IMDSv2']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * cloud_exposure"
+      exploitability_score: 9.0
+      base_risk: "Critical"
+    exploit_scenario:
+      attack_example: |
+        URL fetcher endpoint: resp, _ := http.Get(r.FormValue("url")).
+        Attacker sends url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+        to steal AWS IAM role credentials and access S3, RDS, etc.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/ec2-role"
+      attacker_objective: "Steal cloud IAM credentials for full infrastructure access"
+    confidence_factors:
+      pattern_strength: "critical"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "critical"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "simple"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["SSRF-GO-001", "SSRF-GO-002"]
+
+  - rule_id: "SSRF-GO-006"
+    title: "SSRF via File Protocol and Custom Schemes"
+    description: >
+      Detects SSRF through file://, gopher://, and other non-HTTP protocol
+      schemes in user-controlled URLs, enabling local file reading and
+      interaction with internal services via protocol smuggling.
+    language: go
+    category: ssrf
+    severity: High
+    confidence: 0.85
+    cwe: "CWE-918"
+    owasp: "A10:2021-Server-Side-Request-Forgery"
+    tags: [ssrf, file-protocol, gopher, protocol-smuggling, go]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: 'http\.(?:Get|NewRequest)\s*\(\s*[^)]*(?:r\.|c\.|param|input|user|url)\b(?:(?!schemes|HTTPS_ONLY|validScheme).)*$'
+        description: "HTTP request with user URL without scheme validation"
+      - pattern: 'os\.Open\s*\(\s*(?:r\.|c\.|param|input|url|path)\b'
+        description: "os.Open with user-controlled path (file:// equivalent)"
+      - pattern: '(?:ioutil|os)\.ReadFile\s*\(\s*(?:r\.|c\.|param|input|url|path)\b'
+        description: "ReadFile with user-controlled path"
+      - pattern: 'url\.Parse\s*\(\s*(?:r\.|c\.|param|input|user)\b[^)]*\)(?:(?!Scheme.*https?).)*$'
+        description: "URL parsed from user input without scheme check"
+    anti_patterns:
+      - 'Scheme == "https"'
+      - 'Scheme == "http"'
+      - "HTTPS_ONLY"
+      - "validScheme"
+      - "allowedSchemes"
+    bypass_variants:
+      - description: "Gopher protocol for Redis commands"
+        pattern: 'gopher://.*:6379'
+      - description: "File protocol for local file reading"
+        pattern: 'file:///etc/passwd'
+    evasion_indicators: ["file:// protocol", "gopher:// protocol smuggling", "dict:// protocol"]
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'file%3a%2f%2f'
+    multi_function_chain_patterns:
+      - "r.FormValue('url') -> url.Parse(url) -> no scheme check -> http.Get(url)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Local file reading and protocol smuggling"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.FormValue(), c.Query()"
+        sink: "http.Get(), os.Open()"
+        through: "User-controlled URL without scheme validation"
+    impact: |
+      Non-HTTP protocol SSRF enables local file reading (file://),
+      interaction with Redis/Memcached via gopher://, and SMTP relay
+      via gopher:// protocol smuggling.
+    remediation: |
+      Restrict URL schemes to HTTPS only:
+        u, err := url.Parse(input)
+        if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+            return errors.New("invalid URL scheme")
+        }
+      Block all non-HTTP schemes at the application level.
+    references:
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://blog.assetnote.io/2021/01/13/blind-ssrf-chains/"
+    context_awareness:
+      surrounding_context_patterns: ['url.Parse(', 'http.Get(', 'os.Open(']
+      taint_source_indicators: ['r.FormValue(', 'c.Query(', 'r.URL.Query()']
+      taint_sink_indicators: ['http.Get(', 'os.Open(', 'os.ReadFile(']
+      sanitization_patterns: ['Scheme == "https"', 'allowedSchemes', 'HTTPS_ONLY']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * protocol_exposure"
+      exploitability_score: 7.5
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        Image fetcher accepts URLs without scheme validation.
+        Attacker sends url=file:///etc/passwd to read local files, or
+        url=gopher://127.0.0.1:6379/_CONFIG%20SET%20dir%20/tmp to interact with Redis.
+      example_payload: "gopher://127.0.0.1:6379/_SET%20pwned%20true"
+      attacker_objective: "Read local files or execute commands on internal services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["SSRF-GO-001", "SSRF-GO-004"]

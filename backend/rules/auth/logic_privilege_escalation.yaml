@@ -1,0 +1,548 @@
+# ============================================================================
+# Header-Based Privilege Escalation Detection Rules — Python
+# Ruleset Version: 1.0.0
+# Last Updated: 2026-03-04
+# Category: Authentication / Authorization (CWE-290, CWE-807, CWE-284)
+# Language: Python (Flask, Django, FastAPI, WSGI)
+#
+# Maturity Levels Covered:
+#   L1 — Basic pattern detection (direct header trust)
+#   L2 — Context-aware detection (header → privilege flag → authz branch)
+#   L3 — Cross-function correlation (header flag + admin data endpoint)
+#   L5 — Production hardened (anti-patterns, bypass variants)
+#
+# Threat Model:
+#   HTTP headers are fully client-controlled. Any authorization decision
+#   derived from a raw HTTP header is forgeable via curl, Burp Suite, or
+#   browser DevTools. Attackers add X-Is-Admin: true to escalate.
+# ============================================================================
+
+rules:
+
+  # ==========================================================================
+  # LOGIC-PRIV-001: Direct HTTP Header Privilege Trust
+  # Maturity: L1 — Basic pattern detection
+  # ==========================================================================
+  - rule_id: LOGIC-PRIV-001
+    title: "Direct HTTP Header Privilege Trust — Forgeable Authorization Source"
+    description: >
+      Detects code that reads privilege-related HTTP headers (X-Is-Admin,
+      X-Role, X-Permissions, X-Auth-Level, etc.) using request.headers.get(),
+      request.headers[], request.META.get(), or WSGI environ. HTTP headers
+      are fully client-controlled and trivially forgeable. Any value read from
+      a privilege-named header MUST be treated as untrusted user input.
+    language: python
+    category: auth
+    severity: Critical
+    confidence: 0.90
+    cwe: "CWE-290"
+    owasp: "A01:2021 — Broken Access Control"
+    tags:
+      - header-trust
+      - privilege-escalation
+      - forgeable-auth
+      - access-control
+      - flask
+      - django
+    detection_layer: 1
+    vulnerability_family: header_privilege_escalation
+    attack_surface_type: "api"
+
+    patterns:
+      # Flask / Werkzeug: request.headers.get("X-Is-Admin", ...)
+      - pattern: "request\\.headers\\.get\\s*\\(\\s*['\"]x[_\\-]?(?:is[_\\-]?admin|role|admin|permissions?|user[_\\-]?role|auth[_\\-]?level|privilege|access[_\\-]?level|is[_\\-]?staff|is[_\\-]?superuser)['\"]"
+        description: "Flask request.headers.get() reading privilege-related header"
+
+      # Flask / Werkzeug: request.headers["X-Is-Admin"]
+      - pattern: "request\\.headers\\s*\\[\\s*['\"]x[_\\-]?(?:is[_\\-]?admin|role|admin|permissions?|user[_\\-]?role|auth[_\\-]?level|privilege|access[_\\-]?level|is[_\\-]?staff|is[_\\-]?superuser)['\"]"
+        description: "Flask request.headers[] bracket access to privilege header"
+
+      # Django: request.META.get("HTTP_X_IS_ADMIN") or request.META["HTTP_X_ROLE"]
+      - pattern: "request\\.META(?:\\.get\\s*\\(\\s*['\"]|\\[\\s*['\"])HTTP_X_(?:IS_ADMIN|ROLE|ADMIN|PERMISSIONS?|USER_ROLE|AUTH_LEVEL|PRIVILEGE|ACCESS_LEVEL|IS_STAFF|IS_SUPERUSER)"
+        description: "Django request.META reading X-header for privilege determination"
+
+      # WSGI environ direct access
+      - pattern: "environ(?:\\.get\\s*\\(\\s*['\"]|\\[\\s*['\"])HTTP_X_(?:IS_ADMIN|ROLE|ADMIN|PERMISSIONS?|USER_ROLE|AUTH_LEVEL|PRIVILEGE)"
+        description: "WSGI environ direct access to privilege header"
+
+    anti_patterns:
+      # File-level suppressions: if ANY of these appear in the file,
+      # the rule is skipped entirely. These indicate the file uses
+      # proper authentication infrastructure, making header trust unlikely.
+      - "jwt.decode"
+      - "verify_jwt_token"
+      - "decode_access_token"
+      - "verify_token_signature"
+      - "hmac.compare_digest"
+      - "@token_auth.login_required"
+
+    bypass_variants:
+      - variant: "Case variation: X-IS-ADMIN vs x-is-admin"
+        description: "Werkzeug normalizes header names, but regex is case-insensitive"
+      - variant: "Alternate header names: X-User-Type, X-Account-Level"
+        description: "Custom header names not in our pattern list — extend as discovered"
+      - variant: "Double-hop trust: reverse proxy sets X-Role from upstream"
+        description: "Proxy-injected headers trusted without origin validation"
+      - variant: "request.environ instead of request.headers"
+        description: "WSGI-level access bypasses Flask header API"
+
+    context_awareness:
+      surrounding_context_patterns:
+        - "from flask import request"
+        - "from django.http import HttpRequest"
+        - "from starlette.requests import Request"
+        - "@app.before_request"
+        - "@app.route"
+        - "def before_request"
+      taint_source_indicators:
+        - "request.headers"
+        - "request.META"
+        - "environ"
+      taint_sink_indicators:
+        - "g.is_admin"
+        - "g.role"
+        - "session['role']"
+        - "current_user.role"
+      sanitization_patterns:
+        - "jwt.decode"
+        - "verify_jwt"
+        - "decode_token"
+        - "hmac.compare_digest"
+        - "verify_signature"
+
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Client-controlled HTTP header directly determines privilege level"
+
+    multi_function_chain_patterns:
+      - "request.headers.get('X-Is-Admin') -> g.is_admin = value -> if g.is_admin: admin_action()"
+      - "request.headers.get('X-Role') -> role variable -> role-based conditional -> data exposure"
+      - "request.META['HTTP_X_IS_ADMIN'] -> request.user.is_admin -> admin panel access"
+
+    probable_taint_paths:
+      - source: "HTTP_header_X-Is-Admin"
+        sink: "privilege_flag_assignment"
+        through: "request.headers.get() return value"
+      - source: "HTTP_header_X-Role"
+        sink: "authorization_conditional"
+        through: "role variable from header value"
+      - source: "HTTP_header_X-Permissions"
+        sink: "permission_check"
+        through: "header-derived permission string"
+
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+
+    severity_scoring:
+      severity_weight: 12
+      exploitability_score: "High"
+
+    impact: >
+      Complete privilege escalation. Any unauthenticated attacker can add a
+      forged header (e.g., X-Is-Admin: true) via curl, Burp Suite, or browser
+      DevTools to bypass all authorization checks. This grants full admin
+      access to multi-tenant data, user management, audit logs, and
+      potentially destructive operations like bulk deletion or export.
+
+    remediation: >
+      Never derive authorization from HTTP headers. Use server-side sessions,
+      JWT tokens with cryptographic signature verification, or database-backed
+      role lookups. Example fix:
+
+      # WRONG: g.is_admin = request.headers.get('X-Is-Admin') == 'true'
+      # RIGHT: g.is_admin = current_user.has_role('admin')  # DB-backed
+
+      If reverse-proxy headers are required (e.g., X-Forwarded-For), validate
+      them against a trusted proxy allowlist and never use them for privilege
+      determination.
+
+    cross_rule_intelligence:
+      requires_ai_validation: false
+      related_rules:
+        - "LOGIC-PRIV-002"
+        - "LOGIC-PRIV-003"
+        - "LOGIC-PRIV-004"
+
+
+  # ==========================================================================
+  # LOGIC-PRIV-002: Privilege Flag Assignment from HTTP Header
+  # Maturity: L2 — Context-aware (assignment pattern)
+  # ==========================================================================
+  - rule_id: LOGIC-PRIV-002
+    title: "Privilege Flag Assignment from HTTP Header — Forgeable Escalation"
+    description: >
+      Detects assignment of an HTTP header value to a privilege-related
+      variable or attribute (g.is_admin, is_superuser, user_role, etc.).
+      This pattern is more dangerous than mere header reading because it
+      establishes a trusted privilege flag from an untrusted source.
+    language: python
+    category: auth
+    severity: Critical
+    confidence: 0.92
+    cwe: "CWE-807"
+    owasp: "A01:2021 — Broken Access Control"
+    tags:
+      - header-trust
+      - privilege-assignment
+      - forgeable-auth
+      - taint-flow
+    detection_layer: 1
+    vulnerability_family: header_privilege_escalation
+    attack_surface_type: "api"
+
+    patterns:
+      # g.is_admin = request.headers.get(...)
+      - pattern: "g\\.(?:is[_\\-]?admin|role|is[_\\-]?staff|is[_\\-]?superuser|permissions?)\\s*=\\s*request\\.headers"
+        description: "Flask g object privilege attribute assigned from request headers"
+
+      # is_admin = request.headers.get(...)
+      - pattern: "(?:is[_\\-]?admin|is[_\\-]?superuser|is[_\\-]?staff|user[_\\-]?role|access[_\\-]?level|permission[_\\-]?level|has[_\\-]?privilege)\\s*=\\s*request\\.headers"
+        description: "Local privilege variable assigned from request headers"
+
+      # user.role = request.headers.get(...)
+      - pattern: "(?:user|current_user|g|request)\\.[_a-z]*(?:role|admin|privilege|permission|staff|superuser)[_a-z]*\\s*=\\s*request\\.(?:headers|META)"
+        description: "Object attribute privilege field set from request headers/META"
+
+      # Django META assignment to privilege flag
+      - pattern: "(?:is[_\\-]?admin|is[_\\-]?superuser|user[_\\-]?role|has[_\\-]?privilege)\\s*=\\s*request\\.META\\.(?:get\\s*\\(|\\[)"
+        description: "Django META value assigned to privilege variable"
+
+    anti_patterns:
+      - "jwt.decode"
+      - "verify_jwt_token"
+      - "decode_access_token"
+      - "token_required"
+      - "login_required"
+
+    bypass_variants:
+      - variant: "Indirect assignment via intermediate variable"
+        description: "header_val = request.headers.get('X-Role'); g.role = header_val"
+      - variant: "Ternary assignment: g.is_admin = True if request.headers.get('X-Admin') else False"
+        description: "Conditional expression still derives from forgeable header"
+      - variant: "setattr(g, 'is_admin', request.headers.get(...))"
+        description: "Dynamic attribute setting obscures the assignment"
+
+    context_awareness:
+      surrounding_context_patterns:
+        - "from flask import g"
+        - "from flask import request"
+        - "@app.before_request"
+        - "def before_request"
+      taint_source_indicators:
+        - "request.headers.get"
+        - "request.META.get"
+        - "request.headers["
+      taint_sink_indicators:
+        - "g.is_admin"
+        - "g.role"
+        - "is_admin ="
+        - "user_role ="
+      sanitization_patterns:
+        - "jwt.decode"
+        - "verify_token"
+        - "check_password"
+        - "db.session.query(User)"
+
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Direct privilege flag taint from client-controlled header"
+
+    multi_function_chain_patterns:
+      - "request.headers.get('X-Is-Admin') -> g.is_admin = True -> @app.route('/admin/') -> admin_action()"
+      - "request.META['HTTP_X_ROLE'] -> user.role = 'admin' -> has_permission('delete_users') -> True"
+
+    probable_taint_paths:
+      - source: "HTTP_header_value"
+        sink: "g.is_admin_assignment"
+        through: "request.headers.get() → assignment operator"
+      - source: "HTTP_header_value"
+        sink: "user_role_attribute"
+        through: "request.META → attribute setter"
+
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+
+    severity_scoring:
+      severity_weight: 13
+      exploitability_score: "High"
+
+    impact: >
+      Establishes a server-side privilege flag from a forgeable source. All
+      downstream authorization decisions that check this flag are compromised.
+      Attacker sends X-Is-Admin: true header and gains full admin access to
+      the application, including tenant management, user deletion, billing
+      modification, and audit log access.
+
+    remediation: >
+      Replace header-derived privilege assignments with database-backed lookups:
+
+      # WRONG:
+      g.is_admin = request.headers.get('X-Is-Admin') == 'true'
+
+      # RIGHT:
+      user = User.query.get(session['user_id'])
+      g.is_admin = user.has_role('admin')
+
+      Or use JWT claims with signature verification:
+      claims = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+      g.is_admin = claims.get('role') == 'admin'
+
+    cross_rule_intelligence:
+      requires_ai_validation: false
+      related_rules:
+        - "LOGIC-PRIV-001"
+        - "LOGIC-PRIV-003"
+        - "LOGIC-PRIV-004"
+        - "LOGIC-MT-001"
+
+
+  # ==========================================================================
+  # LOGIC-PRIV-003: Authorization Conditional Using Header-Derived Value
+  # Maturity: L2 — Contextual detection (detection_layer: 2)
+  # ==========================================================================
+  - rule_id: LOGIC-PRIV-003
+    title: "Authorization Conditional Using Forgeable Header-Derived Value"
+    description: >
+      Detects authorization branches (if/else) that gate sensitive operations
+      on privilege flags known to be derived from HTTP headers. This is a
+      Layer 2 contextual rule — the conditional itself is only dangerous when
+      corroborated by LOGIC-PRIV-001 or LOGIC-PRIV-002 firing in the same
+      file (proving the flag originates from a forgeable header).
+    language: python
+    category: auth
+    severity: High
+    confidence: 0.55
+    cwe: "CWE-284"
+    owasp: "A01:2021 — Broken Access Control"
+    tags:
+      - authorization-branch
+      - privilege-check
+      - contextual-detection
+      - header-derived
+    detection_layer: 2
+    vulnerability_family: header_privilege_escalation
+    attack_surface_type: "api"
+
+    patterns:
+      # if g.is_admin: ... / if not g.is_admin: ...
+      - pattern: "if\\s+(?:not\\s+)?g\\.(?:is[_\\-]?admin|role|is[_\\-]?staff|is[_\\-]?superuser)\\s*(?::|==|!=|\\bin\\b)"
+        description: "Authorization branch on g.is_admin / g.role attribute"
+
+      # if is_admin: ... (local variable form)
+      - pattern: "if\\s+(?:not\\s+)?(?:is[_\\-]?admin|is[_\\-]?superuser|is[_\\-]?staff)\\s*:"
+        description: "Authorization branch on local is_admin variable"
+
+      # if request.headers.get('X-Is-Admin') == 'true':
+      - pattern: "if\\s+.*request\\.headers\\.(?:get\\s*\\(|\\[).*(?:==|!=|in\\b)"
+        description: "Inline header check in authorization conditional"
+
+      # if user_role in ['admin', ...]:
+      - pattern: "if\\s+(?:user[_\\-]?role|access[_\\-]?level|permission[_\\-]?level)\\s+(?:==|!=|in\\s+\\[)"
+        description: "Authorization branch on role/level variable"
+
+    anti_patterns:
+      - "jwt.decode"
+      - "verify_jwt_token"
+      - "decode_access_token"
+      - "@roles_required"
+      - "@role_required"
+      - "flask_login"
+      - "flask_principal"
+
+    bypass_variants:
+      - variant: "Nested conditional: if user and user.is_admin"
+        description: "Combined None-check and privilege check"
+      - variant: "Dictionary-based dispatch on role value"
+        description: "actions.get(role, default_handler)() — no explicit if/else"
+      - variant: "Decorator-based check obscures the conditional"
+        description: "@admin_required wrapping but using forgeable source internally"
+
+    context_awareness:
+      surrounding_context_patterns:
+        - "g.is_admin ="
+        - "request.headers.get"
+        - "@app.route"
+        - "def before_request"
+      sanitization_patterns:
+        - "current_user.has_role"
+        - "check_permission"
+        - "verify_role"
+        - "db.session.query"
+
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: true
+      escalation_vector: "Authorization branch gates sensitive operation on forgeable flag"
+
+    probable_taint_paths:
+      - source: "header_derived_privilege_flag"
+        sink: "authorization_conditional_branch"
+        through: "g.is_admin or local is_admin variable"
+
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+    impact: >
+      Authorization bypass. If the conditional guards admin-only operations
+      (user deletion, data export, configuration changes), an attacker who
+      forges the source header gains unrestricted access. Impact depends on
+      the operations gated by the conditional.
+
+    remediation: >
+      Replace header-derived privilege checks with verified sources:
+
+      # WRONG:
+      if g.is_admin:  # where g.is_admin was set from X-Is-Admin header
+          delete_all_users()
+
+      # RIGHT:
+      if current_user.has_role('admin'):  # DB-backed role check
+          delete_all_users()
+
+    cross_rule_intelligence:
+      requires_ai_validation: false
+      related_rules:
+        - "LOGIC-PRIV-001"
+        - "LOGIC-PRIV-002"
+        - "LOGIC-PRIV-004"
+
+
+  # ==========================================================================
+  # LOGIC-PRIV-004: Admin Endpoint with Header-Based Access Control
+  # Maturity: L3 — Cross-function correlation / Chain rule
+  # ==========================================================================
+  - rule_id: LOGIC-PRIV-004
+    title: "Admin Endpoint Protected Only by Header-Derived Authorization"
+    description: >
+      Detects admin or privileged endpoints (routes containing /admin/,
+      /manage/, /internal/, /audit/) that rely on header-based authorization
+      checks. This is a chain rule (Layer 2) — it gains maximum severity when
+      corroborated by LOGIC-PRIV-001 or LOGIC-PRIV-002 in the same file,
+      proving the admin endpoint's access control is entirely forgeable.
+    language: python
+    category: auth
+    severity: Critical
+    confidence: 0.70
+    cwe: "CWE-284"
+    owasp: "A01:2021 — Broken Access Control"
+    tags:
+      - admin-endpoint
+      - header-trust
+      - privilege-chain
+      - cross-function
+      - exploit-chain
+    detection_layer: 2
+    vulnerability_family: header_privilege_escalation
+    attack_surface_type: "api"
+
+    patterns:
+      # @app.route('/admin/...')  or @app.get('/admin/...')
+      - pattern: "@(?:app|blueprint|bp|router)\\.(?:route|get|post|put|delete|patch)\\s*\\(\\s*['\"]\\s*/(?:admin|manage|internal|audit|superadmin|staff)/"
+        description: "Route decorator exposing admin/management endpoint"
+
+      # @app.route('/api/admin/...')
+      - pattern: "@(?:app|blueprint|bp|router)\\.(?:route|get|post|put|delete|patch)\\s*\\(\\s*['\"]\\s*/api/(?:admin|manage|internal|audit)/"
+        description: "API route decorator for admin endpoint"
+
+      # Admin blueprint registration: Blueprint('admin', ...)
+      - pattern: "Blueprint\\s*\\(\\s*['\"](?:admin|manage|internal|staff|audit)['\"]"
+        description: "Flask Blueprint for admin module"
+
+    anti_patterns:
+      - "jwt.decode"
+      - "verify_jwt_token"
+      - "@login_required"
+      - "@admin_required"
+      - "@requires_admin"
+      - "@roles_accepted"
+      - "flask_security"
+      - "flask_login"
+
+    bypass_variants:
+      - variant: "URL prefix registered via Blueprint url_prefix='/admin'"
+        description: "Admin access via Blueprint prefix rather than per-route decorator"
+      - variant: "Middleware-based admin check that itself reads headers"
+        description: "Admin middleware that trusts X-Is-Admin header"
+      - variant: "Path-based admin detection: if '/admin' in request.path"
+        description: "Dynamic path check rather than decorator"
+
+    context_awareness:
+      surrounding_context_patterns:
+        - "request.headers.get"
+        - "g.is_admin"
+        - "is_admin"
+        - "from flask import"
+      sanitization_patterns:
+        - "@login_required"
+        - "@admin_required"
+        - "current_user.is_admin"
+        - "check_admin_role"
+        - "jwt.decode"
+
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: true
+      escalation_vector: "Admin endpoint entirely gated by forgeable HTTP header"
+
+    multi_function_chain_patterns:
+      - "request.headers.get('X-Is-Admin') -> g.is_admin -> @app.route('/admin/users') -> User.query.all()"
+      - "request.headers.get('X-Role') -> role check -> @app.route('/admin/export') -> export_all_data()"
+      - "request.META['HTTP_X_IS_ADMIN'] -> admin_check -> /admin/delete_user -> User.delete()"
+
+    probable_taint_paths:
+      - source: "HTTP_header_X-Is-Admin"
+        sink: "admin_route_handler_execution"
+        through: "before_request hook → g.is_admin flag → route handler"
+      - source: "HTTP_header_X-Role"
+        sink: "admin_data_exposure"
+        through: "role variable → admin conditional → query.all()"
+
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+
+    severity_scoring:
+      severity_weight: 14
+      exploitability_score: "High"
+
+    impact: >
+      Full administrative access via trivially forgeable HTTP header. Attacker
+      gains access to admin panels, user management, tenant administration,
+      billing configuration, audit logs, and bulk data export. In a
+      multi-tenant SaaS context, this enables cross-tenant data access,
+      mass data exfiltration, and service disruption.
+
+    remediation: >
+      Protect admin endpoints with cryptographically verified authentication:
+
+      @app.route('/admin/users')
+      @login_required
+      @admin_required  # Decorator checks DB-backed role
+      def admin_list_users():
+          ...
+
+      Never use header-derived flags as the sole access control for admin
+      endpoints. Implement defense-in-depth: authentication + authorization +
+      audit logging for all admin operations.
+
+    cross_rule_intelligence:
+      requires_ai_validation: false
+      related_rules:
+        - "LOGIC-PRIV-001"
+        - "LOGIC-PRIV-002"
+        - "LOGIC-PRIV-003"
+        - "LOGIC-MT-007"
+        - "LOGIC-IDOR-001"

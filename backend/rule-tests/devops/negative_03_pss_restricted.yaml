@@ -1,0 +1,102 @@
+# ==============================================================================
+# Test:     negative_03_pss_restricted
+# Expected: Must NOT trigger any DevOps security rules
+# Category: DevOps
+# Language: YAML (Kubernetes)
+# ==============================================================================
+# Description: Kubernetes Deployment with Pod Security Standards (PSS)
+# restricted profile enforced via namespace labels and fully compliant pod
+# spec. The restricted profile is the most restrictive built-in policy.
+# ==============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-workloads
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-web-app
+  namespace: secure-workloads
+  labels:
+    app: secure-web-app
+    team: platform
+    environment: production
+    compliance: pss-restricted
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: secure-web-app
+  template:
+    metadata:
+      labels:
+        app: secure-web-app
+        version: "1.5.0"
+    spec:
+      serviceAccountName: secure-web-sa
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: registry.internal.io/web/app:1.5.0@sha256:fedcba0987654321
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/app
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 50Mi
+        - name: cache
+          emptyDir:
+            sizeLimit: 200Mi

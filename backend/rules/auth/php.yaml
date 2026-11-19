@@ -1,0 +1,1260 @@
+rules:
+- rule_id: AUTH-PHP-001
+  title: Hardcoded Passwords in PHP Source
+  description: 'Detects hardcoded passwords, API keys, and credentials in PHP source code including database connection strings,
+    configuration constants, and inline authentication values in PHP applications.
+
+    '
+  language: php
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - hardcoded-credentials
+  - passwords
+  - api-keys
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: \$(?:password|passwd|pwd)\s*=\s*['"][^'"]{4,}['"]
+    description: Hardcoded password variable
+  - pattern: define\s*\(\s*['"](?:DB_PASSWORD|API_KEY|SECRET_KEY)['"]\s*,\s*['"][^'"]{4,}['"]
+    description: Hardcoded credential constant
+  - pattern: '''password''\s*=>\s*[''"][^''"]{4,}[''"]'
+    description: Password in array configuration
+  - pattern: \$(?:api_key|apiKey|secret)\s*=\s*['"][^'"]{8,}['"]
+    description: Hardcoded API key or secret
+  anti_patterns:
+  - pattern: getenv\(|\$_ENV\[|env\(
+    description: Environment variable usage
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: \$_POST\[|\$_GET\[|\$_REQUEST\[
+    description: User input (not hardcoded)
+  - pattern: 'config\(|Config::'
+    description: Configuration file reference
+  - pattern: \bplaceholder\b|\bexample\b|\bchangeme\b|\bxxxxx\b
+    description: Placeholder values
+  - pattern: \bmock\b|\bfake\b|\bfixture\b
+    description: Mock or fixture context
+  bypass_variants:
+  - variant: Password in .env file committed to repository
+    description: Externalized but committed credential
+  - variant: Credential in wp-config.php or config.php
+    description: Configuration file with hardcoded value
+  evasion_indicators:
+  - Credential in define() constant
+  - Password in database config array
+  - Base64-encoded credential string
+  encoding_variants:
+  - Variable assignment
+  - Constant definition
+  - Array configuration
+  multi_function_chain_patterns:
+  - $password = 'secret' -> PDO connection -> database access
+  - define('API_KEY', 'hardcoded') -> curl_setopt -> API call
+  privilege_context_flags:
+  - Database credentials
+  - API authentication
+  - Service account credentials
+  business_logic_indicator:
+  - Database configuration
+  - API client setup
+  probable_taint_paths:
+  - source: Hardcoded string literal
+    sink: Authentication mechanism or database connection
+    through: Direct credential usage
+  impact: 'Hardcoded credentials in PHP files are directly readable from source code. PHP files may be exposed through misconfigured
+    web servers, source code leaks, or backup files (.php.bak).
+
+    '
+  remediation: 'Use environment variables with getenv() or PHP dotenv. In Laravel, use env() helper. Never commit .env files
+    to version control. Use a secrets manager for production credentials.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - <?php
+    - namespace
+    - class
+    - PDO
+    taint_source_indicators:
+    - String literal
+    - Constant value
+    taint_sink_indicators:
+    - PDO::__construct
+    - mysqli_connect
+    - curl_setopt
+    sanitization_patterns:
+    - getenv()
+    - env()
+    - $_ENV
+    - config()
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: database password
+      modifier: '+0.5'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker finds PHP source through misconfigured server or backup file. 2. Reads define(''DB_PASSWORD'',
+    ''production_secret_123'') in config.php. 3. Connects directly to production database. 4. Extracts all user data and sensitive
+    records.
+
+    '
+  confidence_factors:
+    increases:
+    - Password in define() constant
+    - Credential in DB config array
+    decreases:
+    - Test or fixture context
+    - env() helper used
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-003
+    - AUTH-PHP-007
+    dependency_chain: Hardcoded credentials provide direct system access
+    combined_risk_increase: Critical when combined with SQL injection
+- rule_id: AUTH-PHP-002
+  title: MD5/SHA1 for Password Hashing in PHP
+  description: 'Detects use of MD5 or SHA1 for password hashing in PHP applications. These algorithms are cryptographically
+    broken for password storage and allow rapid brute-force attacks.
+
+    '
+  language: php
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-916
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - md5
+  - sha1
+  - password-hashing
+  - weak-crypto
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: md5\(\s*\$(?:password|passwd|pwd|pass)
+    description: MD5 used for password hashing
+  - pattern: sha1\(\s*\$(?:password|passwd|pwd|pass)
+    description: SHA1 used for password hashing
+  - pattern: hash\(\s*['"](?:md5|sha1)['"]\s*,\s*\$(?:password|passwd|pwd)
+    description: hash() with MD5/SHA1 for password
+  - pattern: md5\(.*\$_POST\[\s*['"]password['"]\s*\]
+    description: MD5 on POST password input
+  anti_patterns:
+  - pattern: password_hash\(
+    description: PHP password_hash function
+  - pattern: password_verify\(
+    description: PHP password_verify function
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: bcrypt|argon2|PASSWORD_BCRYPT|PASSWORD_ARGON2
+    description: Strong password hashing
+  - pattern: md5\(.*file|md5_file
+    description: File checksum (not password)
+  - pattern: \bchecksum\b|\bintegrity\b|\bhash.*file\b
+    description: File integrity check
+  bypass_variants:
+  - variant: MD5 with salt (still weak for passwords)
+    description: Salted MD5 providing minimal protection
+  - variant: Double MD5 or SHA1 (security through obscurity)
+    description: Multiple rounds of weak hash
+  evasion_indicators:
+  - MD5 for password storage
+  - SHA1 for password verification
+  - Custom hash wrapper using weak algorithm
+  encoding_variants:
+  - Direct md5() call
+  - hash('md5', ...) call
+  - sha1() call
+  multi_function_chain_patterns:
+  - md5($_POST['password']) -> database comparison -> auth bypass
+  - sha1($password . $salt) -> weak hash stored -> brute-force
+  privilege_context_flags:
+  - Password hashing
+  - User authentication
+  business_logic_indicator:
+  - User registration
+  - Login handler
+  probable_taint_paths:
+  - source: User password
+    sink: Database password column
+    through: MD5/SHA1 hashing
+  impact: 'MD5 and SHA1 are computationally fast, allowing billions of attempts per second on modern GPUs. Rainbow tables
+    exist for common passwords. After database breach, most passwords can be cracked in minutes.
+
+    '
+  remediation: 'Use password_hash() with PASSWORD_BCRYPT or PASSWORD_ARGON2ID. Use password_verify() for comparison. These
+    functions handle salting and use appropriate cost factors automatically.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/916.html
+  - https://www.php.net/manual/en/function.password-hash.php
+  - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - function login
+    - function register
+    - function authenticate
+    taint_source_indicators:
+    - $_POST['password']
+    - $password
+    - User input
+    taint_sink_indicators:
+    - Database INSERT
+    - Database SELECT for comparison
+    sanitization_patterns:
+    - password_hash()
+    - PASSWORD_BCRYPT
+    - PASSWORD_ARGON2ID
+  severity_scoring:
+    base_score: 8.5
+    exploitability: high
+    impact_score: 8.0
+    adjustments:
+    - condition: md5 on user password
+      modifier: '+1.0'
+    - condition: file checksum context
+      modifier: '-5.0'
+  exploit_scenario: '1. PHP app uses md5($password) to store password hashes. 2. Database breach exposes MD5 hashes. 3. Attacker
+    uses rainbow tables or hashcat with GPU. 4. Most passwords cracked within minutes.
+
+    '
+  confidence_factors:
+    increases:
+    - md5() on password variable
+    - SHA1 on POST password
+    decreases:
+    - File checksum context
+    - password_hash() also present
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-001
+    - AUTH-PHP-003
+    dependency_chain: Weak hashing with database exposure enables mass credential cracking
+    combined_risk_increase: Critical when database is breached
+- rule_id: AUTH-PHP-003
+  title: SQL Injection in Login Query
+  description: 'Detects SQL injection vulnerabilities in PHP authentication queries where user-supplied credentials are concatenated
+    directly into SQL strings without parameterization or escaping.
+
+    '
+  language: php
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-89
+  owasp: A03:2021 - Injection
+  tags:
+  - sql-injection
+  - authentication-bypass
+  - login
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: SELECT.*FROM.*(?:users|accounts|members).*WHERE.*\$_(?:POST|GET|REQUEST)\[
+    description: User input in login SQL query
+  - pattern: '"SELECT.*password.*WHERE.*username.*=.*''\s*\.\s*\$'
+    description: Concatenated credential in query
+  - pattern: query\(.*"SELECT.*FROM.*user.*WHERE.*\$(?:username|user|login)
+    description: User variable in SQL query string
+  - pattern: mysql_query\(.*\$_(?:POST|GET).*(?:user|pass|login)
+    description: mysql_query with user input
+  anti_patterns:
+  - pattern: prepare\(|bindParam\(|bindValue\(
+    description: Prepared statements
+  - pattern: \?|:\w+
+    description: Parameter placeholders
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: mysqli_real_escape_string|addslashes
+    description: Input escaping (still risky but mitigating)
+  - pattern: PDO::prepare|\$stmt
+    description: PDO prepared statement
+  - pattern: Eloquent|queryBuilder|DB::table
+    description: ORM/query builder
+  bypass_variants:
+  - variant: Prepared statement with partial concatenation
+    description: Mixing parameterized and concatenated values
+  - variant: Numeric input not parameterized (type juggling)
+    description: Numeric field injection
+  evasion_indicators:
+  - Direct string concatenation in login query
+  - mysql_query with user input
+  - User input in WHERE clause
+  encoding_variants:
+  - String concatenation with dot operator
+  - Variable interpolation in double-quoted string
+  multi_function_chain_patterns:
+  - $_POST['username'] -> SQL concat -> login bypass with ' OR 1=1 --
+  - User input -> query() -> authentication decision -> unauthorized access
+  privilege_context_flags:
+  - Authentication query
+  - Login verification
+  business_logic_indicator:
+  - Login function
+  - Authentication handler
+  probable_taint_paths:
+  - source: $_POST['username'] or $_POST['password']
+    sink: SQL query execution
+    through: String concatenation without parameterization
+  impact: 'SQL injection in login queries allows complete authentication bypass. Attacker uses '' OR 1=1 -- to log in as any
+    user without knowing the password. Can also extract database contents.
+
+    '
+  remediation: 'Use PDO prepared statements with parameterized queries. Never concatenate user input into SQL strings. In
+    Laravel, use Eloquent ORM or query builder with parameter binding.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - function login
+    - function authenticate
+    - session_start()
+    taint_source_indicators:
+    - $_POST
+    - $_GET
+    - $_REQUEST
+    taint_sink_indicators:
+    - mysql_query
+    - mysqli_query
+    - PDO::query
+    sanitization_patterns:
+    - prepare()
+    - bindParam()
+    - real_escape_string
+  severity_scoring:
+    base_score: 10.0
+    exploitability: high
+    impact_score: 9.5
+    adjustments:
+    - condition: direct POST input in login query
+      modifier: '+0.0'
+    - condition: input escaping present
+      modifier: '-2.0'
+  exploit_scenario: '1. Login form sends username and password via POST. 2. PHP code: $query = "SELECT * FROM users WHERE
+    username=''$username'' AND password=''$password''". 3. Attacker enters: username = admin'' -- , password = anything. 4.
+    Query becomes: SELECT * FROM users WHERE username=''admin'' --'' AND password=''anything''. 5. Logs in as admin without
+    password.
+
+    '
+  confidence_factors:
+    increases:
+    - $_POST in SQL string
+    - mysql_query with user input
+    decreases:
+    - Prepared statements present
+    - ORM usage
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-001
+    - AUTH-PHP-002
+    dependency_chain: SQL injection in login bypasses all authentication
+    combined_risk_increase: Maximum severity standalone
+- rule_id: AUTH-PHP-004
+  title: Session Fixation in PHP
+  description: 'Detects PHP applications vulnerable to session fixation attacks where the session ID is not regenerated after
+    authentication, allowing attackers to fix a known session ID and hijack authenticated sessions.
+
+    '
+  language: php
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-384
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session-fixation
+  - session-management
+  - php
+  detection_layer: 2
+  attack_surface_type: authentication
+  patterns:
+  - pattern: \$_SESSION\[\s*['"](?:user|logged_in|authenticated|auth)['"]\s*\]\s*=(?!.*session_regenerate_id)
+    description: Session auth set without regeneration
+  - pattern: session_start\(\).*\$_SESSION\[.*(?:login|auth|user).*\]\s*=(?!.*session_regenerate_id)
+    description: Login sets session without regeneration
+  - pattern: session_id\(\s*\$_(?:GET|POST|REQUEST|COOKIE)\[
+    description: Session ID from user input
+  - pattern: \$_SESSION\[.*\]\s*=.*true.*(?:login|auth)(?!.*session_regenerate_id)
+    description: Auth flag set without session regeneration
+  anti_patterns:
+  - pattern: session_regenerate_id\(\s*true\s*\)
+    description: Session regeneration with old session deletion
+  - pattern: session_regenerate_id\(
+    description: Session regeneration
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: Session::regenerate|Session::flush
+    description: Framework session regeneration
+  - pattern: Auth::login.*regenerate
+    description: Login with regeneration
+  - pattern: session\.use_strict_mode\s*=\s*1
+    description: Strict session mode
+  bypass_variants:
+  - variant: session_regenerate_id() without true parameter (old session persists)
+    description: Regeneration without old session deletion
+  - variant: Session regeneration in wrong code path
+    description: Regeneration not on every login path
+  evasion_indicators:
+  - Auth session set without regeneration
+  - Session ID accepted from user input
+  encoding_variants:
+  - Native PHP session handling
+  - Framework session wrapper
+  multi_function_chain_patterns:
+  - session_start() -> auth check -> $_SESSION['loggedin'] = true -> no regenerate
+  - session_id($_GET['sid']) -> login -> session fixation
+  privilege_context_flags:
+  - Authentication session
+  - Login handling
+  business_logic_indicator:
+  - Login handler
+  - Authentication function
+  probable_taint_paths:
+  - source: Pre-authentication session ID
+    sink: Authenticated session
+    through: Missing session_regenerate_id()
+  impact: 'Session fixation allows attackers to set a known session ID before authentication. After the victim logs in, the
+    attacker uses the pre-set session ID to access the authenticated session.
+
+    '
+  remediation: 'Always call session_regenerate_id(true) immediately after successful authentication. Use session.use_strict_mode=1
+    in php.ini. In Laravel, use Session::regenerate(). Never accept session IDs from URL parameters.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/384.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://www.php.net/manual/en/function.session-regenerate-id.php
+  context_awareness:
+    surrounding_context_patterns:
+    - session_start()
+    - $_SESSION
+    - function login
+    taint_source_indicators:
+    - Pre-auth session cookie
+    - $_GET['sid']
+    taint_sink_indicators:
+    - $_SESSION['loggedin']
+    - $_SESSION['user']
+    sanitization_patterns:
+    - session_regenerate_id(true)
+    - Session::regenerate()
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: session_id from user input
+      modifier: '+1.5'
+    - condition: framework session management
+      modifier: '-2.0'
+  exploit_scenario: '1. Attacker creates session and obtains PHPSESSID=abc123. 2. Sends link to victim: https://target.com/login?PHPSESSID=abc123.
+    3. Victim logs in; session ID remains abc123. 4. Attacker uses PHPSESSID=abc123 to access victim''s session.
+
+    '
+  confidence_factors:
+    increases:
+    - Auth session set without regenerate
+    - session_id from $_GET
+    decreases:
+    - session_regenerate_id present
+    - Framework session management
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-005
+    - AUTH-PHP-010
+    dependency_chain: Session fixation allows session hijacking without credentials
+    combined_risk_increase: High when combined with insecure session config
+- rule_id: AUTH-PHP-005
+  title: Missing CSRF Token Verification in PHP
+  description: 'Detects PHP forms and state-changing endpoints that lack CSRF token generation and verification, allowing
+    cross-site request forgery attacks on authenticated operations.
+
+    '
+  language: php
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-352
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - csrf
+  - cross-site-request-forgery
+  - token
+  - php
+  detection_layer: 2
+  attack_surface_type: authentication
+  patterns:
+  - pattern: if\s*\(\$_SERVER\[\s*['"]REQUEST_METHOD['"]\s*\]\s*===?\s*['"]POST['"]\)(?!.*csrf|token|nonce)
+    description: POST handler without CSRF check
+  - pattern: <form.*method\s*=\s*['"]post['"].*>(?!.*csrf|token|nonce)
+    description: Form without CSRF token field
+  - pattern: \$_POST\[.*\].*(?:update|delete|insert|modify|transfer)(?!.*csrf|token|verify)
+    description: State-changing POST without CSRF verification
+  - pattern: if\s*\(isset\(\$_POST\[.*\]\)\).*(?:UPDATE|DELETE|INSERT)
+    description: POST data directly used in state-changing SQL
+  anti_patterns:
+  - pattern: csrf_token|csrfToken|_token|csrf-token
+    description: CSRF token present
+  - pattern: wp_nonce|check_admin_referer|wp_verify_nonce
+    description: WordPress nonce verification
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: '@csrf|csrf_field'
+    description: Laravel CSRF blade directive
+  - pattern: VerifyCsrfToken|CsrfTokenMiddleware
+    description: CSRF middleware
+  - pattern: X-CSRF-TOKEN|X-XSRF-TOKEN
+    description: CSRF header token
+  bypass_variants:
+  - variant: CSRF token generated but never verified on server
+    description: Token present but not validated
+  - variant: CSRF check only on some POST handlers
+    description: Inconsistent CSRF protection
+  evasion_indicators:
+  - POST handler without CSRF verification
+  - Form without hidden CSRF field
+  encoding_variants:
+  - Native PHP POST handling
+  - WordPress admin handlers
+  multi_function_chain_patterns:
+  - POST without CSRF -> state change -> unauthorized modification
+  - Form without token -> auto-submit from attacker page -> data modification
+  privilege_context_flags:
+  - State-changing operations
+  - Administrative actions
+  business_logic_indicator:
+  - Form handler
+  - Admin action handler
+  probable_taint_paths:
+  - source: Cross-origin form submission
+    sink: State-changing operation
+    through: Missing CSRF token verification
+  impact: 'Missing CSRF protection allows attackers to forge requests that perform actions on behalf of authenticated users,
+    including data modification, account changes, and financial transactions.
+
+    '
+  remediation: 'Generate a unique CSRF token per session and include it in all forms as a hidden field. Verify the token on
+    every state-changing request. In Laravel, use @csrf directive. In WordPress, use wp_nonce_field().
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/352.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - $_POST
+    - $_SERVER['REQUEST_METHOD']
+    - <form
+    taint_source_indicators:
+    - Cross-origin request
+    - Auto-submitted form
+    taint_sink_indicators:
+    - Database modification
+    - Account update
+    - File operation
+    sanitization_patterns:
+    - csrf_token
+    - wp_verify_nonce
+    - '@csrf'
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: financial or admin action without CSRF
+      modifier: '+1.5'
+    - condition: read-only endpoint
+      modifier: '-4.0'
+  exploit_scenario: '1. PHP admin panel handles POST /admin/delete_user without CSRF token. 2. Attacker creates page with
+    auto-submitting form targeting /admin/delete_user. 3. Admin visits attacker''s page. 4. Form submits; user deleted without
+    admin''s knowledge.
+
+    '
+  confidence_factors:
+    increases:
+    - POST handler without any token check
+    - Admin action without CSRF
+    decreases:
+    - CSRF token in scope
+    - Framework CSRF middleware
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-004
+    - AUTH-PHP-010
+    dependency_chain: Missing CSRF enables cross-site attacks on authenticated actions
+    combined_risk_increase: High when combined with session weaknesses
+- rule_id: AUTH-PHP-006
+  title: Insecure Remember-Me Token in PHP
+  description: 'Detects insecure remember-me token implementations in PHP that use predictable values, store plaintext credentials,
+    or lack proper token rotation and expiration mechanisms.
+
+    '
+  language: php
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-640
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - remember-me
+  - persistent-login
+  - token
+  - cookie
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: setcookie\(.*['"]remember['"].*\$(?:user_id|username|user)
+    description: Remember-me cookie with user identifier
+  - pattern: setcookie\(.*['"]remember['"].*md5\(
+    description: Remember-me with MD5 token
+  - pattern: \$_COOKIE\[.*remember.*\].*(?:SELECT|query)
+    description: Remember-me cookie directly used in DB query
+  - pattern: setcookie\(.*(?:password|passwd|pwd).*\$
+    description: Password stored in cookie
+  anti_patterns:
+  - pattern: random_bytes|openssl_random_pseudo_bytes
+    description: Cryptographically secure random token
+  - pattern: hash_equals
+    description: Constant-time comparison
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: token_expir|expiration|expires_at
+    description: Token expiration handling
+  - pattern: bin2hex\(random_bytes
+    description: Secure token generation
+  - pattern: remember_token.*hash
+    description: Hashed remember token
+  bypass_variants:
+  - variant: Token based on user_id and timestamp (predictable)
+    description: Predictable token generation
+  - variant: Remember-me token never expires or rotates
+    description: Permanent token without rotation
+  evasion_indicators:
+  - User ID in remember-me cookie
+  - MD5-based remember token
+  - Password stored in cookie
+  encoding_variants:
+  - setcookie() direct
+  - Cookie header manipulation
+  multi_function_chain_patterns:
+  - setcookie('remember', $user_id) -> cookie read -> auto-login without password
+  - md5($username . $timestamp) -> predictable token -> session hijacking
+  privilege_context_flags:
+  - Persistent login
+  - Automatic re-authentication
+  business_logic_indicator:
+  - Login with remember-me
+  - Persistent session handler
+  probable_taint_paths:
+  - source: Predictable remember-me token
+    sink: Auto-login mechanism
+    through: Weak token generation
+  impact: 'Insecure remember-me tokens allow attackers to forge persistent login cookies. Storing passwords in cookies exposes
+    credentials. Predictable tokens enable brute-force of valid sessions.
+
+    '
+  remediation: 'Generate cryptographically random tokens with bin2hex(random_bytes(32)). Store only the token hash in the
+    database. Implement token rotation on each use. Set proper expiration and HttpOnly/Secure flags.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/640.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - setcookie
+    - function login
+    - $_COOKIE
+    taint_source_indicators:
+    - User identifier
+    - Timestamp
+    taint_sink_indicators:
+    - Cookie storage
+    - Auto-login mechanism
+    sanitization_patterns:
+    - random_bytes()
+    - hash()
+    - token rotation
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: password in cookie
+      modifier: '+2.0'
+    - condition: secure random token with hash
+      modifier: '-3.0'
+  exploit_scenario: '1. PHP app sets remember-me cookie as md5($user_id . ''secret_salt''). 2. Attacker knows user IDs are
+    sequential integers. 3. Generates remember-me tokens for target users. 4. Uses forged cookie to auto-login as any user.
+
+    '
+  confidence_factors:
+    increases:
+    - User ID in remember-me cookie
+    - Password stored in cookie
+    decreases:
+    - random_bytes used for token
+    - Token hashed before storage
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-004
+    - AUTH-PHP-010
+    dependency_chain: Insecure remember-me enables persistent unauthorized access
+    combined_risk_increase: Critical when combined with user enumeration
+- rule_id: AUTH-PHP-007
+  title: strcmp/strcasecmp Bypass for Authentication in PHP
+  description: 'Detects use of strcmp or strcasecmp for password or token comparison in PHP. These functions return 0 (equal)
+    when comparing a string to an array, enabling authentication bypass through type juggling.
+
+    '
+  language: php
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-287
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - strcmp-bypass
+  - type-juggling
+  - authentication-bypass
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: strcmp\(\s*\$(?:password|passwd|pwd|pass|token)\s*,
+    description: strcmp on password comparison
+  - pattern: strcasecmp\(\s*\$(?:password|passwd|pwd|token)\s*,
+    description: strcasecmp on credential comparison
+  - pattern: if\s*\(\s*strcmp\(.*\$_(?:POST|GET|REQUEST).*\)\s*==\s*0\s*\)
+    description: strcmp with user input checking equality
+  - pattern: strcmp\(.*,\s*\$(?:stored|expected|db).*\)\s*==\s*0
+    description: strcmp for credential verification
+  anti_patterns:
+  - pattern: password_verify\(
+    description: Proper password verification
+  - pattern: hash_equals\(
+    description: Constant-time comparison
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: ===\s*0
+    description: Strict comparison (mitigates type juggling)
+  - pattern: is_string\(.*\$_(?:POST|GET)
+    description: Type validation before comparison
+  - pattern: strcmp.*!==.*0|strcmp.*===.*0
+    description: Strict identity comparison
+  bypass_variants:
+  - variant: Password sent as array parameter (password[]=)
+    description: Array input causes strcmp to return 0
+  - variant: NULL input causing strcmp to return 0
+    description: NULL parameter bypass
+  evasion_indicators:
+  - strcmp for password verification
+  - Loose comparison (==) on strcmp result
+  encoding_variants:
+  - strcmp() direct call
+  - strcasecmp() direct call
+  multi_function_chain_patterns:
+  - $_POST['password'] as array -> strcmp returns NULL -> == 0 is true -> auth bypass
+  - strcasecmp($input, $stored) == 0 -> NULL == 0 -> true -> bypass
+  privilege_context_flags:
+  - Password verification
+  - Token validation
+  business_logic_indicator:
+  - Authentication handler
+  - Credential comparison
+  probable_taint_paths:
+  - source: $_POST['password'] as array
+    sink: strcmp comparison result
+    through: Type juggling with loose comparison
+  impact: 'strcmp returns NULL when given an array instead of string. In PHP, NULL == 0 is true with loose comparison, bypassing
+    password checks entirely. Any user can authenticate without valid credentials.
+
+    '
+  remediation: 'Use password_verify() for password comparison. Use hash_equals() for token comparison. If using strcmp, always
+    use strict comparison (===). Validate input types before comparison.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/287.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://www.php.net/manual/en/function.strcmp.php
+  context_awareness:
+    surrounding_context_patterns:
+    - function login
+    - function authenticate
+    - if (strcmp
+    taint_source_indicators:
+    - $_POST['password']
+    - $_GET['token']
+    taint_sink_indicators:
+    - strcmp comparison
+    - Authentication decision
+    sanitization_patterns:
+    - password_verify()
+    - hash_equals()
+    - === 0
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: loose comparison on strcmp result
+      modifier: '+0.5'
+    - condition: strict comparison used
+      modifier: '-5.0'
+  exploit_scenario: '1. PHP login uses: if(strcmp($_POST[''password''], $stored_hash) == 0). 2. Attacker sends POST with password[]=anything.
+    3. strcmp(array, string) returns NULL in PHP. 4. NULL == 0 evaluates to true; authentication bypassed.
+
+    '
+  confidence_factors:
+    increases:
+    - strcmp with loose == 0 comparison
+    - User input in strcmp
+    decreases:
+    - Strict === comparison
+    - Type validation present
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-008
+    - AUTH-PHP-003
+    dependency_chain: strcmp bypass enables complete authentication circumvention
+    combined_risk_increase: Maximum as it provides direct auth bypass
+- rule_id: AUTH-PHP-008
+  title: Type Juggling in Password Comparison
+  description: 'Detects PHP authentication code using loose comparison (==) for password hash verification, which is vulnerable
+    to type juggling attacks where specially crafted strings compare as equal to numeric values.
+
+    '
+  language: php
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-287
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - type-juggling
+  - loose-comparison
+  - password
+  - authentication-bypass
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: \$(?:password|passwd|pwd|hash).*==\s*\$(?:stored|expected|db|hash)
+    description: Loose comparison of password hashes
+  - pattern: md5\(.*\)\s*==\s*['"]0e\d+
+    description: MD5 magic hash comparison
+  - pattern: if\s*\(.*hash.*==.*hash.*\)
+    description: Loose hash comparison
+  - pattern: \$_(?:POST|GET)\[.*password.*\]\s*==\s*\$
+    description: Loose comparison of user password input
+  anti_patterns:
+  - pattern: password_verify\(
+    description: Proper password verification
+  - pattern: ===
+    description: Strict comparison operator
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: hash_equals\(
+    description: Constant-time comparison
+  - pattern: is_string\(|is_int\(
+    description: Type checking
+  - pattern: \(string\)\s*\$|strval\(
+    description: Type casting
+  bypass_variants:
+  - variant: 'Magic hash: md5(''240610708'') starts with 0e and equals 0 in loose comparison'
+    description: Magic hash equality bypass
+  - variant: 'Integer comparison: ''0'' == false == null in PHP'
+    description: Falsy value comparison bypass
+  evasion_indicators:
+  - Loose == on hash values
+  - MD5 hash compared with ==
+  encoding_variants:
+  - Direct == operator
+  - Ternary with loose comparison
+  multi_function_chain_patterns:
+  - md5($input) == md5($stored) -> magic hash collision -> auth bypass
+  - $_POST['pass'] == $db_hash -> type juggling -> unauthorized access
+  privilege_context_flags:
+  - Password verification
+  - Hash comparison
+  business_logic_indicator:
+  - Login function
+  - Authentication check
+  probable_taint_paths:
+  - source: User-provided password
+    sink: Loose comparison with stored hash
+    through: PHP type juggling
+  impact: 'PHP type juggling with loose comparison allows authentication bypass. MD5 hashes starting with 0e are treated as
+    zero in scientific notation. Multiple known strings produce 0e-prefixed MD5 hashes.
+
+    '
+  remediation: 'Always use password_verify() for password comparison. Use strict comparison (===) for all hash comparisons.
+    Use hash_equals() for constant-time string comparison.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/287.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://www.php.net/manual/en/language.operators.comparison.php
+  context_awareness:
+    surrounding_context_patterns:
+    - function login
+    - md5(
+    - sha1(
+    - password
+    taint_source_indicators:
+    - User password input
+    - Hash function output
+    taint_sink_indicators:
+    - Comparison operator
+    - if condition
+    sanitization_patterns:
+    - password_verify()
+    - ===
+    - hash_equals()
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: MD5 with loose comparison
+      modifier: '+1.0'
+    - condition: strict comparison used
+      modifier: '-5.0'
+  exploit_scenario: '1. PHP app: if(md5($input_password) == $stored_hash). 2. Stored hash starts with 0e (e.g., 0e462097431906509019562988).
+    3. Attacker finds password that also produces 0e-prefixed MD5 (e.g., 240610708). 4. PHP treats both as 0 (scientific notation);
+    comparison returns true.
+
+    '
+  confidence_factors:
+    increases:
+    - Loose == on hash values
+    - md5() with == comparison
+    decreases:
+    - Strict === used
+    - password_verify() present
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-007
+    - AUTH-PHP-002
+    dependency_chain: Type juggling with weak hashing enables authentication bypass
+    combined_risk_increase: Critical when combined with MD5 password hashing
+- rule_id: AUTH-PHP-009
+  title: extract() and register_globals Abuse in Authentication
+  description: 'Detects use of extract() on user input or patterns mimicking register_globals in PHP authentication code,
+    allowing attackers to overwrite authentication variables with arbitrary values.
+
+    '
+  language: php
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-621
+  owasp: A03:2021 - Injection
+  tags:
+  - extract
+  - register-globals
+  - variable-overwrite
+  - authentication-bypass
+  - php
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: extract\(\s*\$_(?:POST|GET|REQUEST|COOKIE)
+    description: extract() on user input superglobals
+  - pattern: extract\(\s*\$_SERVER\[
+    description: extract() on server variables
+  - pattern: foreach\s*\(\s*\$_(?:POST|GET|REQUEST)\s*as.*\$\$
+    description: Variable variables from user input (register_globals emulation)
+  - pattern: import_request_variables\(
+    description: Deprecated import_request_variables function
+  anti_patterns:
+  - pattern: extract\(.*EXTR_SKIP\)
+    description: extract with EXTR_SKIP (does not overwrite)
+  - pattern: extract\(.*EXTR_PREFIX
+    description: extract with prefix (safe namespace)
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: extract\(.*compact\(
+    description: extract of compact (safe pattern)
+  - pattern: filter_input|filter_var
+    description: Input filtering
+  - pattern: whitelist|allowlist|array_intersect_key
+    description: Input whitelisting
+  bypass_variants:
+  - variant: extract() after initializing auth variables
+    description: User input overwrites initialized auth variables
+  - variant: Variable variables ($$key) in foreach on $_POST
+    description: Manual register_globals emulation
+  evasion_indicators:
+  - extract() on POST/GET data
+  - Variable variables from user input
+  encoding_variants:
+  - extract() function call
+  - foreach with $$ variable variables
+  multi_function_chain_patterns:
+  - extract($_POST) -> $is_admin overwritten -> admin access granted
+  - foreach $_GET as $$key -> $authenticated = true -> auth bypass
+  privilege_context_flags:
+  - Authentication variable manipulation
+  - Authorization flag overwrite
+  business_logic_indicator:
+  - Authentication handler
+  - Request processing
+  probable_taint_paths:
+  - source: $_POST/$_GET with attacker-controlled keys
+    sink: Authentication/authorization variables
+    through: extract() variable injection
+  impact: 'extract() on user input allows attackers to overwrite any PHP variable in the current scope. Sending is_admin=1
+    or authenticated=true in POST data directly sets those variables, bypassing all authentication.
+
+    '
+  remediation: 'Never use extract() on user input. Access $_POST, $_GET directly by key. If extract is necessary, use EXTR_SKIP
+    or EXTR_PREFIX_ALL. Whitelist expected input keys.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/621.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://www.php.net/manual/en/function.extract.php
+  context_awareness:
+    surrounding_context_patterns:
+    - extract(
+    - $_POST
+    - $_GET
+    - function login
+    taint_source_indicators:
+    - $_POST
+    - $_GET
+    - $_REQUEST
+    taint_sink_indicators:
+    - $is_admin
+    - $authenticated
+    - $role
+    sanitization_patterns:
+    - EXTR_SKIP
+    - EXTR_PREFIX_ALL
+    - array_intersect_key
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: extract on $_POST in auth context
+      modifier: '+0.5'
+    - condition: EXTR_SKIP flag used
+      modifier: '-5.0'
+  exploit_scenario: '1. PHP code: extract($_POST); if($is_admin) { grant_admin(); }. 2. Attacker sends POST request with is_admin=1.
+    3. extract() creates $is_admin = "1" in current scope. 4. if($is_admin) evaluates to true; admin access granted.
+
+    '
+  confidence_factors:
+    increases:
+    - extract on $_POST/$_GET
+    - Variable variables from user input
+    decreases:
+    - EXTR_SKIP or EXTR_PREFIX used
+    - Whitelist filtering
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-003
+    - AUTH-PHP-007
+    dependency_chain: Variable injection enables direct authentication bypass
+    combined_risk_increase: Maximum as it provides arbitrary variable control
+- rule_id: AUTH-PHP-010
+  title: Insecure PHP Session Configuration
+  description: 'Detects insecure PHP session configuration settings including disabled cookie_httponly, cookie_secure, use_strict_mode,
+    and use of file-based sessions with world-readable permissions.
+
+    '
+  language: php
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-614
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session-config
+  - cookie-security
+  - php-ini
+  - session-management
+  - php
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: session\.cookie_httponly\s*=\s*(?:0|false|off)
+    description: Session cookie HttpOnly disabled
+  - pattern: session\.cookie_secure\s*=\s*(?:0|false|off)
+    description: Session cookie Secure flag disabled
+  - pattern: session\.use_strict_mode\s*=\s*(?:0|false|off)
+    description: Session strict mode disabled
+  - pattern: ini_set\(\s*['"]session\.cookie_httponly['"]\s*,\s*(?:0|false|'0')[\s)]
+    description: HttpOnly disabled via ini_set
+  anti_patterns:
+  - pattern: session\.cookie_httponly\s*=\s*(?:1|true|on)
+    description: HttpOnly enabled
+  - pattern: session\.cookie_secure\s*=\s*(?:1|true|on)
+    description: Secure flag enabled
+  - pattern: \btest\b|\bTest\b|@test
+    description: Test context
+  - pattern: session\.use_strict_mode\s*=\s*(?:1|true|on)
+    description: Strict mode enabled
+  - pattern: session\.cookie_samesite\s*=\s*(?:Strict|Lax)
+    description: SameSite set
+  - pattern: Redis|Memcached|session_set_save_handler
+    description: Custom session handler
+  bypass_variants:
+  - variant: Secure flags set in php.ini but overridden by ini_set in code
+    description: Runtime override of secure defaults
+  - variant: Session config secure but session ID in URL
+    description: session.use_only_cookies = 0
+  evasion_indicators:
+  - HttpOnly disabled on session cookie
+  - Secure flag disabled
+  - Strict mode disabled
+  encoding_variants:
+  - php.ini configuration
+  - ini_set() in PHP code
+  - .htaccess php_value directives
+  multi_function_chain_patterns:
+  - cookie_httponly=0 -> XSS -> document.cookie -> session hijacking
+  - cookie_secure=0 -> HTTP transmission -> session sniffing
+  privilege_context_flags:
+  - Session management
+  - Authentication persistence
+  business_logic_indicator:
+  - PHP session configuration
+  - Application initialization
+  probable_taint_paths:
+  - source: Session cookie
+    sink: HTTP response without secure flags
+    through: Insecure session configuration
+  impact: 'Insecure session configuration exposes session cookies to XSS theft (missing HttpOnly), network interception (missing
+    Secure), and session fixation attacks (missing strict mode).
+
+    '
+  remediation: 'Set session.cookie_httponly=1, session.cookie_secure=1, session.use_strict_mode=1, session.use_only_cookies=1,
+    and session.cookie_samesite=Strict in php.ini or via ini_set().
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/614.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://www.php.net/manual/en/session.security.ini.php
+  context_awareness:
+    surrounding_context_patterns:
+    - ini_set
+    - session.cookie
+    - php.ini
+    - session_start
+    taint_source_indicators:
+    - Session cookie
+    - PHPSESSID
+    taint_sink_indicators:
+    - HTTP response
+    - Set-Cookie header
+    sanitization_patterns:
+    - cookie_httponly=1
+    - cookie_secure=1
+    - use_strict_mode=1
+  severity_scoring:
+    base_score: 7.0
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: HttpOnly and Secure both disabled
+      modifier: '+1.5'
+    - condition: custom session handler with encryption
+      modifier: '-2.0'
+  exploit_scenario: '1. PHP app has session.cookie_httponly=0. 2. XSS vulnerability exists on the application. 3. Attacker
+    injects script: document.cookie sends to evil.com. 4. PHPSESSID stolen; attacker hijacks user session.
+
+    '
+  confidence_factors:
+    increases:
+    - HttpOnly explicitly disabled
+    - Secure flag disabled in production
+    decreases:
+    - Secure settings in php.ini
+    - Custom secure session handler
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PHP-004
+    - AUTH-PHP-005
+    dependency_chain: Insecure session config amplifies XSS and session fixation impacts
+    combined_risk_increase: High when combined with session fixation vulnerability

@@ -1,0 +1,1265 @@
+rules:
+- rule_id: AUTH-JS-001
+  title: Hardcoded JWT Secret Key
+  description: 'Detects hardcoded secret keys used to sign or verify JSON Web Tokens. Hardcoded secrets in source code can
+    be extracted by anyone with repository access, enabling token forgery, privilege escalation, and full authentication bypass
+    across all users.
+
+    '
+  language: javascript
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - jwt
+  - hardcoded-secret
+  - credential-exposure
+  - token-forgery
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: jwt\.sign\(.*,\s*['"][^'"]{4,}['"]
+    description: jwt.sign() with inline string secret
+  - pattern: jwt\.verify\(.*,\s*['"][^'"]{4,}['"]
+    description: jwt.verify() with inline string secret
+  - pattern: (?:const|let|var)\s+(?:secret|jwtSecret|JWT_SECRET)\s*=\s*['"][^'"]{6,}['"]
+    description: Variable named secret assigned a string literal
+  - pattern: jsonwebtoken.*sign\(.*['"][A-Za-z0-9+/=]{8,}['"]
+    description: jsonwebtoken sign with base64-like hardcoded secret
+  - pattern: secretOrKey\s*:\s*['"][^'"]{6,}['"]
+    description: Passport JWT strategy secretOrKey with hardcoded value
+  anti_patterns:
+  - pattern: process\.env\.
+    description: Secret read from environment variable
+  - pattern: config\.get\(
+    description: Secret fetched from config provider
+  - pattern: vault\.read\(
+    description: Secret fetched from Vault
+  - pattern: aws\.secretsmanager
+    description: Secret fetched from AWS Secrets Manager
+  - pattern: KeyVault
+    description: Secret fetched from Azure Key Vault
+  - pattern: \btest\b|\bspec\b|\bmock\b|\.test\.|__tests__
+    description: Test or mock context
+  bypass_variants:
+  - variant: Buffer.from('secret')
+    description: Secret wrapped in Buffer.from to avoid plain string detection
+  - variant: String.fromCharCode(115,101,99)
+    description: Secret constructed via character codes
+  - variant: atob('c2VjcmV0')
+    description: Base64 decoded secret at runtime
+  evasion_indicators:
+  - Dynamic string concatenation to build secret
+  - Secret split across multiple variables
+  - Secret loaded from non-standard config file bundled in repo
+  encoding_variants:
+  - base64 encoded secret string
+  - hex encoded secret string
+  - unicode escaped secret string
+  multi_function_chain_patterns:
+  - require('jsonwebtoken') -> jwt.sign(payload, HARDCODED)
+  - import jwt -> jwt.verify(token, HARDCODED)
+  privilege_context_flags:
+  - admin token generation
+  - role assignment in payload
+  - elevated privilege claims
+  business_logic_indicator:
+  - Token generation for authentication flow
+  - API gateway token validation
+  probable_taint_paths:
+  - source: hardcoded string literal
+    sink: jwt.sign() / jwt.verify() secret parameter
+    through: variable assignment
+  impact: 'An attacker who retrieves the hardcoded secret can forge arbitrary JWT tokens, impersonate any user including administrators,
+    and fully bypass authentication. This leads to complete system compromise.
+
+    '
+  remediation: 'Store JWT secrets in environment variables or a secrets management service such as AWS Secrets Manager, HashiCorp
+    Vault, or Azure Key Vault. Rotate secrets periodically and use asymmetric key pairs (RS256/ES256) for production systems.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - require\(['"]jsonwebtoken['"]\)
+    - import.*from\s+['"]jsonwebtoken['"]
+    taint_source_indicators:
+    - string literal passed as secret
+    - constant with hardcoded value
+    taint_sink_indicators:
+    - jwt.sign()
+    - jwt.verify()
+    sanitization_patterns:
+    - process.env.JWT_SECRET
+    - config.get('jwt.secret')
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: production environment detected
+      modifier: '+0.5'
+    - condition: test file context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker clones or gains read access to the repository. 2. Attacker extracts the hardcoded JWT secret
+    from the source code. 3. Attacker crafts a JWT token with admin claims signed using the secret. 4. Attacker sends requests
+    with the forged token to the API. 5. The API validates the token successfully and grants admin access.
+
+    '
+  confidence_factors:
+    increases:
+    - jwt.sign or jwt.verify call with inline string
+    - Variable named secret or JWT_SECRET with literal assignment
+    decreases:
+    - Test or mock file context
+    - Value is a placeholder like 'changeme' with surrounding TODO comment
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-002
+    - AUTH-JS-009
+    dependency_chain: Hardcoded secrets enable AUTH-JS-002 (alg:none bypass) exploitation
+    combined_risk_increase: Critical when combined with missing rate limiting (AUTH-JS-010)
+- rule_id: AUTH-JS-002
+  title: JWT Algorithm None Bypass
+  description: 'Detects configurations where the JWT library accepts ''none'' as a valid signing algorithm. This allows attackers
+    to craft unsigned tokens that the server treats as valid, completely bypassing authentication.
+
+    '
+  language: javascript
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-327
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - jwt
+  - algorithm-bypass
+  - cryptographic-failure
+  - authentication-bypass
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: algorithms\s*:\s*\[.*['"]none['"]
+    description: JWT verification explicitly allowing none algorithm
+  - pattern: algorithm\s*[:=]\s*['"]none['"]
+    description: Algorithm set to none
+  - pattern: jwt\.verify\(.*\{\s*algorithms.*none
+    description: jwt.verify with none in allowed algorithms
+  - pattern: alg['"]?\s*[:=]\s*['"]none['"]
+    description: Algorithm header set to none
+  anti_patterns:
+  - pattern: algorithms\s*:\s*\[\s*['"]RS256['"]\s*\]
+    description: Only RS256 in allowed algorithms
+  - pattern: algorithms\s*:\s*\[\s*['"]HS256['"]\s*\]
+    description: Only HS256 in allowed algorithms
+  - pattern: algorithms\s*:\s*\[\s*['"]ES256['"]\s*\]
+    description: Only ES256 in allowed algorithms
+  - pattern: ignoreExpiration\s*:\s*false
+    description: Strict expiration checking
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test file context
+  - pattern: //\s*test|//\s*example|//\s*demo
+    description: Comment indicating test or demo
+  bypass_variants:
+  - variant: Setting alg to 'None' or 'NONE' (case variations)
+    description: Case-insensitive none algorithm bypass
+  - variant: Setting alg to 'nOnE' with mixed casing
+    description: Mixed-case evasion of algorithm check
+  evasion_indicators:
+  - Algorithm value constructed dynamically
+  - Algorithm header manipulated in transit
+  encoding_variants:
+  - base64url encoded header with alg:none
+  - Modified JWT header bytes
+  multi_function_chain_patterns:
+  - jwt.decode() without verification -> use claims
+  - jwt.verify() with algorithms:['none'] -> trust payload
+  privilege_context_flags:
+  - Token used for admin access
+  - Token used to access protected resources
+  business_logic_indicator:
+  - Authentication middleware
+  - API gateway token validation
+  probable_taint_paths:
+  - source: Incoming Authorization header
+    sink: jwt.verify() with none algorithm allowed
+    through: Request header extraction
+  impact: 'Attackers can create unsigned JWT tokens that the server accepts as valid. This allows complete authentication
+    bypass, impersonation of any user, and unauthorized access to all protected resources.
+
+    '
+  remediation: 'Always specify a strict allow-list of algorithms in jwt.verify() options, e.g., algorithms: [''RS256'']. Never
+    include ''none'' in allowed algorithms. Use asymmetric algorithms (RS256, ES256) in production.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/327.html
+  - https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
+  - https://portswigger.net/web-security/jwt/algorithm-confusion
+  context_awareness:
+    surrounding_context_patterns:
+    - jwt\.verify\(
+    - jwt\.decode\(
+    taint_source_indicators:
+    - Authorization header
+    - Bearer token
+    taint_sink_indicators:
+    - jwt.verify() options
+    - jwt.decode() without verify
+    sanitization_patterns:
+    - 'algorithms: [''RS256'']'
+    - 'algorithms: [''HS256'']'
+  severity_scoring:
+    base_score: 9.8
+    exploitability: high
+    impact_score: 9.5
+    adjustments:
+    - condition: strict algorithm list elsewhere
+      modifier: '-2.0'
+    - condition: test context
+      modifier: '-5.0'
+  exploit_scenario: '1. Attacker intercepts a valid JWT token from a legitimate session. 2. Attacker decodes the JWT header
+    and changes alg to ''none''. 3. Attacker modifies the payload to escalate privileges. 4. Attacker removes the signature
+    portion of the token. 5. Server accepts the unsigned token because ''none'' is in the allowed algorithms.
+
+    '
+  confidence_factors:
+    increases:
+    - Explicit 'none' in algorithms array
+    - jwt.decode used without subsequent verification
+    decreases:
+    - Strict algorithm whitelist alongside
+    - Test file context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-001
+    - AUTH-JS-005
+    dependency_chain: Combined with AUTH-JS-001, allows complete authentication bypass
+    combined_risk_increase: Critical when secrets are also hardcoded
+- rule_id: AUTH-JS-003
+  title: Missing Authentication Middleware on Sensitive Routes
+  description: 'Detects Express.js or similar framework routes that handle sensitive operations without authentication middleware.
+    Unprotected routes allow unauthenticated users to access restricted functionality.
+
+    '
+  language: javascript
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-306
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - missing-auth
+  - middleware
+  - express
+  - unprotected-route
+  detection_layer: 2
+  attack_surface_type: authorization
+  patterns:
+  - pattern: app\.(get|post|put|delete|patch)\s*\(\s*['"]/(admin|api|user|account|dashboard|settings|profile)
+    description: Sensitive route without middleware argument
+  - pattern: router\.(get|post|put|delete|patch)\s*\(\s*['"][^'"]+['"]\s*,\s*\(req
+    description: Router handler with direct callback and no middleware
+  - pattern: app\.(get|post|put|delete|patch)\s*\(\s*['"][^'"]+['"]\s*,\s*async\s*\(req
+    description: Route with async handler but no authentication middleware
+  - pattern: router\.(get|post|put|delete|patch)\s*\(\s*['"]/(admin|user|account|settings)
+    description: Sensitive router path without auth guard
+  anti_patterns:
+  - pattern: authenticate|isAuthenticated|requireAuth|ensureAuth|verifyToken|authMiddleware|passport\.authenticate
+    description: Authentication middleware is present
+  - pattern: app\.use\(.*auth
+    description: Global auth middleware applied
+  - pattern: router\.use\(.*auth
+    description: Router-level auth middleware
+  - pattern: \bpublic\b|\bhealthcheck\b|\bhealth\b|\bping\b
+    description: Public endpoint that should not require auth
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test context
+  - pattern: \blogin\b|\bregister\b|\bsignup\b|\bforgot.?password\b
+    description: Authentication endpoint that does not require prior auth
+  bypass_variants:
+  - variant: Middleware order manipulation to skip auth
+    description: Registering route before auth middleware is applied
+  - variant: Using app.all() with wildcard that skips specific auth middleware
+    description: Wildcard route bypassing specific auth checks
+  evasion_indicators:
+  - Route registered before middleware in startup sequence
+  - Conditional middleware that can be skipped
+  encoding_variants:
+  - URL-encoded path segments to bypass route matching
+  - Double-encoded paths
+  multi_function_chain_patterns:
+  - express.Router() -> router.get('/admin') -> no auth middleware
+  - app.get('/api/users') -> direct handler without auth
+  privilege_context_flags:
+  - admin routes
+  - user data access
+  - financial operations
+  business_logic_indicator:
+  - REST API endpoint definitions
+  - Route configuration module
+  probable_taint_paths:
+  - source: HTTP request from unauthenticated client
+    sink: Route handler accessing protected resources
+    through: Express route without auth middleware
+  impact: 'Unauthenticated users can access sensitive API endpoints, view or modify protected data, perform administrative
+    actions, or access other users'' resources without any credentials.
+
+    '
+  remediation: 'Add authentication middleware to all sensitive routes. Use app.use() or router.use() to apply authentication
+    globally, then whitelist public endpoints explicitly. Prefer a deny-by-default approach.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://expressjs.com/en/guide/using-middleware.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - express\(\)
+    - Router\(\)
+    taint_source_indicators:
+    - req.params
+    - req.body
+    - req.query
+    taint_sink_indicators:
+    - database query with user input
+    - res.json() with sensitive data
+    sanitization_patterns:
+    - requireAuth middleware
+    - passport.authenticate()
+  severity_scoring:
+    base_score: 8.5
+    exploitability: high
+    impact_score: 8.0
+    adjustments:
+    - condition: global auth middleware detected
+      modifier: '-3.0'
+    - condition: admin route without auth
+      modifier: '+1.0'
+  exploit_scenario: '1. Attacker discovers unprotected API endpoint via reconnaissance. 2. Attacker sends requests directly
+    to the endpoint without credentials. 3. Server processes the request without checking authentication. 4. Attacker gains
+    access to sensitive data or performs privileged actions.
+
+    '
+  confidence_factors:
+    increases:
+    - Sensitive path component like /admin or /user
+    - No auth middleware in entire router file
+    decreases:
+    - Global auth middleware applied at app level
+    - Public endpoint context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-004
+    - AUTH-JS-010
+    dependency_chain: Missing auth makes IDOR (AUTH-JS-004) trivially exploitable
+    combined_risk_increase: Critical when combined with IDOR vulnerabilities
+- rule_id: AUTH-JS-004
+  title: Broken Access Control - Insecure Direct Object Reference (IDOR)
+  description: 'Detects patterns where user-supplied identifiers are used directly to access resources without verifying that
+    the authenticated user is authorized to access those specific resources. This enables horizontal privilege escalation.
+
+    '
+  language: javascript
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-639
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - idor
+  - broken-access-control
+  - horizontal-privilege-escalation
+  - authorization
+  detection_layer: 2
+  attack_surface_type: authorization
+  patterns:
+  - pattern: findById\(req\.params\.(id|userId|user_id)
+    description: Database lookup by user-controlled ID parameter
+  - pattern: findOne\(\{\s*_id\s*:\s*req\.(params|query|body)\.
+    description: MongoDB query with user-supplied ID
+  - pattern: where\(.*id.*req\.(params|query|body)
+    description: SQL query filtering by user-supplied ID
+  - pattern: User\.findByPk\(req\.params
+    description: Sequelize lookup by user-controlled primary key
+  - pattern: getObject\(.*Key.*req\.(params|query)
+    description: Object storage access with user-controlled key
+  anti_patterns:
+  - pattern: req\.user\.id\s*===|req\.user\.id\s*==
+    description: Ownership check comparing request user ID
+  - pattern: isOwner|checkOwnership|canAccess|authorize
+    description: Authorization check function
+  - pattern: where.*userId.*req\.user
+    description: Query scoped to authenticated user
+  - pattern: policy|permission|acl|rbac
+    description: Access control layer
+  - pattern: belongsTo|hasPermission
+    description: Relationship or permission check
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test file context
+  bypass_variants:
+  - variant: Using UUID enumeration to access other users records
+    description: Sequential or predictable IDs enabling enumeration
+  - variant: Manipulating nested object IDs in request body
+    description: Nested IDOR via complex request body
+  evasion_indicators:
+  - ID parameter passed through multiple layers
+  - ID extracted from JWT payload without server-side validation
+  encoding_variants:
+  - URL-encoded ID parameters
+  - Base64-encoded object references
+  multi_function_chain_patterns:
+  - req.params.id -> Model.findById() -> res.json()
+  - req.body.userId -> db.query() -> return data
+  privilege_context_flags:
+  - Accessing another user's profile
+  - Modifying another user's data
+  - Deleting resources owned by others
+  business_logic_indicator:
+  - User profile retrieval
+  - Order or transaction lookup
+  - Document or file access
+  probable_taint_paths:
+  - source: req.params.id / req.query.id / req.body.userId
+    sink: Database query or file system access
+    through: Direct parameter usage without ownership check
+  impact: 'Attackers can access, modify, or delete resources belonging to other users by manipulating object identifiers.
+    This leads to data breaches, privacy violations, and unauthorized modifications.
+
+    '
+  remediation: 'Always verify that the authenticated user is authorized to access the requested resource. Scope database queries
+    to the current user (e.g., where userId = req.user.id). Use UUIDs instead of sequential integer IDs. Implement an authorization
+    layer.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/639.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - router\.(get|put|delete)\(
+    - app\.(get|put|delete)\(
+    taint_source_indicators:
+    - req.params
+    - req.query
+    - req.body
+    taint_sink_indicators:
+    - Model.findById()
+    - db.query()
+    - collection.findOne()
+    sanitization_patterns:
+    - ownership verification
+    - authorization middleware
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: authorization check present
+      modifier: '-4.0'
+    - condition: admin endpoint
+      modifier: '+0.5'
+  exploit_scenario: '1. Authenticated user discovers their profile at /api/users/123. 2. Attacker changes the ID to /api/users/124
+    in the request. 3. Server retrieves user 124''s data without verifying authorization. 4. Attacker accesses another user''s
+    personal information. 5. Attacker repeats with other IDs to enumerate all user data.
+
+    '
+  confidence_factors:
+    increases:
+    - req.params used directly in database lookup
+    - No ownership check in handler function
+    decreases:
+    - Authorization middleware applied
+    - Query scoped to req.user.id
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-003
+    - AUTH-JS-010
+    dependency_chain: IDOR combined with missing auth (AUTH-JS-003) is critical
+    combined_risk_increase: High when combined with missing rate limiting
+- rule_id: AUTH-JS-005
+  title: Session Fixation Vulnerability
+  description: 'Detects session management patterns where session IDs are not regenerated after authentication, allowing attackers
+    to fixate a known session ID and hijack authenticated sessions.
+
+    '
+  language: javascript
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-384
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session-fixation
+  - session-management
+  - session-hijacking
+  - authentication
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: req\.session\.userId\s*=|req\.session\.user\s*=|req\.session\.authenticated\s*=
+    description: Session populated after login without regeneration
+  - pattern: req\.session\.save\(\)
+    description: Session saved without prior regeneration call
+  - pattern: req\.login\(.*\)(?!.*regenerate)
+    description: Login without session regeneration
+  - pattern: passport\.authenticate.*callback(?!.*regenerate)
+    description: Passport authentication without session regeneration in callback
+  anti_patterns:
+  - pattern: req\.session\.regenerate
+    description: Session regeneration called
+  - pattern: session\.destroy\(
+    description: Old session destroyed
+  - pattern: req\.session\.id\s*=.*crypto
+    description: Session ID regenerated with crypto
+  - pattern: rotateSession|renewSession
+    description: Custom session rotation function
+  - pattern: passport.*session:\s*false
+    description: Stateless authentication without sessions
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test context
+  bypass_variants:
+  - variant: Setting session cookie before authentication via URL parameter
+    description: Pre-authentication session fixation via cookie injection
+  - variant: Exploiting subdomain cookie scope to fix session on target domain
+    description: Cross-subdomain session fixation
+  evasion_indicators:
+  - Session assigned in a different code path than regeneration
+  - Custom session store that does not support regeneration
+  encoding_variants:
+  - Session ID in URL as query parameter
+  - Session ID in custom header
+  multi_function_chain_patterns:
+  - passport.authenticate() -> req.session.user = user (no regeneration)
+  - verifyPassword() -> req.session.authenticated = true (no regeneration)
+  privilege_context_flags:
+  - User login handler
+  - Authentication callback
+  - OAuth callback
+  business_logic_indicator:
+  - Login form handler
+  - SSO callback
+  - Authentication flow
+  probable_taint_paths:
+  - source: Pre-existing session ID cookie
+    sink: Authenticated session
+    through: Login handler without session regeneration
+  impact: 'An attacker can fixate a session ID on the victim''s browser, wait for the victim to authenticate, and then use
+    the known session ID to access the victim''s authenticated session, gaining full access to their account.
+
+    '
+  remediation: 'Always call req.session.regenerate() immediately after successful authentication and before storing any user
+    data in the session. Destroy the old session first. Use secure session configuration with httpOnly and secure cookie flags.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/384.html
+  - https://owasp.org/www-community/attacks/Session_fixation
+  - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - express-session
+    - passport\.authenticate
+    taint_source_indicators:
+    - session cookie from request
+    - pre-existing session ID
+    taint_sink_indicators:
+    - req.session.user assignment
+    - req.session.authenticated = true
+    sanitization_patterns:
+    - req.session.regenerate()
+    - session.destroy()
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 8.0
+    adjustments:
+    - condition: session regeneration detected nearby
+      modifier: '-4.0'
+    - condition: login handler context
+      modifier: '+1.0'
+  exploit_scenario: '1. Attacker creates a session on the target application and obtains a session ID. 2. Attacker tricks
+    the victim into using that session ID via a crafted link. 3. Victim logs in using the fixated session ID. 4. The server
+    does not regenerate the session ID after login. 5. Attacker uses the known session ID to access the victim''s authenticated
+    session.
+
+    '
+  confidence_factors:
+    increases:
+    - Session user assignment without regeneration in same function
+    - Login handler context
+    decreases:
+    - req.session.regenerate() called in same handler
+    - Stateless JWT authentication
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-006
+    - AUTH-JS-007
+    dependency_chain: Session fixation combined with insecure cookies (AUTH-JS-006) amplifies risk
+    combined_risk_increase: High when cookies lack secure flags
+- rule_id: AUTH-JS-006
+  title: Insecure Cookie Settings
+  description: 'Detects session or authentication cookies configured without essential security flags such as httpOnly, secure,
+    and sameSite. Missing flags expose cookies to theft via XSS, man-in-the-middle attacks, and cross-site request forgery.
+
+    '
+  language: javascript
+  category: auth
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-614
+  owasp: A05:2021 - Security Misconfiguration
+  tags:
+  - cookie-security
+  - session-management
+  - xss-protection
+  - csrf-protection
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: httpOnly\s*:\s*false
+    description: Cookie httpOnly flag explicitly disabled
+  - pattern: secure\s*:\s*false
+    description: Cookie secure flag explicitly disabled
+  - pattern: sameSite\s*:\s*['"]none['"]
+    description: SameSite set to none
+  - pattern: cookie\s*:\s*\{[^}]*(?!httpOnly)
+    description: Cookie configuration missing httpOnly
+  - pattern: res\.cookie\([^)]*(?!httpOnly)
+    description: res.cookie() without httpOnly option
+  anti_patterns:
+  - pattern: httpOnly\s*:\s*true
+    description: httpOnly flag properly set
+  - pattern: secure\s*:\s*true
+    description: Secure flag properly set
+  - pattern: sameSite\s*:\s*['"]strict['"]
+    description: SameSite strict mode
+  - pattern: sameSite\s*:\s*['"]lax['"]
+    description: SameSite lax mode
+  - pattern: __Host-|__Secure-
+    description: Cookie prefix for secure cookies
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test context
+  bypass_variants:
+  - variant: Setting cookie via Set-Cookie header directly without flags
+    description: Raw header creation bypassing cookie library safety defaults
+  - variant: Using document.cookie on client side to set unprotected cookies
+    description: Client-side cookie creation without flags
+  evasion_indicators:
+  - Cookie set via raw header string
+  - Dynamic cookie options that may omit security flags
+  encoding_variants:
+  - URL-encoded cookie values
+  - Base64 cookie payloads
+  multi_function_chain_patterns:
+  - 'express-session config -> cookie: { httpOnly: false }'
+  - res.cookie(name, value) -> missing options object
+  privilege_context_flags:
+  - Session cookie configuration
+  - Authentication token cookie
+  - Remember-me cookie
+  business_logic_indicator:
+  - Session management setup
+  - Authentication cookie creation
+  probable_taint_paths:
+  - source: Session or token data
+    sink: HTTP Set-Cookie header
+    through: Cookie configuration without security flags
+  impact: 'Cookies without httpOnly can be stolen via XSS attacks. Cookies without secure flag can be intercepted over unencrypted
+    HTTP connections. Missing SameSite enables CSRF. All can lead to session hijacking and account compromise.
+
+    '
+  remediation: 'Set httpOnly: true, secure: true, and sameSite: ''strict'' (or ''lax'') for all session and authentication
+    cookies. Use __Host- or __Secure- cookie prefixes where possible. Review all res.cookie() calls for proper flags.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/614.html
+  - https://owasp.org/www-community/controls/SecureCookieAttribute
+  - https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies
+  context_awareness:
+    surrounding_context_patterns:
+    - express-session
+    - res\.cookie\(
+    taint_source_indicators:
+    - Session data
+    - Authentication token
+    taint_sink_indicators:
+    - Set-Cookie header
+    - cookie options object
+    sanitization_patterns:
+    - 'httpOnly: true, secure: true, sameSite: ''strict'''
+    - Cookie prefix __Host-
+  severity_scoring:
+    base_score: 6.5
+    exploitability: medium
+    impact_score: 6.0
+    adjustments:
+    - condition: httpOnly explicitly set to false
+      modifier: '+1.0'
+    - condition: development environment
+      modifier: '-2.0'
+  exploit_scenario: '1. Application sets session cookie without httpOnly flag. 2. Attacker exploits an XSS vulnerability on
+    the site. 3. Malicious JavaScript accesses document.cookie and reads the session cookie. 4. Attacker exfiltrates the session
+    cookie to an attacker-controlled server. 5. Attacker uses the stolen cookie to hijack the user''s session.
+
+    '
+  confidence_factors:
+    increases:
+    - 'httpOnly: false explicitly set'
+    - Session cookie configuration context
+    decreases:
+    - Development-only configuration
+    - Non-session cookie context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-005
+    - AUTH-JS-009
+    dependency_chain: Insecure cookies amplify session fixation (AUTH-JS-005) risk
+    combined_risk_increase: High when combined with XSS vulnerabilities
+- rule_id: AUTH-JS-007
+  title: Password Stored in localStorage
+  description: 'Detects patterns where passwords or authentication credentials are stored in the browser''s localStorage or
+    sessionStorage. These storage mechanisms are accessible to any JavaScript running on the page, making credentials vulnerable
+    to XSS-based theft.
+
+    '
+  language: javascript
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-922
+  owasp: A04:2021 - Insecure Design
+  tags:
+  - password-storage
+  - localStorage
+  - credential-exposure
+  - client-side-storage
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: localStorage\.setItem\(['"].*password
+    description: Password stored in localStorage
+  - pattern: sessionStorage\.setItem\(['"].*password
+    description: Password stored in sessionStorage
+  - pattern: localStorage\[['"].*password
+    description: Password stored in localStorage via bracket notation
+  - pattern: localStorage\.setItem\(['"].*credential|localStorage\.setItem\(['"].*secret
+    description: Credentials or secrets stored in localStorage
+  - pattern: window\.localStorage\..*password
+    description: Password access via window.localStorage
+  anti_patterns:
+  - pattern: localStorage\.removeItem\(['"].*password
+    description: Password removed from localStorage
+  - pattern: sessionStorage\.clear\(
+    description: Session storage cleared
+  - pattern: //\s*TODO.*remove|//\s*FIXME
+    description: Marked for removal
+  - pattern: encrypt|cipher|CryptoJS
+    description: Value is encrypted before storage
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test context
+  - pattern: localStorage\.setItem\(['"]token
+    description: Token storage (less severe than password)
+  bypass_variants:
+  - variant: Storing password in IndexedDB instead of localStorage
+    description: Alternative client-side storage equally accessible via XSS
+  - variant: Storing password in a global JavaScript variable
+    description: In-memory storage exposed to page scope
+  evasion_indicators:
+  - Password stored under a non-obvious key name
+  - Password encoded or obfuscated before storage
+  encoding_variants:
+  - Base64-encoded password in localStorage
+  - ROT13-obfuscated password
+  multi_function_chain_patterns:
+  - input.value -> localStorage.setItem('password', value)
+  - fetch(login) -> response.password -> localStorage.setItem()
+  privilege_context_flags:
+  - Login form handler
+  - Remember-me functionality
+  - Auto-login feature
+  business_logic_indicator:
+  - Login page
+  - Credential management
+  - Remember-me checkbox handler
+  probable_taint_paths:
+  - source: User password input
+    sink: localStorage.setItem()
+    through: Form handler or login response
+  impact: 'Any XSS vulnerability on the site allows attackers to read passwords from localStorage. Passwords in browser storage
+    persist across sessions and can be accessed by browser extensions, shared computer users, or malware.
+
+    '
+  remediation: 'Never store passwords or raw credentials in localStorage or sessionStorage. Use secure httpOnly cookies for
+    session management. If a token must be stored client-side, use short-lived tokens and store them in memory only.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/922.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html
+  - https://owasp.org/www-community/attacks/xss/
+  context_awareness:
+    surrounding_context_patterns:
+    - document\.getElementById.*password
+    - login|authenticate
+    taint_source_indicators:
+    - Password input field value
+    - Login API response
+    taint_sink_indicators:
+    - localStorage.setItem()
+    - sessionStorage.setItem()
+    sanitization_patterns:
+    - httpOnly cookie for session
+    - In-memory only token storage
+  severity_scoring:
+    base_score: 7.5
+    exploitability: high
+    impact_score: 8.0
+    adjustments:
+    - condition: value is encrypted
+      modifier: '-2.0'
+    - condition: raw plaintext password
+      modifier: '+1.0'
+  exploit_scenario: '1. Application stores user password in localStorage after login. 2. Attacker finds an XSS vulnerability
+    on the application. 3. Attacker injects script to read localStorage.getItem(''password''). 4. Victim visits the page,
+    and the XSS payload exfiltrates their password. 5. Attacker uses the stolen password to access the victim''s account.
+
+    '
+  confidence_factors:
+    increases:
+    - Key name contains 'password' or 'credential'
+    - Login form handler context
+    decreases:
+    - Value is encrypted before storage
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-006
+    - AUTH-JS-001
+    dependency_chain: Password in localStorage combined with XSS enables credential theft
+    combined_risk_increase: Critical when XSS vulnerabilities exist
+- rule_id: AUTH-JS-008
+  title: OAuth State Parameter Missing
+  description: 'Detects OAuth 2.0 authorization flows that do not generate or validate the state parameter. The missing state
+    parameter makes the application vulnerable to Cross-Site Request Forgery attacks against the OAuth callback.
+
+    '
+  language: javascript
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-352
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - oauth
+  - csrf
+  - state-parameter
+  - authorization-flow
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: authorize\?.*client_id=.*(?!state=)
+    description: OAuth authorization URL without state parameter
+  - pattern: oauth.*redirect.*(?!state)
+    description: OAuth redirect configuration without state
+  - pattern: passport\.authenticate\(['"](?:oauth|google|facebook|github)
+    description: Passport OAuth strategy invocation to check for state
+  - pattern: grant_type=authorization_code.*(?!state)
+    description: Authorization code exchange without state validation
+  - pattern: callback.*code=.*(?!state)
+    description: OAuth callback handling code without state check
+  anti_patterns:
+  - pattern: state\s*=\s*crypto\.randomBytes|state\s*=\s*uuid
+    description: Cryptographically random state generated
+  - pattern: req\.query\.state|req\.session\.oauthState
+    description: State parameter validation present
+  - pattern: state:\s*true|passReqToCallback
+    description: Passport state option enabled
+  - pattern: verifyState|validateState|checkState
+    description: State validation function
+  - pattern: pkce|code_challenge
+    description: PKCE flow which provides CSRF protection
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test context
+  bypass_variants:
+  - variant: Predictable state value (e.g., hardcoded or sequential)
+    description: State parameter present but not cryptographically random
+  - variant: State stored client-side only, not validated server-side
+    description: State without server-side validation
+  evasion_indicators:
+  - State value generated but not validated on callback
+  - State check wrapped in optional condition
+  encoding_variants:
+  - URL-encoded state parameter
+  - Base64-encoded state
+  multi_function_chain_patterns:
+  - buildAuthorizationUrl() -> redirect (no state) -> callback handler
+  - passport.authenticate('oauth2') -> callback (no state check)
+  privilege_context_flags:
+  - OAuth login flow
+  - Social login integration
+  - Third-party authorization
+  business_logic_indicator:
+  - OAuth authorization flow
+  - Social login feature
+  - Third-party app integration
+  probable_taint_paths:
+  - source: Attacker-initiated OAuth flow
+    sink: OAuth callback without state validation
+    through: Redirect to authorization server
+  impact: 'Without a state parameter, an attacker can initiate an OAuth flow and trick a victim into completing it, linking
+    the attacker''s account to the victim''s session. This enables account takeover or unauthorized access.
+
+    '
+  remediation: 'Always generate a cryptographically random state parameter and store it in the server-side session before
+    initiating the OAuth flow. Validate the state parameter in the callback handler. Use PKCE for public clients.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/352.html
+  - https://datatracker.ietf.org/doc/html/rfc6749#section-10.12
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - passport\.use.*OAuth
+    - oauth2|openid
+    taint_source_indicators:
+    - OAuth authorization URL
+    - OAuth callback request
+    taint_sink_indicators:
+    - Account linking
+    - Session creation from OAuth claims
+    sanitization_patterns:
+    - state parameter validation
+    - PKCE code_verifier
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: PKCE implemented
+      modifier: '-3.0'
+    - condition: No state validation in callback
+      modifier: '+1.0'
+  exploit_scenario: '1. Attacker initiates an OAuth flow with a malicious provider account. 2. Attacker obtains the authorization
+    code from the callback URL. 3. Attacker crafts a link to the victim app''s callback with the attacker''s code. 4. Victim
+    clicks the link, and the app links the attacker''s OAuth identity to the victim''s session. 5. Attacker can now log in
+    as the victim using the linked OAuth account.
+
+    '
+  confidence_factors:
+    increases:
+    - OAuth authorization URL without state parameter
+    - Callback handler without state validation
+    decreases:
+    - PKCE flow detected
+    - State validation function exists
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-005
+    - AUTH-JS-009
+    dependency_chain: OAuth CSRF combined with session fixation enables account takeover
+    combined_risk_increase: Critical when session management is also weak
+- rule_id: AUTH-JS-009
+  title: CORS Misconfiguration with Credentials
+  description: 'Detects CORS configurations that allow credentials (cookies, HTTP authentication) with overly permissive origins,
+    including wildcard or dynamically reflected origins. This allows malicious third-party sites to make authenticated requests
+    on behalf of users.
+
+    '
+  language: javascript
+  category: auth
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-346
+  owasp: A05:2021 - Security Misconfiguration
+  tags:
+  - cors
+  - credential-exposure
+  - cross-origin
+  - misconfiguration
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: credentials\s*:\s*true.*origin\s*:\s*['"]\*['"]
+    description: CORS with credentials and wildcard origin
+  - pattern: origin\s*:\s*true.*credentials\s*:\s*true
+    description: CORS reflecting any origin with credentials
+  - pattern: Access-Control-Allow-Origin.*\*.*Access-Control-Allow-Credentials.*true
+    description: CORS headers with wildcard and credentials
+  - pattern: origin\s*:\s*req\.headers\.origin.*credentials\s*:\s*true
+    description: CORS dynamically reflecting request origin with credentials
+  - pattern: cors\(\{\s*origin\s*:\s*true
+    description: CORS middleware reflecting all origins
+  anti_patterns:
+  - pattern: origin\s*:\s*\[.*https://.*\]
+    description: CORS with explicit origin whitelist
+  - pattern: origin\s*:\s*['"]https://specific-domain\.com['"]
+    description: CORS with specific origin
+  - pattern: credentials\s*:\s*false
+    description: Credentials not allowed
+  - pattern: origin\s*:\s*function.*whitelist|allowedOrigins\.includes
+    description: Origin validation function
+  - pattern: cors\(\)(?!.*credentials)
+    description: CORS without credentials
+  - pattern: \.test\.|__tests__|spec\.
+    description: Test context
+  bypass_variants:
+  - variant: 'Using null origin from sandboxed iframe or data: URI'
+    description: Null origin bypass for misconfigured CORS
+  - variant: Subdomain takeover combined with *.domain.com CORS whitelist
+    description: Subdomain takeover for CORS bypass
+  evasion_indicators:
+  - Origin validation using regex with improper anchoring
+  - Origin check using string includes() instead of exact match
+  encoding_variants:
+  - Internationalized domain names in origin
+  - Origin with unusual port numbers
+  multi_function_chain_patterns:
+  - 'cors({origin: true, credentials: true}) -> authenticated API endpoints'
+  - res.header('Access-Control-Allow-Origin', req.headers.origin) -> res.header('Access-Control-Allow-Credentials', 'true')
+  privilege_context_flags:
+  - API serving authenticated data
+  - Cross-origin API with cookie-based auth
+  business_logic_indicator:
+  - API CORS configuration
+  - Cross-origin resource sharing setup
+  probable_taint_paths:
+  - source: Malicious origin cross-origin request
+    sink: Authenticated API response with user data
+    through: Permissive CORS with credentials
+  impact: 'A malicious website can make authenticated cross-origin requests to the vulnerable API, reading sensitive data
+    or performing actions as the victim user. This enables data theft, account manipulation, and further attacks.
+
+    '
+  remediation: 'Never use wildcard origin with credentials. Maintain a strict whitelist of allowed origins and validate against
+    it. Use exact string matching for origin validation. Avoid reflecting the request Origin header directly.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/346.html
+  - https://portswigger.net/web-security/cors
+  - https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+  context_awareness:
+    surrounding_context_patterns:
+    - require\(['"]cors['"]\)
+    - app\.use\(cors
+    taint_source_indicators:
+    - req.headers.origin
+    - Origin request header
+    taint_sink_indicators:
+    - Access-Control-Allow-Origin response header
+    - Access-Control-Allow-Credentials response header
+    sanitization_patterns:
+    - Origin whitelist validation
+    - Exact origin matching
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: origin whitelist present
+      modifier: '-4.0'
+    - condition: 'credentials: true with reflected origin'
+      modifier: '+1.0'
+  exploit_scenario: '1. Application configures CORS with origin: true and credentials: true. 2. Attacker hosts a malicious
+    page on evil.com. 3. Victim visits evil.com while logged into the vulnerable application. 4. Malicious JavaScript sends
+    a fetch request with credentials: ''include''. 5. The API returns sensitive user data because the origin is reflected.
+    6. Attacker''s script reads the response and exfiltrates user data.
+
+    '
+  confidence_factors:
+    increases:
+    - 'credentials: true with wildcard or reflected origin'
+    - No origin whitelist
+    decreases:
+    - Strict origin whitelist
+    - Development-only configuration
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-006
+    - AUTH-JS-003
+    dependency_chain: CORS misconfiguration with insecure cookies enables cross-origin session theft
+    combined_risk_increase: Critical when combined with cookie theft vectors
+- rule_id: AUTH-JS-010
+  title: Rate Limiting Bypass on Authentication Endpoints
+  description: 'Detects authentication endpoints (login, registration, password reset) that lack rate limiting middleware.
+    Without rate limiting, attackers can perform brute-force attacks, credential stuffing, and enumeration at scale.
+
+    '
+  language: javascript
+  category: auth
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-307
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - rate-limiting
+  - brute-force
+  - credential-stuffing
+  - authentication
+  detection_layer: 2
+  attack_surface_type: authentication
+  patterns:
+  - pattern: app\.post\(['"].*login['"]\s*,\s*(?!rateLimit|rateLimiter|limiter|throttle)
+    description: Login endpoint without rate limiter middleware
+  - pattern: router\.post\(['"].*login['"]\s*,\s*(?!rateLimit|limiter)
+    description: Router login route without rate limiting
+  - pattern: app\.post\(['"].*register['"]\s*,\s*(?!rateLimit|limiter)
+    description: Registration endpoint without rate limiting
+  - pattern: app\.post\(['"].*password.*reset['"]\s*,\s*(?!rateLimit|limiter)
+    description: Password reset endpoint without rate limiting
+  - pattern: app\.post\(['"].*forgot['"]\s*,\s*(?!rateLimit|limiter)
+    description: Forgot password endpoint without rate limiting
+  anti_patterns:
+  - pattern: rateLimit|rateLimiter|express-rate-limit|rate-limiter-flexible
+    description: Rate limiting middleware present
+  - pattern: throttle|slowDown|express-slow-down
+    description: Throttling middleware present
+  - pattern: app\.use\(.*rateLimit|app\.use\(.*limiter
+    description: Global rate limiting applied
+  - pattern: captcha|recaptcha|hcaptcha|turnstile
+    description: CAPTCHA protection present
+  - pattern: brute.*protect|BruteForceProtection
+    description: Brute force protection mechanism
+  - pattern: lockout|accountLock|maxAttempts
+    description: Account lockout mechanism
+  bypass_variants:
+  - variant: Distributing requests across multiple IP addresses
+    description: IP rotation to bypass IP-based rate limiting
+  - variant: Using X-Forwarded-For header manipulation
+    description: Header spoofing to bypass IP-based limits
+  - variant: Targeting rate limit by IP while using different user-agent strings
+    description: User-agent rotation to evade fingerprinting
+  evasion_indicators:
+  - Rate limit keyed only on IP without account-level limiting
+  - Rate limit with very high threshold
+  encoding_variants:
+  - URL encoding variations on login endpoint path
+  - Alternate paths to same login handler
+  multi_function_chain_patterns:
+  - app.post('/login') -> authenticate(req.body) -> no rate limit
+  - router.post('/auth/login') -> passport.authenticate() -> no rate limit
+  privilege_context_flags:
+  - Login endpoint
+  - Password reset endpoint
+  - Account creation endpoint
+  business_logic_indicator:
+  - Authentication form handler
+  - Password management endpoint
+  - User registration flow
+  probable_taint_paths:
+  - source: Automated attack tool
+    sink: Authentication handler processing unlimited requests
+    through: Endpoint without rate limiting
+  impact: 'Without rate limiting, attackers can perform brute-force password attacks, credential stuffing with leaked credential
+    databases, and user enumeration. This can lead to mass account compromise.
+
+    '
+  remediation: 'Apply rate limiting middleware to all authentication endpoints using express-rate-limit or rate-limiter-flexible.
+    Implement progressive delays and account lockout. Add CAPTCHA after multiple failed attempts. Use both IP-based and account-based
+    limiting.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/307.html
+  - https://owasp.org/www-community/controls/Blocking_Brute_Force_Attacks
+  - https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - passport\.authenticate
+    - bcrypt\.compare
+    taint_source_indicators:
+    - req.body.username
+    - req.body.password
+    taint_sink_indicators:
+    - authentication function
+    - database credential lookup
+    sanitization_patterns:
+    - express-rate-limit middleware
+    - Account lockout mechanism
+  severity_scoring:
+    base_score: 6.5
+    exploitability: high
+    impact_score: 6.0
+    adjustments:
+    - condition: CAPTCHA present
+      modifier: '-2.0'
+    - condition: No rate limiting on any auth endpoint
+      modifier: '+1.5'
+  exploit_scenario: '1. Attacker identifies the login endpoint at /api/auth/login. 2. Attacker uses a credential stuffing
+    tool with leaked username/password pairs. 3. Tool sends thousands of login attempts per minute without being throttled.
+    4. Multiple valid credential pairs are discovered. 5. Attacker accesses compromised accounts.
+
+    '
+  confidence_factors:
+    increases:
+    - Authentication endpoint without any limiter middleware
+    - No global rate limiting configured
+    decreases:
+    - Global rate limiting at reverse proxy level
+    - CAPTCHA or account lockout mechanisms
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JS-003
+    - AUTH-JS-001
+    dependency_chain: No rate limiting combined with missing auth enables unrestricted access
+    combined_risk_increase: High when combined with weak password policies

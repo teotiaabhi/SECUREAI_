@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: secureai-cli
+Version: 1.0.0
+Summary: SecureAI Code Analyzer — Production SAST CLI with AI-powered false-positive removal
+Author: SecureAI Team
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Quality Assurance
+Requires-Python: >=3.9
+Requires-Dist: pyyaml>=6.0
+Dynamic: author
+Dynamic: classifier
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

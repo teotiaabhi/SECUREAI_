@@ -1,0 +1,1186 @@
+rules:
+- rule_id: PT-JS-001
+  title: fs.readFile/writeFile with User-Controlled Path
+  description: 'Detects usage of Node.js fs.readFile, fs.readFileSync, fs.writeFile, and fs.writeFileSync where the file path
+    argument originates from user input such as request parameters, query strings, headers, or body fields. An attacker can
+    inject path traversal sequences like ../../etc/passwd to read or overwrite arbitrary files on the server filesystem, potentially
+    exfiltrating sensitive configuration, credentials, or source code, or corrupting critical application data.
+
+    '
+  language: javascript
+  category: path_traversal
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - file-read
+  - file-write
+  - fs-module
+  - node-js
+  - server-side
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: fs\s*\.\s*readFile(?:Sync)?\s*\(\s*(?:req\s*\.\s*(?:params|query|body|headers)\s*(?:\.\s*\w+|\[\s*['"\w]+\s*\]))
+    description: fs.readFile/readFileSync called with req.params, req.query, req.body, or req.headers property
+  - type: regex
+    pattern: fs\s*\.\s*writeFile(?:Sync)?\s*\(\s*(?:req\s*\.\s*(?:params|query|body|headers)\s*(?:\.\s*\w+|\[\s*['"\w]+\s*\]))
+    description: fs.writeFile/writeFileSync called with req.params, req.query, req.body, or req.headers property
+  - type: regex
+    pattern: fs\s*\.\s*(?:readFile|writeFile)(?:Sync)?\s*\(\s*(?:`[^`]*\$\{[^}]*req\b)
+    description: fs.readFile/writeFile with template literal interpolating request data
+  - type: regex
+    pattern: fs\s*\.\s*(?:readFile|writeFile)(?:Sync)?\s*\(\s*(?:\w+\s*\+\s*req\s*\.\s*(?:params|query|body))
+    description: fs.readFile/writeFile with string concatenation of request data
+  - type: regex
+    pattern: fs\s*\.\s*(?:readFile|writeFile)(?:Sync)?\s*\(\s*(?:file(?:Path|Name|_path|_name)?|userPath|inputPath|docPath)\s*[,\)]
+    description: fs.readFile/writeFile with common user-controlled path variable names
+  - type: regex
+    pattern: fs\s*\.\s*(?:readFile|writeFile)(?:Sync)?\s*\(\s*(?:ctx\s*\.\s*(?:params|query|request))\s*(?:\.\s*\w+|\[\s*['"\w]+\s*\])
+    description: fs.readFile/writeFile with Koa context parameters
+  - type: regex
+    pattern: fs(?:Promises|\.promises)\s*\.\s*(?:readFile|writeFile)\s*\(\s*(?:req\s*\.\s*(?:params|query|body))
+    description: fs.promises.readFile/writeFile with request parameters
+  - type: regex
+    pattern: require\s*\(\s*['"]fs['"]\s*\)[\s\S]{0,200}(?:readFile|writeFile)(?:Sync)?\s*\(\s*(?:req|ctx|request)\s*\.
+    description: Nearby fs require followed by readFile/writeFile with request object
+  anti_patterns:
+  - fs\.readFile(?:Sync)?\s*\(\s*path\.resolve\s*\(\s*__dirname
+  - fs\.readFile(?:Sync)?\s*\(\s*['"][^'"]*['"]\s*[,\)]
+  - if\s*\(\s*!?\s*filePath\s*\.\s*startsWith\s*\(
+  - path\.normalize\s*\([^)]+\)\s*\.\s*startsWith\s*\(
+  - filePath\s*\.\s*includes\s*\(\s*['"]\.\.['"]\s*\)
+  - path\.resolve\s*\([^)]+\)\s*\.\s*startsWith\s*\(\s*(?:allowedDir|baseDir|rootDir)
+  - const\s+\w+\s*=\s*path\.join\s*\(\s*__dirname\s*,\s*['"][^'"]+['"]\s*\)
+  - sanitize(?:Path|FileName|Input)\s*\(
+  - validator\s*\.\s*(?:isAlphanumeric|whitelist|escape)\s*\(
+  - if\s*\(\s*\/\\\.\\\.\s*\/\s*\.\s*test\s*\(
+  - path\.basename\s*\(\s*(?:req|ctx|request)\s*\.
+  - whitelist(?:ed)?(?:Paths|Files|Dirs)\s*\.\s*(?:includes|has|indexOf)\s*\(
+  - allowedPaths\s*\.\s*(?:includes|has)\s*\(
+  - realpath(?:Sync)?\s*\([^)]+\)\s*\.\s*startsWith
+  - chroot\s*\(\s*['"]
+  bypass_variants:
+  - description: URL-encoded dot-dot-slash traversal
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c|\.\.%5c)
+  - description: Double URL-encoded traversal
+    pattern: (?:%252e%252e%252f|%252e%252e%255c|%252e%252e\/)
+  - description: Null byte injection to bypass extension checks
+    pattern: (?:%00|\\x00|\\0|\\u0000)(?:\.(?:jpg|png|gif|txt|pdf))?$
+  - description: Unicode/overlong UTF-8 encoded traversal
+    pattern: (?:%c0%ae%c0%ae%c0%af|%e0%80%ae%e0%80%ae%e0%80%af|%%32%65%%32%65%%32%66)
+  - description: Backslash and mixed separator traversal on Windows
+    pattern: (?:\.\.\\\\|\.\.\/|\.\.%5c|\.\.%2f|\.\.%5C%2F)
+  evasion_indicators:
+  - Double URL encoding of path separators
+  - Null byte injection before file extension
+  - Unicode normalization bypass of dot sequences
+  - Mixed forward-slash and backslash separators
+  - Overlong UTF-8 encoding of dot and slash characters
+  - Use of path fragments stored in variables assembled at runtime
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c|%2e%2e\/|%2e%2e\\\\)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c|%252e%252e\/|%252e%252e\\\\)
+  - type: null_byte
+    pattern: (?:\.\.\/[^/]*%00|\.\.\\\\[^\\\\]*%00|%2e%2e%2f[^/]*%00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae|%e0%80%ae|%f0%80%80%ae|%c0%af|%e0%80%af)
+  multi_function_chain_patterns:
+  - req.query.file -> fs.readFileSync
+  - req.params.path -> path.join -> fs.readFileSync
+  - req.body.filename -> string concat -> fs.writeFile
+  - ctx.query.doc -> fs.promises.readFile
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary file read/write can expose credentials, tokens, and private keys enabling full server compromise
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: req.query.file
+    sink: fs.readFileSync()
+    through: direct parameter pass or string concatenation
+  - source: req.params.path
+    sink: fs.writeFile()
+    through: variable assignment
+  - source: req.body.filename
+    sink: fs.promises.readFile()
+    through: template literal interpolation
+  impact: 'Successful exploitation allows an attacker to read arbitrary files from the
+
+    server filesystem, including /etc/passwd, environment files, application
+
+    source code, private keys, database credentials, and session secrets.
+
+    Write-variant exploitation enables overwriting configuration files, injecting
+
+    malicious code into application files, or corrupting critical data. This can
+
+    lead to full server compromise, data breach, and lateral movement within the
+
+    infrastructure.
+
+    '
+  remediation: "1. Use path.resolve() and validate the resolved path starts with the intended base directory:\n\n   const\
+    \ baseDir = path.resolve(__dirname, 'uploads');\n   const resolvedPath = path.resolve(baseDir, userInput);\n   if (!resolvedPath.startsWith(baseDir\
+    \ + path.sep)) {\n     return res.status(403).send('Access denied');\n   }\n\n2. Use path.basename() to strip directory\
+    \ components when only a filename is needed:\n\n   const safeName = path.basename(req.query.file);\n   const filePath\
+    \ = path.join(uploadsDir, safeName);\n\n3. Maintain an allowlist of permitted filenames or paths.\n4. Never pass raw user\
+    \ input directly to filesystem operations.\n5. Apply chroot or container-level filesystem isolation.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://nodejs.org/api/path.html#pathresolvepaths
+  - https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - app\.\s*(?:get|post|put|delete|patch)\s*\(
+    - router\.\s*(?:get|post|put|delete|patch)\s*\(
+    - exports\.\s*\w+\s*=\s*(?:async\s+)?function
+    - module\.exports\s*=
+    taint_source_indicators:
+    - req\.query\.\w+
+    - req\.params\.\w+
+    - req\.body\.\w+
+    - req\.headers\[\s*['"][\w-]+['"]\s*\]
+    - ctx\.query\.\w+
+    - ctx\.params\.\w+
+    taint_sink_indicators:
+    - fs\.readFileSync\s*\(
+    - fs\.readFile\s*\(
+    - fs\.writeFileSync\s*\(
+    - fs\.writeFile\s*\(
+    - fs\.promises\.readFile\s*\(
+    - fs\.promises\.writeFile\s*\(
+    sanitization_patterns:
+    - path\.resolve\s*\([^)]*\)\s*\.startsWith\s*\(
+    - path\.normalize\s*\([^)]*\)\s*\.startsWith\s*\(
+    - path\.basename\s*\(
+    - sanitize(?:Path|FileName)\s*\(
+    - \.replace\s*\(\s*\/\[\\\\\/\]\s*\/g
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker sends a GET request to /api/files?name=../../../../etc/passwd.
+
+      The server-side handler calls fs.readFileSync(req.query.name) without
+
+      validation. The filesystem resolves the traversal sequences and returns the
+
+      contents of /etc/passwd, exposing system user information. Repeating with
+
+      targets like /etc/shadow, .env, or private keys escalates the attack to
+
+      full server compromise.
+
+      '
+    example_payload: ../../../../etc/passwd
+    attacker_objective: Read sensitive files such as /etc/passwd, .env, private keys, or application source code from the
+      server
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-JS-002
+    - PT-JS-005
+    - PT-PY-001
+    - PT-JAVA-001
+- rule_id: PT-JS-002
+  title: path.join with Unsanitized User Input
+  description: 'Detects usage of Node.js path.join where one or more path segments originate from unsanitized user input.
+    While path.join normalizes path separators, it does NOT prevent traversal — path.join(''/base'', ''../../etc/passwd'')
+    resolves to /etc/passwd. Developers often mistakenly believe path.join provides safety, making this a widespread and dangerous
+    pattern.
+
+    '
+  language: javascript
+  category: path_traversal
+  severity: High
+  confidence: 0.9
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - path-join
+  - node-js
+  - server-side
+  - cwe-22
+  - owasp-a01
+  - common-misconfiguration
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*[^)]*req\s*\.\s*(?:params|query|body|headers)\s*(?:\.\s*\w+|\[\s*['"\w]+\s*\])
+    description: path.join with request parameters as any segment
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*(?:__dirname|process\.cwd\(\))\s*,\s*[^,)]*,\s*req\s*\.\s*(?:params|query|body)\s*\.\s*\w+
+    description: path.join with base directory and user-controlled trailing segment
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*(?:uploadDir|baseDir|rootDir|staticDir|dataDir)\s*,\s*req\s*\.\s*(?:params|query|body)\s*\.\s*\w+
+    description: path.join with named base directory variable and request property
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*[^)]*(?:`[^`]*\$\{[^}]*req\b)
+    description: path.join with template literal interpolating request data
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*[^)]*(?:ctx\s*\.\s*(?:params|query|request)\s*\.\s*\w+)
+    description: path.join with Koa context parameters
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*[^)]*(?:file(?:Name|Path|_name|_path)|user(?:Input|Path|File)|doc(?:Name|Path))\s*[,\)]
+    description: path.join with common user-controlled variable names
+  - type: regex
+    pattern: path\s*\.\s*join\s*\(\s*[^)]*(?:args|options|config|params)\s*\.\s*(?:path|file|dir|name)\s*[,\)]
+    description: path.join with configuration or options object path properties
+  - type: regex
+    pattern: path\s*\.\s*(?:join|resolve)\s*\(\s*[^)]*\)\s*;\s*(?:\/\/[^\n]*)?\s*(?:fs|fsp)\s*\.\s*(?:readFile|writeFile|access|stat)
+    description: path.join result immediately used in fs operations without validation
+  anti_patterns:
+  - path\.join\s*\([^)]*\)\s*;\s*(?:\/\/[^\n]*)?\s*if\s*\(\s*!?\s*\w+\s*\.\s*startsWith\s*\(
+  - const\s+\w+\s*=\s*path\.join\s*\(\s*__dirname\s*,\s*['"][^'"]+['"]\s*\)\s*;
+  - path\.resolve\s*\([^)]+\)\s*\.\s*startsWith\s*\(\s*path\.resolve\s*\(
+  - if\s*\(\s*\w+\s*\.\s*includes\s*\(\s*['"]\.\.['"]\s*\)\s*\)
+  - path\.basename\s*\(\s*req\s*\.\s*(?:params|query|body)
+  - sanitize(?:Path|FileName|Input)\s*\(
+  - validator\.\s*(?:isAlphanumeric|whitelist)\s*\(
+  - path\.join\s*\(\s*__dirname\s*,\s*['"](?:views|templates|public|static)['"]
+  - \.replace\s*\(\s*\/\\\.\\\.(?:\\\/|\\\\\\\\)\s*\/g\s*,\s*['"]['"]\s*\)
+  - if\s*\(\s*\/\\\.\\\.\/\s*\.\s*test\s*\(\s*\w+\s*\)\s*\)
+  - allowedPaths\s*\.\s*includes\s*\(\s*\w+\s*\)
+  - whitelist\s*\.\s*(?:has|includes)\s*\(\s*\w+\s*\)
+  - realpath(?:Sync)?\s*\([^)]+\)\s*\.\s*startsWith\s*\(
+  - if\s*\(\s*!?\s*isValidPath\s*\(
+  - path\.normalize\s*\([^)]+\)\s*\.\s*indexOf\s*\(\s*['"]\.\.['"]\s*\)\s*(?:===?\s*-1|!==?\s*-1)
+  bypass_variants:
+  - description: URL-encoded dot-dot-slash to evade string matching
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c)
+  - description: Double URL encoding to bypass single decode filters
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte to truncate extension validation
+    pattern: (?:%00|\\x00|\\0|\\u0000)
+  - description: Backslash variant for Windows path resolution
+    pattern: (?:\.\.\\\\|\.\.%5c|\.\.%5C)
+  - description: Path segment with current-directory dot notation
+    pattern: (?:\.\/)+
+  evasion_indicators:
+  - URL encoding of dot-dot-slash characters
+  - Double encoding to bypass single-pass decode filters
+  - Null byte insertion to truncate extension checks
+  - Windows-style backslash separators
+  - Insertion of harmless ./ segments between traversal steps
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00|\\0)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af|%e0%80%ae)
+  multi_function_chain_patterns:
+  - req.query.file -> path.join -> fs.readFile
+  - req.params.name -> path.join -> res.sendFile
+  - req.body.dir -> path.join -> fs.readdir
+  - ctx.query.path -> path.join -> fs.createReadStream
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Traversal through path.join can escape intended base directories, accessing any file readable by the
+      Node.js process
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: req.query.file
+    sink: path.join(baseDir, userInput)
+    through: direct parameter pass
+  - source: req.params.name
+    sink: path.join(__dirname, 'uploads', userInput)
+    through: variable assignment to path segment
+  - source: req.body.path
+    sink: path.join(rootDir, userInput)
+    through: request body destructuring
+  impact: 'An attacker can escape the intended directory scope by injecting traversal
+
+    sequences into path segments. Since path.join normalizes but does not
+
+    restrict traversal, the resulting path can point anywhere on the filesystem.
+
+    This leads to arbitrary file read/write, information disclosure, or
+
+    denial of service through file overwrite/deletion.
+
+    '
+  remediation: "1. Always validate the resolved path after joining:\n\n   const fullPath = path.join(baseDir, userInput);\n\
+    \   const resolved = path.resolve(fullPath);\n   if (!resolved.startsWith(path.resolve(baseDir) + path.sep)) {\n     return\
+    \ res.status(403).send('Forbidden');\n   }\n\n2. Use path.basename() to extract only the filename:\n\n   const safeName\
+    \ = path.basename(userInput);\n   const fullPath = path.join(baseDir, safeName);\n\n3. Reject inputs containing '..' or\
+    \ path separators.\n4. Use a file-ID-to-path mapping instead of accepting paths from users.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://nodejs.org/api/path.html#pathjoinpaths
+  context_awareness:
+    surrounding_context_patterns:
+    - app\.\s*(?:get|post|put|delete)\s*\(
+    - router\.\s*(?:get|post|put|delete)\s*\(
+    - exports\.\s*\w+\s*=
+    taint_source_indicators:
+    - req\.query\.\w+
+    - req\.params\.\w+
+    - req\.body\.\w+
+    - ctx\.query\.\w+
+    - ctx\.params\.\w+
+    taint_sink_indicators:
+    - path\.join\s*\(
+    - path\.resolve\s*\(
+    - fs\.\w+\s*\(
+    sanitization_patterns:
+    - path\.resolve\s*\([^)]+\)\s*\.\s*startsWith
+    - path\.basename\s*\(
+    - \.replace\s*\(\s*\/\\\.\\\.[\\/]
+    - sanitizePath\s*\(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A file download endpoint uses path.join(uploadsDir, req.params.filename).
+
+      An attacker requests GET /download/../../../../etc/shadow. The path.join
+
+      call resolves to /etc/shadow, bypassing the intended uploads directory
+
+      boundary. The file contents are returned to the attacker, exposing
+
+      password hashes for all system users.
+
+      '
+    example_payload: ../../../../etc/shadow
+    attacker_objective: Escape the intended base directory to access arbitrary files on the server filesystem
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-JS-001
+    - PT-JS-003
+    - PT-PY-002
+- rule_id: PT-JS-003
+  title: Express Static File Serving Bypass
+  description: 'Detects insecure patterns in Express.js static file serving where user-controlled input can bypass the intended
+    directory restriction via res.sendFile, res.download, or improperly configured express.static middleware. This includes
+    direct use of user input in res.sendFile without root option or path validation, custom static file handlers that do not
+    properly constrain the served directory, and misconfigured dotfiles options.
+
+    '
+  language: javascript
+  category: path_traversal
+  severity: High
+  confidence: 0.88
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - express
+  - static-files
+  - sendFile
+  - download
+  - node-js
+  - cwe-22
+  - owasp-a01
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: res\s*\.\s*sendFile\s*\(\s*req\s*\.\s*(?:params|query|body)\s*\.\s*\w+
+    description: res.sendFile called directly with request parameter
+  - type: regex
+    pattern: res\s*\.\s*sendFile\s*\(\s*(?:path\.join|path\.resolve)\s*\(\s*[^)]*req\s*\.\s*(?:params|query|body)
+    description: res.sendFile with path.join/resolve containing request data
+  - type: regex
+    pattern: res\s*\.\s*download\s*\(\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+|path\.join\s*\([^)]*req\s*\.)
+    description: res.download with user-controlled file path
+  - type: regex
+    pattern: res\s*\.\s*sendFile\s*\(\s*(?:`[^`]*\$\{[^}]*req\b)
+    description: res.sendFile with template literal interpolating request data
+  - type: regex
+    pattern: express\s*\.\s*static\s*\(\s*(?:req\s*\.\s*(?:params|query|body)|process\.env\.\w+\s*\+\s*req)
+    description: express.static with dynamic user-controlled root directory
+  - type: regex
+    pattern: res\s*\.\s*sendFile\s*\(\s*(?:file(?:Path|Name)|userPath|docPath|requestedFile)\s*[,\)]
+    description: res.sendFile with common user-influenced variable names
+  - type: regex
+    pattern: res\s*\.\s*sendFile\s*\(\s*[^{)]+\)\s*(?:;|\s*$)
+    description: res.sendFile without options object (missing root constraint)
+  - type: regex
+    pattern: express\.static\s*\(\s*[^)]+,\s*\{[^}]*dotfiles\s*:\s*['"]allow['"]
+    description: express.static with dotfiles set to allow, exposing hidden files
+  anti_patterns:
+  - res\.sendFile\s*\(\s*[^,]+,\s*\{\s*root\s*:\s*(?:__dirname|path\.resolve)
+  - res\.sendFile\s*\(\s*path\.resolve\s*\(\s*__dirname\s*,\s*['"][^'"]*['"]\s*\)\s*\)
+  - if\s*\(\s*!?\s*(?:resolvedPath|fullPath)\s*\.\s*startsWith\s*\(
+  - path\.basename\s*\(\s*req\s*\.
+  - sanitize(?:Path|FileName)\s*\(
+  - if\s*\(\s*\w+\s*\.\s*includes\s*\(\s*['"]\.\.['"]\s*\)\s*\)
+  - whitelist\s*\.\s*(?:includes|has)\s*\(
+  - res\.sendFile\s*\(\s*['"][^'"]+['"]\s*[,\)]
+  - express\.static\s*\(\s*['"][^'"]+['"]\s*[,\)]
+  - \.replace\s*\(\s*\/\\\.\\\.[\\/]
+  - allowedExtensions\s*\.\s*includes
+  - if\s*\(\s*\/\\\.\\\.\/\.\s*test\s*\(
+  - realpath(?:Sync)?\b
+  - chroot\s*\(
+  - path\.normalize\s*\([^)]+\)\s*\.indexOf\s*\(\s*['"]\.\.['"]\s*\)
+  bypass_variants:
+  - description: URL-encoded traversal in Express route parameter
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Double encoding to bypass Express URL decode
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte injection to bypass extension checks in sendFile
+    pattern: (?:%00|\\x00|\\0)(?:\.(?:html|js|css|jpg|png))?$
+  - description: Backslash traversal for Windows-hosted Express servers
+    pattern: (?:\.\.\\\\|\.\.%5c|\.\.%5C)
+  - description: Path with encoded dots and slashes in query string
+    pattern: (?:\?.*(?:%2e%2e|\.\.)[%\/\\\\])
+  evasion_indicators:
+  - URL encoding of traversal sequences in route parameters
+  - Double URL encoding to bypass Express automatic decode
+  - Null byte injection before extension in sendFile calls
+  - Backslash separators targeting Windows Express deployments
+  - Encoded path segments in query string parameters
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)(?:\.\w+)?$
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af|%c0%ae)
+  multi_function_chain_patterns:
+  - req.params.file -> res.sendFile
+  - req.query.doc -> path.join -> res.sendFile
+  - req.params.name -> path.join -> res.download
+  - req.body.path -> res.sendFile without root
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: File download endpoints with sendFile can expose any file readable by the Node.js process user
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: req.params.file
+    sink: res.sendFile()
+    through: direct parameter or path.join
+  - source: req.query.document
+    sink: res.download()
+    through: variable assignment
+  - source: req.body.filename
+    sink: res.sendFile()
+    through: string concatenation
+  impact: 'An attacker can download arbitrary files from the server by injecting
+
+    path traversal sequences into file download or static serving endpoints.
+
+    Sensitive files such as application configuration, environment variables,
+
+    database credentials, TLS private keys, and other users'' uploaded files
+
+    can be exfiltrated. In severe cases, source code exposure reveals
+
+    additional vulnerabilities for chained exploitation.
+
+    '
+  remediation: "1. Always use the root option in res.sendFile:\n\n   res.sendFile(req.params.file, {\n     root: path.resolve(__dirname,\
+    \ 'public'),\n     dotfiles: 'deny'\n   });\n\n2. Validate file paths after resolution:\n\n   const resolved = path.resolve(publicDir,\
+    \ req.params.file);\n   if (!resolved.startsWith(publicDir + path.sep)) {\n     return res.status(403).send('Forbidden');\n\
+    \   }\n   res.sendFile(resolved);\n\n3. Use path.basename() to strip directory components.\n4. Set dotfiles: 'deny' in\
+    \ express.static options.\n5. Use a file ID mapping instead of passing raw filenames.\n"
+  references:
+  - https://expressjs.com/en/api.html#res.sendFile
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - app\.\s*(?:get|post)\s*\(\s*['"].*(?:download|file|doc|static|serve)
+    - router\.\s*(?:get|post)\s*\(
+    - express\s*\(\s*\)
+    taint_source_indicators:
+    - req\.params\.\w+
+    - req\.query\.\w+
+    - req\.body\.\w+
+    taint_sink_indicators:
+    - res\.sendFile\s*\(
+    - res\.download\s*\(
+    - express\.static\s*\(
+    sanitization_patterns:
+    - path\.resolve\s*\([^)]+\)\s*\.startsWith
+    - path\.basename\s*\(
+    - \.includes\s*\(\s*['"]\.\.['"]\s*\)
+    - \{\s*root\s*:\s*path\.resolve
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An Express route handler at GET /files/:name serves files using
+
+      res.sendFile(req.params.name) without the root option. The attacker
+
+      requests GET /files/..%2f..%2f..%2f..%2fetc%2fpasswd. Express decodes
+
+      the URL, and the operating system resolves the path to /etc/passwd,
+
+      returning the file contents to the attacker.
+
+      '
+    example_payload: ..%2f..%2f..%2f..%2fetc%2fpasswd
+    attacker_objective: Download arbitrary server files through the Express file serving endpoint
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-JS-001
+    - PT-JS-002
+    - PT-JS-004
+- rule_id: PT-JS-004
+  title: Multer Upload Path Traversal
+  description: 'Detects path traversal vulnerabilities in multer file upload configurations where the destination directory
+    or filename callback uses unsanitized user input. An attacker can craft a multipart upload with a filename containing
+    traversal sequences such as ../../../tmp/malicious.js to write files outside the intended upload directory. This can lead
+    to remote code execution if the traversal targets executable paths, or overwrite critical application files.
+
+    '
+  language: javascript
+  category: path_traversal
+  severity: High
+  confidence: 0.89
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - file-upload
+  - multer
+  - node-js
+  - rce-potential
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: destination\s*:\s*(?:function\s*\(|(?:\([^)]*\)|\w+)\s*=>)\s*[^}]*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+|file\s*\.\s*originalname)
+    description: Multer destination callback using request data or original filename
+  - type: regex
+    pattern: filename\s*:\s*(?:function\s*\(|(?:\([^)]*\)|\w+)\s*=>)\s*[^}]*(?:file\s*\.\s*originalname)\s*(?:\)|[,;])
+    description: Multer filename callback passing through originalname without sanitization
+  - type: regex
+    pattern: cb\s*\(\s*null\s*,\s*file\s*\.\s*originalname\s*\)
+    description: Multer callback passing original filename directly
+  - type: regex
+    pattern: cb\s*\(\s*null\s*,\s*(?:`[^`]*\$\{[^}]*file\.originalname[^}]*\}`|[^)]*\+\s*file\.originalname)
+    description: Multer callback with template literal or concatenation using originalname
+  - type: regex
+    pattern: multer\s*\(\s*\{\s*dest\s*:\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+)
+    description: Multer dest option set from user input
+  - type: regex
+    pattern: cb\s*\(\s*null\s*,\s*req\s*\.\s*(?:params|query|body)\s*\.\s*\w+\s*\)
+    description: Multer callback using request parameter for destination or filename
+  - type: regex
+    pattern: storage\s*=\s*multer\s*\.\s*diskStorage\s*\(\s*\{[^}]*(?:destination|filename)\s*:\s*[^}]*file\.originalname
+    description: multer.diskStorage with originalname in destination or filename
+  - type: regex
+    pattern: multer\s*\.\s*diskStorage\s*\(\s*\{[^}]*destination\s*:\s*(?:function|(?:\([^)]*\)|\w+)\s*=>)[^}]*path\.join\s*\([^)]*req\s*\.
+    description: multer.diskStorage destination using path.join with request data
+  anti_patterns:
+  - path\.basename\s*\(\s*file\s*\.\s*originalname\s*\)
+  - file\.originalname\s*\.\s*replace\s*\(\s*\/[^/]*\.\.[\\/][^/]*\/g
+  - uuid\s*\(\s*\)|uuidv4\s*\(\s*\)|crypto\.randomUUID\s*\(\s*\)
+  - Date\.now\s*\(\s*\)\s*\+\s*['"]
+  - sanitize(?:Filename|Path|Name)\s*\(
+  - file\.originalname\s*\.\s*replace\s*\(\s*\/\[\\\\\/\]\s*\/g
+  - path\.extname\s*\(\s*file\.originalname\s*\)\s*;\s*(?:\/\/[^\n]*)?\s*cb\s*\(\s*null\s*,\s*(?:uuid|Date\.now|crypto\.random)
+  - allowedExtensions\s*\.\s*includes\s*\(\s*path\.extname
+  - whitelist\s*\.\s*test\s*\(\s*file\.originalname\s*\)
+  - if\s*\(\s*file\.originalname\s*\.\s*includes\s*\(\s*['"]\.\.['"]\s*\)\s*\)
+  - file\.originalname\s*\.\s*match\s*\(\s*\/\^\[a-zA-Z0-9
+  - fileFilter\s*:\s*(?:function|(?:\([^)]*\)|\w+)\s*=>)\s*[^}]*(?:mimetype|allowedTypes|fileTypes)
+  - cb\s*\(\s*null\s*,\s*['"][^'"]*['"]\s*\)
+  - destination\s*:\s*['"][^'"]*['"]\s*[,\}]
+  - 'limits\s*:\s*\{\s*fileSize\s*:'
+  bypass_variants:
+  - description: Filename with URL-encoded traversal sequences
+    pattern: (?:filename="[^"]*(?:%2e%2e%2f|%2e%2e\/|\.\.[/\\\\])[^"]*")
+  - description: Double-encoded filename in Content-Disposition header
+    pattern: (?:filename="[^"]*(?:%252e%252e%252f|%252e%252e%255c)[^"]*")
+  - description: Null byte in filename to bypass extension check
+    pattern: (?:filename="[^"]*(?:%00|\\x00)[^"]*")
+  - description: Unicode/overlong encoded dots in filename
+    pattern: (?:filename="[^"]*(?:%c0%ae%c0%ae|%e0%80%ae)[^"]*")
+  - description: Backslash traversal in uploaded filename
+    pattern: (?:filename="[^"]*(?:\.\.\\\\|\.\.%5c)[^"]*")
+  evasion_indicators:
+  - URL-encoded traversal sequences in multipart filename field
+  - Double-encoded traversal in Content-Disposition header
+  - Null byte injection in uploaded filename
+  - Unicode-encoded dots in filename
+  - Mixed slash directions in multipart filename
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)(?:\.\w+)?$
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - multipart filename -> file.originalname -> cb(null, originalname)
+  - multipart filename -> file.originalname -> path.join(dest, originalname)
+  - req.body.uploadDir -> multer dest -> file write
+  - file.originalname -> string concat -> disk write
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Writing files to arbitrary paths can overwrite application code, configuration, or cron scripts leading
+      to RCE
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: multipart filename header
+    sink: multer diskStorage filename callback
+    through: file.originalname
+  - source: req.body.uploadDir
+    sink: multer diskStorage destination callback
+    through: direct parameter injection
+  - source: multipart filename
+    sink: path.join(dest, file.originalname)
+    through: filename callback
+  impact: 'Successful exploitation allows an attacker to write uploaded files to
+
+    arbitrary locations on the server filesystem. This can result in:
+
+    overwriting application source files for code injection, placing web shells
+
+    in publicly accessible directories, overwriting configuration files to
+
+    modify application behavior, or writing to cron directories for scheduled
+
+    code execution. The impact ranges from data corruption to full remote
+
+    code execution.
+
+    '
+  remediation: "1. Never use file.originalname directly; generate unique filenames:\n\n   filename: (req, file, cb) => {\n\
+    \     const uniqueName = crypto.randomUUID() + path.extname(file.originalname);\n     cb(null, uniqueName);\n   }\n\n\
+    2. If original filename is needed, use path.basename and sanitize:\n\n   const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g,\
+    \ '_');\n\n3. Hardcode the destination directory; never derive from user input:\n\n   destination: path.resolve(__dirname,\
+    \ 'uploads')\n\n4. Validate file types via MIME type checking and magic bytes.\n5. Set appropriate file size limits.\n"
+  references:
+  - https://github.com/expressjs/multer#diskstorage
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - multer\s*\.\s*diskStorage\s*\(
+    - multer\s*\(\s*\{
+    - upload\s*\.\s*(?:single|array|fields|any)\s*\(
+    taint_source_indicators:
+    - file\.originalname
+    - req\.body\.\w+
+    - req\.query\.\w+
+    taint_sink_indicators:
+    - cb\s*\(\s*null\s*,
+    - 'destination\s*:'
+    - 'filename\s*:'
+    sanitization_patterns:
+    - path\.basename\s*\(\s*file\.originalname
+    - uuid|crypto\.randomUUID
+    - \.replace\s*\(\s*\/[^/]*[\\\\\/]
+    - sanitizeFilename\s*\(
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker uploads a file with the Content-Disposition header set to:
+
+      filename="../../../app/server.js". The multer diskStorage filename
+
+      callback passes file.originalname directly to cb(null, file.originalname).
+
+      The file is written to the application root, overwriting server.js with
+
+      the attacker''s malicious code. On next server restart, the attacker''s
+
+      code executes with full server privileges.
+
+      '
+    example_payload: ../../../app/server.js
+    attacker_objective: Write arbitrary files to server filesystem locations outside the uploads directory, potentially achieving
+      remote code execution
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-JS-001
+    - PT-JS-005
+    - PT-PY-004
+- rule_id: PT-JS-005
+  title: ZIP Slip via adm-zip or archiver Libraries
+  description: 'Detects ZIP Slip vulnerabilities when extracting ZIP archives using adm-zip, archiver, or similar Node.js
+    libraries without validating that extracted file paths remain within the target directory. A maliciously crafted ZIP archive
+    can contain entries with path traversal sequences (e.g., ../../malicious.js), causing files to be extracted to arbitrary
+    filesystem locations. This is one of the most impactful path traversal variants as it often leads to remote code execution.
+
+    '
+  language: javascript
+  category: path_traversal
+  severity: High
+  confidence: 0.91
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - zip-slip
+  - archive-extraction
+  - adm-zip
+  - archiver
+  - rce-potential
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: extractAllTo\s*\(\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+|extractDir|outputDir|destDir|targetDir)
+    description: adm-zip extractAllTo with user-controlled or common destination variable
+  - type: regex
+    pattern: new\s+AdmZip\s*\(\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+|filePath|uploadPath|zipPath|archivePath)
+    description: AdmZip constructor with user-controlled path
+  - type: regex
+    pattern: getEntries\s*\(\s*\)\s*\.\s*forEach\s*\(\s*(?:function\s*\(\s*\w+\s*\)|(?:\(\s*\w+\s*\)|\w+)\s*=>)\s*\{[^}]*(?:fs\.\s*(?:writeFile|createWriteStream|mkdir))
+    description: Manual extraction loop with getEntries writing files without path validation
+  - type: regex
+    pattern: (?:entry|zipEntry|item)\s*\.\s*(?:entryName|name|fileName)\b(?!.*(?:startsWith|indexOf\s*\(\s*['"]\.\.['"]\s*\)\s*(?:===?\s*-1|!==?\s*-1)))
+    description: Access to zip entry name without subsequent traversal check
+  - type: regex
+    pattern: extractEntryTo\s*\(\s*(?:entry|zipEntry)\s*(?:\.\s*entryName)?\s*,\s*(?:outputDir|destDir|req\s*\.)
+    description: adm-zip extractEntryTo with unchecked entry name
+  - type: regex
+    pattern: yauzl\s*\.\s*open\s*\([^)]+(?:function|=>)\s*[^}]*(?:entry\.fileName|openReadStream)[^}]*(?:createWriteStream|writeFile)
+    description: yauzl ZIP extraction writing files without path validation
+  - type: regex
+    pattern: unzipper\s*\.\s*(?:Extract|Parse)\s*\(\s*\{[^}]*path\s*:\s*(?:req\s*\.|outputDir|destDir)
+    description: unzipper extraction with user-controlled or common output path
+  - type: regex
+    pattern: tar\s*\.\s*(?:extract|x)\s*\(\s*\{[^}]*(?:cwd|C)\s*:\s*(?:req\s*\.|outputDir|destDir)
+    description: tar extraction without path validation
+  anti_patterns:
+  - entry(?:Name|\.name|\.fileName)\s*\.\s*(?:startsWith|indexOf)\s*\(\s*['"]\.\.['"]\s*\)
+  - if\s*\(\s*!?\s*resolved\s*\.\s*startsWith\s*\(\s*(?:targetDir|destDir|outputDir)
+  - path\.resolve\s*\([^)]+\)\s*\.\s*startsWith\s*\(\s*path\.resolve\s*\(
+  - entry(?:Name|\.name)\s*\.\s*includes\s*\(\s*['"]\.\.['"]\s*\)
+  - if\s*\(\s*\/\\\.\\\.\/\.\s*test\s*\(\s*entry
+  - if\s*\(\s*entry\s*\.\s*(?:isDirectory|type\s*===?\s*['"]Directory['"]\s*)\s*\)\s*(?:continue|return)
+  - sanitize(?:Path|Entry|FileName)\s*\(
+  - zip\.extractAllTo\s*\(\s*['"][^'"]+['"]\s*,\s*true\s*\)
+  - const\s+\w+\s*=\s*path\.normalize\s*\(\s*entry[^)]*\)\s*;\s*if\s*\(\s*\w+\s*\.\s*startsWith
+  - path\.relative\s*\([^)]+\)\s*\.\s*startsWith\s*\(\s*['"]\.\.['"]\s*\)
+  - if\s*\(\s*path\.isAbsolute\s*\(\s*entry
+  - overwrite\s*:\s*false
+  - entry\.entryName\s*\.\s*replace\s*\(\s*\/\\\.\\\.[\\/]\s*\/g
+  - extractAllTo\s*\(\s*['"][^'"]+['"]\s*,\s*\w+\s*,\s*['"]
+  - \.replace\s*\(\s*\/\[\\\\\/\]\s*\/g
+  bypass_variants:
+  - description: ZIP entry with URL-encoded traversal path
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: ZIP entry with double encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: ZIP entry with null byte in filename
+    pattern: (?:%00|\\x00)(?:\.\w+)?
+  - description: ZIP entry with absolute path on Linux/Windows
+    pattern: (?:^\/|^[A-Za-z]:\\\\)
+  - description: ZIP entry with backslash separators for Windows traversal
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  evasion_indicators:
+  - ZIP entries with path traversal sequences in filenames
+  - ZIP entries mixing forward and backslash directory separators
+  - ZIP entries with absolute paths
+  - Nested ZIP archives (ZIP bomb + traversal)
+  - Symlinks within ZIP pointing outside extraction directory
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af|%e0%80%ae)
+  multi_function_chain_patterns:
+  - upload ZIP -> new AdmZip(buffer) -> extractAllTo
+  - upload ZIP -> getEntries -> forEach -> fs.writeFile(entry.entryName)
+  - upload archive -> yauzl.open -> openReadStream -> createWriteStream
+  - req.file -> unzipper.Extract -> disk write
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: ZIP Slip allows writing files to arbitrary locations, enabling RCE via overwrite of application code,
+      cron jobs, or SSH keys
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-uploaded ZIP file
+    sink: extractAllTo() or fs.writeFile()
+    through: ZIP entry entryName property
+  - source: ZIP entry filename
+    sink: path.join(destDir, entry.entryName)
+    through: manual extraction loop
+  - source: uploaded archive
+    sink: 'unzipper.Extract({path: destDir})'
+    through: archive entry paths
+  impact: 'ZIP Slip enables an attacker to write arbitrary files to the server
+
+    filesystem during archive extraction. Common exploitation scenarios
+
+    include: overwriting application source code or configuration for RCE,
+
+    placing web shells in document roots, overwriting crontab entries for
+
+    persistent access, and replacing SSH authorized_keys for remote login.
+
+    This vulnerability class has led to numerous critical CVEs across
+
+    multiple languages and frameworks.
+
+    '
+  remediation: "1. Validate every extracted file path stays within the target directory:\n\n   const zip = new AdmZip(uploadedFile);\n\
+    \   const entries = zip.getEntries();\n   const targetDir = path.resolve(__dirname, 'extracted');\n\n   for (const entry\
+    \ of entries) {\n     const entryPath = path.resolve(targetDir, entry.entryName);\n     if (!entryPath.startsWith(targetDir\
+    \ + path.sep)) {\n       throw new Error('Path traversal detected: ' + entry.entryName);\n     }\n   }\n   zip.extractAllTo(targetDir,\
+    \ true);\n\n2. Reject entries with absolute paths or '..' components.\n3. Use libraries with built-in ZIP Slip protection.\n\
+    4. Run extraction in a sandboxed temporary directory.\n"
+  references:
+  - https://snyk.io/research/zip-slip-vulnerability
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://github.com/nicbarker/adm-zip
+  context_awareness:
+    surrounding_context_patterns:
+    - require\s*\(\s*['"]adm-zip['"]\s*\)
+    - require\s*\(\s*['"]yauzl['"]\s*\)
+    - require\s*\(\s*['"]unzipper['"]\s*\)
+    - upload\s*\.\s*single\s*\(
+    taint_source_indicators:
+    - req\.file\.\w+
+    - entry\.entryName
+    - entry\.fileName
+    - zipEntry\.name
+    taint_sink_indicators:
+    - extractAllTo\s*\(
+    - extractEntryTo\s*\(
+    - fs\.writeFile\s*\(
+    - fs\.createWriteStream\s*\(
+    sanitization_patterns:
+    - path\.resolve\s*\([^)]+\)\s*\.startsWith
+    - entry\w*\.includes\s*\(\s*['"]\.\.['"]\s*\)
+    - path\.relative\s*\([^)]+\)\s*\.startsWith\s*\(\s*['"]\.\.['"]\s*\)
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker creates a ZIP archive containing an entry named
+
+      ../../../app/index.js with malicious JavaScript code. When a user uploads
+
+      this ZIP to a file processing endpoint that calls zip.extractAllTo(destDir),
+
+      the entry is extracted to the application root, overwriting index.js.
+
+      On the next server restart or hot-reload, the attacker''s code executes,
+
+      establishing a reverse shell.
+
+      '
+    example_payload: ../../../app/index.js
+    attacker_objective: Write files outside the extraction directory to overwrite application code and achieve remote code
+      execution
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-JS-004
+    - PT-PY-005
+    - PT-JAVA-005
+    - PT-GO-005
+- rule_id: PT-JS-006
+  title: Directory Listing via User-Controlled Directory Path
+  description: 'Detects usage of fs.readdir, fs.readdirSync, or fs.promises.readdir where the directory path originates from
+    user-controlled input. An attacker can inject path traversal sequences to enumerate files and directories outside the
+    intended scope, revealing the server''s filesystem structure, identifying sensitive files for subsequent targeted access,
+    and mapping the application deployment for further exploitation.
+
+    '
+  language: javascript
+  category: path_traversal
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - directory-listing
+  - information-disclosure
+  - fs-readdir
+  - node-js
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: fs\s*\.\s*readdir(?:Sync)?\s*\(\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+)
+    description: fs.readdir/readdirSync with direct request parameter
+  - type: regex
+    pattern: fs\s*\.\s*readdir(?:Sync)?\s*\(\s*path\s*\.\s*join\s*\(\s*[^)]*req\s*\.\s*(?:params|query|body)
+    description: fs.readdir with path.join containing request data
+  - type: regex
+    pattern: fs\s*\.\s*readdir(?:Sync)?\s*\(\s*(?:`[^`]*\$\{[^}]*req\b)
+    description: fs.readdir with template literal interpolating request data
+  - type: regex
+    pattern: fs(?:\.promises|Promises)\s*\.\s*readdir\s*\(\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+)
+    description: fs.promises.readdir with request parameter
+  - type: regex
+    pattern: fs\s*\.\s*readdir(?:Sync)?\s*\(\s*(?:dirPath|userDir|inputDir|folderPath|browsePath|listDir)\s*[,\)]
+    description: fs.readdir with common user-controlled directory variable names
+  - type: regex
+    pattern: fs\s*\.\s*readdir(?:Sync)?\s*\(\s*(?:ctx\s*\.\s*(?:params|query|request)\s*\.\s*\w+)
+    description: fs.readdir with Koa context parameters
+  - type: regex
+    pattern: glob\s*\(\s*(?:req\s*\.\s*(?:params|query|body)\s*\.\s*\w+|`[^`]*\$\{[^}]*req\b)
+    description: glob() or fast-glob with user-controlled path pattern
+  - type: regex
+    pattern: (?:readdirp|recursive-readdir|klaw|walk)\s*\(\s*(?:req\s*\.\s*(?:params|query|body))
+    description: Recursive directory reading libraries with user-controlled root
+  anti_patterns:
+  - fs\.readdir(?:Sync)?\s*\(\s*['"][^'"]*['"]\s*[,\)]
+  - fs\.readdir(?:Sync)?\s*\(\s*path\.resolve\s*\(\s*__dirname
+  - if\s*\(\s*!?\s*dirPath\s*\.\s*startsWith\s*\(
+  - path\.resolve\s*\([^)]+\)\s*\.\s*startsWith\s*\(\s*(?:baseDir|allowedDir|rootDir)
+  - if\s*\(\s*\w+\s*\.\s*includes\s*\(\s*['"]\.\.['"]\s*\)\s*\)
+  - path\.basename\s*\(\s*req\s*\.
+  - sanitize(?:Path|Dir|Input)\s*\(
+  - whitelist(?:ed)?(?:Dirs|Paths)\s*\.\s*(?:includes|has)\s*\(
+  - allowedDirs\s*\.\s*(?:includes|has)\s*\(
+  - if\s*\(\s*\/\\\.\\\.\/\.\s*test\s*\(
+  - path\.normalize\s*\([^)]+\)\s*\.\s*startsWith
+  - isSubdirectory\s*\(
+  - chroot\s*\(
+  - realpath(?:Sync)?\s*\([^)]+\)\s*\.\s*startsWith
+  - \.replace\s*\(\s*\/\[\\\\\/\]\s*\/g
+  bypass_variants:
+  - description: URL-encoded traversal to list parent directories
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Double encoding to bypass single decode
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte to disrupt path processing
+    pattern: (?:%00|\\x00)
+  - description: Backslash traversal for Windows
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  - description: Trailing slash and dot variations
+    pattern: (?:\.\.\/\.\.\/$|\.\.\/\.\.\/\.\/$)
+  evasion_indicators:
+  - URL-encoded path traversal in directory listing parameter
+  - Double encoding to bypass URL decode filters
+  - Null byte injection in directory path
+  - Windows backslash variants
+  - Trailing dots and slashes to confuse path resolution
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - req.query.dir -> fs.readdirSync -> response
+  - req.params.folder -> path.join -> fs.readdir -> JSON response
+  - req.body.path -> fs.promises.readdir -> file listing
+  - ctx.query.directory -> glob -> matching file list
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Directory listing reveals filesystem structure enabling targeted file read/write attacks
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: req.query.dir
+    sink: fs.readdirSync()
+    through: direct parameter pass
+  - source: req.params.folder
+    sink: fs.readdir()
+    through: path.join with base directory
+  - source: req.body.path
+    sink: fs.promises.readdir()
+    through: variable assignment
+  impact: 'Directory listing allows an attacker to enumerate the server filesystem
+
+    structure, revealing filenames, directory hierarchies, and potentially
+
+    sensitive file locations. This information is used to identify targets for
+
+    subsequent file read attacks (e.g., configuration files, key files, source
+
+    code). Even without directly reading file contents, the listing can expose
+
+    business-sensitive information through filenames and directory names. It
+
+    also aids in fingerprinting the application framework, identifying backup
+
+    files, and locating hidden administrative interfaces.
+
+    '
+  remediation: "1. Validate and constrain directory paths after resolution:\n\n   const baseDir = path.resolve(__dirname,\
+    \ 'userfiles');\n   const requested = path.resolve(baseDir, req.query.dir);\n   if (!requested.startsWith(baseDir + path.sep)\
+    \ && requested !== baseDir) {\n     return res.status(403).json({ error: 'Access denied' });\n   }\n   const files = fs.readdirSync(requested);\n\
+    \n2. Use allowlists for browsable directories.\n3. Implement path.basename() for single-level listing.\n4. Never expose\
+    \ filesystem listing to unauthenticated users.\n5. Consider virtual filesystem mappings instead of direct paths.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://nodejs.org/api/fs.html#fsreaddirpath-options-callback
+  context_awareness:
+    surrounding_context_patterns:
+    - app\.\s*(?:get|post)\s*\(\s*['"].*(?:list|browse|dir|folder|files)
+    - router\.\s*(?:get|post)\s*\(
+    - res\.\s*json\s*\(
+    taint_source_indicators:
+    - req\.query\.\w+
+    - req\.params\.\w+
+    - req\.body\.\w+
+    - ctx\.query\.\w+
+    taint_sink_indicators:
+    - fs\.readdir\s*\(
+    - fs\.readdirSync\s*\(
+    - fs\.promises\.readdir\s*\(
+    - glob\s*\(
+    sanitization_patterns:
+    - path\.resolve\s*\([^)]+\)\s*\.startsWith
+    - \.includes\s*\(\s*['"]\.\.['"]\s*\)
+    - sanitizePath\s*\(
+    - allowedDirs\s*\.\s*includes
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A file browser API endpoint at GET /api/browse?dir=documents accepts a
+
+      directory name parameter. The handler calls fs.readdirSync(path.join(
+
+      baseDir, req.query.dir)). The attacker sends GET /api/browse?dir=../../etc.
+
+      The resolved path points to /etc, and the response contains a listing of
+
+      system configuration files including passwd, shadow, hosts, and
+
+      ssh directories, mapping the server for further exploitation.
+
+      '
+    example_payload: ../../etc
+    attacker_objective: Enumerate server filesystem structure to identify sensitive files and plan targeted data exfiltration
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: false
+    related_rules:
+    - PT-JS-001
+    - PT-JS-002
+    - PT-JS-003

@@ -13,6 +13,21 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // Security: prevent eval-like constructs
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
+      "no-script-url": "error",
+
+      // Prevent console.log in production code
+      "no-console": ["warn", { allow: ["warn", "error"] }],
+
+      // Prevent debugger statements
+      "no-debugger": "error",
+    },
+  },
 ]);
 
 export default eslintConfig;

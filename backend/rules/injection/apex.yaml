@@ -1,0 +1,368 @@
+rules:
+- rule_id: APEX-INJ-001
+  title: SOQL Injection
+  description: 'Detects SOQL queries built with string concatenation of user input.
+
+    '
+  language: apex
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - soql-injection
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: Database\.query\s*\(\s*'(?:SELECT|INSERT|UPDATE|DELETE).*'\s*\+\s*(?:ApexPages|request|input|param|user)\b
+  - type: regex
+    pattern: Database\.query\s*\(\s*(?:query|soql|stmt|sql)\w*\s*\)
+  - type: regex
+    pattern: \[?\s*SELECT\b[^]]*'\s*\+\s*(?:ApexPages|request|input|param|user)\b
+  - type: regex
+    pattern: Database\.query\s*\(\s*'[^']*'\s*\+\s*\w+\s*\+\s*'[^']*'
+  anti_patterns:
+  - String.escapeSingleQuotes
+  - bind variable
+  - :paramName
+  - Database.query(.*:.*)
+  impact: 'SOQL injection can bypass sharing rules, expose sensitive Salesforce records,
+
+    and potentially modify data across objects.
+
+    '
+  remediation: "Use bind variables in SOQL queries:\n  List<Account> accts = [SELECT Id FROM Account WHERE Name = :userInput];\nOr escape input:\n  String safe = String.escapeSingleQuotes(userInput);\n"
+- rule_id: APEX-INJ-002
+  title: SOSL Injection
+  description: 'Detects SOSL search queries with user-controlled input.
+
+    '
+  language: apex
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sosl-injection
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: Database\.search\s*\(\s*'FIND\b.*'\s*\+\s*(?:input|param|user|request)\b
+  - type: regex
+    pattern: search\.query\s*\(\s*(?:query|searchTerm)\w*\s*\)
+  anti_patterns:
+  - String.escapeSingleQuotes
+  - :bindVar
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: APEX-INJ-003
+  title: Dynamic Apex via Type.forName
+  description: 'Detects dynamic class instantiation with user-controlled class names.
+
+    '
+  language: apex
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-470
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - dynamic-apex
+  - reflection
+  patterns:
+  - type: regex
+    pattern: Type\.forName\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: JSON\.deserialize\s*\([^,]+,\s*Type\.forName\s*\(\s*(?:request|param|input|user)\b
+  anti_patterns:
+  - allowedTypes
+  - whitelist
+  - ALLOWED_CLASSES
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: APEX-XAUTH-001
+  title: Missing CRUD/FLS Check
+  description: 'Detects DML operations without CRUD or Field Level Security checks.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.8
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - crud-fls
+  - sharing
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: (?:insert|update|delete|upsert)\s+\w+(?:List|Records|Objs|s)\s*;
+  - type: regex
+    pattern: Database\.(?:insert|update|delete|upsert)\s*\(
+  anti_patterns:
+  - isAccessible
+  - isCreateable
+  - isUpdateable
+  - isDeletable
+  - Schema.sObjectType
+  - WITH SECURITY_ENFORCED
+  - stripInaccessible
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-XAUTH-002
+  title: Missing Sharing Declaration
+  description: 'Detects Apex classes without explicit sharing declarations.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - sharing
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: public\s+class\s+\w+\s*(?:extends|implements|\{)
+  - type: regex
+    pattern: global\s+class\s+\w+\s*(?:extends|implements|\{)
+  anti_patterns:
+  - with sharing
+  - without sharing
+  - inherited sharing
+  - '@IsTest'
+  - interface
+  - enum
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-XAUTH-003
+  title: Hardcoded Credentials in Apex
+  description: 'Detects hardcoded passwords, tokens, or API keys in Apex code.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: (?:String\s+)?(?:password|apiKey|api_key|secretKey|token|authToken)\s*=\s*'[^']{4,}'
+  - type: regex
+    pattern: (?:setPassword|setHeader).*'(?:Bearer|Basic)\s+[A-Za-z0-9+/=]{10,}'
+  - type: regex
+    pattern: Authorization.*'Basic\s+[A-Za-z0-9+/=]{10,}'
+  anti_patterns:
+  - Named Credential
+  - Custom Setting
+  - Custom Metadata
+  - Org.getSecretKey
+  - test
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-XSS-001
+  title: Cross-Site Scripting in Visualforce
+  description: 'Detects XSS in Visualforce pages via unescaped output.
+
+    '
+  language: apex
+  category: xss
+  severity: High
+  confidence: 0.88
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - visualforce
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: \{!\s*(?:HTMLENCODE\s*\()?\s*(?:param|input|request|user)\b.*\}
+  - type: regex
+    pattern: escape\s*=\s*['"]false['"]
+  - type: regex
+    pattern: <apex:outputText\s+[^>]*escape\s*=\s*['"]false['"]
+  - type: regex
+    pattern: ApexPages\.currentPage\(\)\.getParameters\(\)\.get\(
+  anti_patterns:
+  - HTMLENCODE
+  - JSENCODE
+  - URLENCODE
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: APEX-XSS-002
+  title: Lightning Component XSS
+  description: 'Detects XSS in Lightning components via unsafe rendering.
+
+    '
+  language: apex
+  category: xss
+  severity: High
+  confidence: 0.82
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - lightning
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: (?:innerHTML|outerHTML)\s*=\s*(?:component|event|helper|cmp)\.
+  - type: regex
+    pattern: aura:unescapedHtml
+  - type: regex
+    pattern: lightning:formattedRichText.*value\s*=\s*['"]?\{!
+  anti_patterns:
+  - sanitize
+  - DOMPurify
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: APEX-SSRF-001
+  title: Server-Side Request Forgery in Apex
+  description: 'Detects HTTP callouts with user-controlled URLs.
+
+    '
+  language: apex
+  category: ssrf
+  severity: High
+  confidence: 0.85
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  detection_layer: 1
+  tags:
+  - ssrf
+  - callout
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: HttpRequest.*setEndpoint\s*\(\s*(?:request|param|input|user|url)\b
+  - type: regex
+    pattern: new\s+Http\(\)\.send.*setEndpoint\s*\(\s*(?:'[^']*'\s*\+|request|param|input)\b
+  anti_patterns:
+  - Named Credential
+  - 'callout:'
+  - allowedEndpoints
+  impact: Server-side request forgery enables access to internal resources and cloud metadata
+  remediation: Validate and allowlist URLs, block private IP ranges and cloud metadata endpoints
+- rule_id: APEX-XCRYPTO-001
+  title: Weak Cryptography in Apex
+  description: 'Detects use of weak encryption in Apex.
+
+    '
+  language: apex
+  category: crypto
+  severity: High
+  confidence: 0.88
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-crypto
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: Crypto\.encrypt\s*\(\s*'(?:DES|ECB|AES128)\b
+  - type: regex
+    pattern: Crypto\.generateDigest\s*\(\s*'(?:MD5|SHA1|SHA-1)\b
+  - type: regex
+    pattern: EncodingUtil\.base64(?:Encode|Decode)\s*\(.*(?:password|secret|token)\b
+  anti_patterns:
+  - AES256
+  - SHA256
+  - SHA-256
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: APEX-XSEC-001
+  title: Sensitive Data in Debug Log
+  description: 'Detects logging of sensitive data in Apex debug statements.
+
+    '
+  language: apex
+  category: secrets
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - logging
+  - data-exposure
+  patterns:
+  - type: regex
+    pattern: System\.debug\s*\([^)]*(?:password|passwd|secret|token|ssn|creditCard|apiKey)\b
+  - type: regex
+    pattern: System\.debug\s*\(\s*(?:LoggingLevel\.\w+\s*,\s*)?(?:request|credential|auth)\b
+  anti_patterns:
+  - mask
+  - redact
+  - LoggingLevel.NONE
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: APEX-DESER-001
+  title: Unsafe JSON Deserialization
+  description: 'Detects unsafe JSON deserialization in Apex.
+
+    '
+  language: apex
+  category: deserialization
+  severity: High
+  confidence: 0.8
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 2
+  tags:
+  - deserialization
+  - json
+  patterns:
+  - type: regex
+    pattern: JSON\.deserializeUntyped\s*\(\s*(?:request|param|input|body)\b
+  - type: regex
+    pattern: JSON\.deserialize\s*\([^,]+,\s*(?:Object|Map<String,\s*Object>)\.class\s*\)
+  anti_patterns:
+  - JSON.deserialize(.*MyClass.class)
+  - JSON.deserializeStrict
+  impact: Unsafe deserialization can lead to remote code execution via gadget chains
+  remediation: Use safe serialization formats (JSON), implement type filtering, avoid deserializing untrusted data
+- rule_id: APEX-FW-001
+  title: Governor Limit Vulnerability (SOQL in Loop)
+  description: 'Detects SOQL queries inside loops which can hit governor limits.
+
+    '
+  language: apex
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.88
+  cwe: CWE-770
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 2
+  tags:
+  - governor-limits
+  - performance
+  - salesforce
+  patterns:
+  - type: regex
+    pattern: for\s*\([^)]+\)\s*\{[^}]*\[?\s*SELECT\b
+  - type: regex
+    pattern: while\s*\([^)]+\)\s*\{[^}]*Database\.query\s*\(
+  anti_patterns:
+  - // bulkified
+  - Map<
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

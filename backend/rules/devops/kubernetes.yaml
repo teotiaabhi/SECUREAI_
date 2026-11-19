@@ -1,0 +1,383 @@
+rules:
+- rule_id: K8S-SEC-001
+  title: Privileged Container
+  description: 'Detects containers running in privileged mode with full host access.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - privileged
+  - container-escape
+  patterns:
+  - type: regex
+    pattern: privileged:\s*true
+  anti_patterns:
+  - '# required for'
+  - initContainer
+  impact: 'Privileged containers have full access to the host kernel and devices.
+
+    An attacker can escape the container and compromise the host node.
+
+    '
+  remediation: "Remove privileged flag and use specific capabilities:\n  securityContext:\n    privileged: false\n    capabilities:\n      add: [\"NET_ADMIN\"]\n"
+- rule_id: K8S-SEC-002
+  title: Container Running as Root
+  description: 'Detects containers without runAsNonRoot security context.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: High
+  confidence: 0.88
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - root
+  - security-context
+  patterns:
+  - type: regex
+    pattern: runAsUser:\s*0\b
+  - type: regex
+    pattern: runAsNonRoot:\s*false
+  anti_patterns:
+  - 'runAsNonRoot: true'
+  - 'runAsUser: 1000'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-003
+  title: HostPath Volume Mount
+  description: 'Detects hostPath volume mounts which expose host filesystem.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: High
+  confidence: 0.9
+  cwe: CWE-552
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - hostpath
+  - volume
+  patterns:
+  - type: regex
+    pattern: hostPath:\s*\n\s+path:\s*/
+  - type: regex
+    pattern: hostPath:\s*\n\s+path:\s*/(?:etc|var|root|proc|sys)\b
+  anti_patterns:
+  - 'type: DirectoryOrCreate'
+  - /var/log/
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-004
+  title: Secrets in Environment Variables
+  description: 'Detects hardcoded secrets in pod environment variables.
+
+    '
+  language: kubernetes
+  category: secrets
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - secrets
+  - env
+  patterns:
+  - type: regex
+    pattern: name:\s*(?:PASSWORD|SECRET|TOKEN|API_KEY|AWS_SECRET)\s*\n\s+value:\s*["\x27]?[A-Za-z0-9+/=]{8,}
+  - type: regex
+    pattern: env:\s*\n(?:\s+.*\n){0,20}\s+-\s*name:\s*.*(?:PASSWORD|SECRET|KEY|TOKEN)\s*\n\s+value:\s*\S+
+  anti_patterns:
+  - 'valueFrom:'
+  - 'secretKeyRef:'
+  - 'configMapKeyRef:'
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: K8S-SEC-005
+  title: Missing Network Policy
+  description: 'Detects pods/deployments without associated NetworkPolicy.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: High
+  confidence: 0.75
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 3
+  tags:
+  - kubernetes
+  - network-policy
+  - isolation
+  patterns:
+  - type: regex
+    pattern: kind:\s*(?:Deployment|StatefulSet|DaemonSet)\b
+  anti_patterns:
+  - 'kind: NetworkPolicy'
+  - networkpolicy
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-006
+  title: Writable Root Filesystem
+  description: 'Detects containers without read-only root filesystem.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-732
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - kubernetes
+  - filesystem
+  - read-only
+  patterns:
+  - type: regex
+    pattern: readOnlyRootFilesystem:\s*false
+  anti_patterns:
+  - 'readOnlyRootFilesystem: true'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-007
+  title: RBAC ClusterRoleBinding with cluster-admin
+  description: 'Detects ClusterRoleBinding granting cluster-admin privileges.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - rbac
+  - cluster-admin
+  patterns:
+  - type: regex
+    pattern: roleRef:\s*\n(?:\s+.*\n){0,20}\s+name:\s*cluster-admin
+  - type: regex
+    pattern: ClusterRoleBinding.*cluster-admin
+  anti_patterns:
+  - '# system'
+  - kube-system
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-008
+  title: Wildcard RBAC Permissions
+  description: 'Detects RBAC roles with wildcard resource or verb access.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - rbac
+  - wildcard
+  patterns:
+  - type: regex
+    pattern: resources:\s*\[?\s*["\x27]?\*["\x27]?\s*\]?
+  - type: regex
+    pattern: verbs:\s*\[?\s*["\x27]?\*["\x27]?\s*\]?
+  - type: regex
+    pattern: apiGroups:\s*\[?\s*["\x27]?\*["\x27]?\s*\]?
+  anti_patterns:
+  - '# admin namespace'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-009
+  title: Host Network Enabled
+  description: 'Detects pods using host network namespace.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: High
+  confidence: 0.9
+  cwe: CWE-668
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - host-network
+  - isolation
+  patterns:
+  - type: regex
+    pattern: hostNetwork:\s*true
+  - type: regex
+    pattern: hostPID:\s*true
+  - type: regex
+    pattern: hostIPC:\s*true
+  anti_patterns:
+  - '# CNI plugin'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-010
+  title: Missing Resource Limits
+  description: 'Detects containers without CPU or memory resource limits.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-770
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - kubernetes
+  - resources
+  - limits
+  patterns:
+  - type: regex
+    pattern: containers:\s*\n(?:(?!\s+resources:).*\n)+
+  anti_patterns:
+  - 'resources:'
+  - 'limits:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-011
+  title: Latest Image Tag
+  description: 'Detects container images using ''latest'' or no tag.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - image
+  - tag
+  patterns:
+  - type: regex
+    pattern: image:\s*[\w./:-]+:latest\b
+  - type: regex
+    pattern: image:\s*[\w./]+\s*$
+  anti_patterns:
+  - 'sha256:'
+  - '@sha256'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-012
+  title: Service Account Token Auto-Mount
+  description: 'Detects pods with auto-mounted service account tokens.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - kubernetes
+  - service-account
+  - token
+  patterns:
+  - type: regex
+    pattern: automountServiceAccountToken:\s*true
+  anti_patterns:
+  - 'automountServiceAccountToken: false'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-013
+  title: Dangerous Capabilities Added
+  description: 'Detects containers with dangerous Linux capabilities.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: High
+  confidence: 0.9
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - capabilities
+  - security-context
+  patterns:
+  - type: regex
+    pattern: add:\s*\[.*(?:SYS_ADMIN|SYS_PTRACE|NET_RAW|ALL)\b
+  - type: regex
+    pattern: add:\s*\n\s+-\s*(?:SYS_ADMIN|SYS_PTRACE|NET_RAW|ALL)\b
+  anti_patterns:
+  - 'drop:'
+  - '# required'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-014
+  title: Missing Pod Security Standards
+  description: 'Detects namespaces without pod security standard labels.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-693
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 3
+  tags:
+  - kubernetes
+  - pss
+  - namespace
+  patterns:
+  - type: regex
+    pattern: kind:\s*Namespace\b
+  anti_patterns:
+  - pod-security.kubernetes.io
+  - 'enforce:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: K8S-SEC-015
+  title: Tiller Deployment Detected
+  description: 'Detects Helm Tiller server-side component (deprecated, insecure).
+
+    '
+  language: kubernetes
+  category: devops
+  severity: High
+  confidence: 0.92
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - kubernetes
+  - helm
+  - tiller
+  patterns:
+  - type: regex
+    pattern: name:\s*tiller-deploy
+  - type: regex
+    pattern: image:\s*.*tiller
+  anti_patterns:
+  - '# helm v3'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging

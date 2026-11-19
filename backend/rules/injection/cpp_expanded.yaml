@@ -1,0 +1,274 @@
+rules:
+- rule_id: CPP-INJ-009
+  title: C++ Buffer Overflow via strcpy
+  description: Detects use of unsafe string copy functions that can cause buffer overflow
+  language: cpp
+  category: injection
+  severity: Critical
+  confidence: 95
+  cwe: 120
+  owasp: A06:2021
+  tags:
+  - buffer-overflow
+  - cpp
+  - memory-safety
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: \bstrcpy\s*\(\s*\w+\s*,\s*\w+
+  - type: regex
+    pattern: \bstrcat\s*\(\s*\w+\s*,\s*\w+
+  - type: regex
+    pattern: \bsprintf\s*\(\s*\w+\s*,\s*"[^"]*%s
+  - type: regex
+    pattern: \bgets\s*\(\s*\w+
+  anti_patterns:
+  - pattern: strncpy|strncat|snprintf
+    description: Using bounded string functions
+  - pattern: sizeof\s*\(
+    description: Size bounds checking
+  impact: Buffer overflow can lead to arbitrary code execution and system compromise
+  remediation: Use strncpy, snprintf, or C++ std::string and std::string_view
+- rule_id: CPP-INJ-010
+  title: C++ Format String Vulnerability
+  description: Detects format string vulnerabilities where user input controls format specifiers
+  language: cpp
+  category: injection
+  severity: Critical
+  confidence: 90
+  cwe: 134
+  owasp: A03:2021
+  tags:
+  - format-string
+  - cpp
+  - memory-corruption
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: printf\s*\(\s*\w*(?:input|buf|data|str|arg|param|user)\w*\s*\)
+  - type: regex
+    pattern: fprintf\s*\(\s*\w+\s*,\s*\w*(?:input|buf|data|user)\w*\s*\)
+  - type: regex
+    pattern: syslog\s*\(\s*\w+\s*,\s*\w*(?:input|buf|data|user)\w*\s*\)
+  anti_patterns:
+  - pattern: printf\s*\(\s*"[^"]*"\s*,
+    description: Static format string
+  - pattern: printf\s*\(\s*"[^"]*"\s*\)
+    description: No format arguments needed
+  impact: Format string attacks can read/write arbitrary memory, enabling code execution
+  remediation: 'Always use static format strings: printf("%s", user_input)'
+- rule_id: CPP-INJ-011
+  title: C++ Integer Overflow
+  description: Detects potential integer overflow in size calculations or allocations
+  language: cpp
+  category: injection
+  severity: High
+  confidence: 75
+  cwe: 190
+  owasp: A06:2021
+  tags:
+  - integer-overflow
+  - cpp
+  - memory-safety
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: malloc\s*\(\s*\w+\s*\*\s*\w+
+  - type: regex
+    pattern: new\s+\w+\s*\[\s*\w+\s*\*\s*\w+\s*\]
+  - type: regex
+    pattern: calloc\s*\(\s*\w+\s*,\s*\w+\s*\*\s*\w+
+  anti_patterns:
+  - pattern: safe_multiply|checked_multiply|__builtin_mul_overflow
+    description: Overflow-checked arithmetic
+  - pattern: if\s*\(\s*\w+\s*>\s*SIZE_MAX\s*/
+    description: Overflow check
+  impact: Integer overflow in allocations leads to heap overflow and code execution
+  remediation: Use overflow-checked arithmetic (__builtin_mul_overflow) before allocations
+- rule_id: CPP-INJ-012
+  title: C++ Use After Free
+  description: Detects potential use-after-free patterns in C++
+  language: cpp
+  category: rce
+  severity: Critical
+  confidence: 70
+  cwe: 416
+  owasp: A06:2021
+  tags:
+  - use-after-free
+  - cpp
+  - memory-safety
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: free\s*\(\s*\w+\s*\)\s*;[^}]*\w+\s*(?:->|\[)
+  - type: regex
+    pattern: delete\s+\w+\s*;[^=]*\w+\s*->
+  anti_patterns:
+  - pattern: =\s*nullptr\s*;
+    description: Pointer nullified after free
+  - pattern: unique_ptr|shared_ptr
+    description: Using smart pointers
+  impact: Use-after-free enables arbitrary code execution through corrupted heap
+  remediation: Use std::unique_ptr/std::shared_ptr, set pointers to nullptr after deletion
+- rule_id: CPP-INJ-013
+  title: C++ Double Free
+  description: Detects potential double-free vulnerabilities
+  language: cpp
+  category: rce
+  severity: Critical
+  confidence: 70
+  cwe: 415
+  owasp: A06:2021
+  tags:
+  - double-free
+  - cpp
+  - memory-safety
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: free\s*\(\s*\w+\s*\)\s*;[^}]*free\s*\(\s*\w+\s*\)
+  - type: regex
+    pattern: delete\s+\w+\s*;[^}]*delete\s+\w+\s*;
+  anti_patterns:
+  - pattern: =\s*(?:NULL|nullptr)\s*;
+    description: Pointer nullified between frees
+  - pattern: unique_ptr|shared_ptr
+    description: Using smart pointers
+  impact: Double free corrupts heap metadata, enabling code execution
+  remediation: Use smart pointers (unique_ptr), always nullify pointers after free
+- rule_id: CPP-AUTH-001
+  title: C++ Hardcoded Credentials
+  description: Detects hardcoded passwords and API keys in C++ code
+  language: cpp
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 798
+  owasp: A07:2021
+  tags:
+  - hardcoded-creds
+  - cpp
+  - secrets
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: const\s+(?:char\s*\*|std::string)\s+\w*(?:password|passwd|secret|api_key|token)\w*\s*=\s*"[^"]{8,}"
+  - type: regex
+    pattern: '#define\s+\w*(?:PASSWORD|SECRET|API_KEY|TOKEN)\w*\s+"[^"]{8,}"'
+  anti_patterns:
+  - pattern: getenv\s*\(
+    description: Reading from environment
+  - pattern: '""'
+    description: Empty string
+  impact: Credentials in source can be extracted from compiled binaries
+  remediation: Use environment variables or OS-provided credential stores
+- rule_id: CPP-CRYPTO-001
+  title: C++ Weak Cryptography
+  description: Detects use of weak or deprecated crypto in C++
+  language: cpp
+  category: crypto
+  severity: High
+  confidence: 90
+  cwe: 327
+  owasp: A02:2021
+  tags:
+  - crypto
+  - cpp
+  - weak-algorithm
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: MD5_(?:Init|Update|Final)\s*\(
+  - type: regex
+    pattern: SHA1_(?:Init|Update|Final)\s*\(
+  - type: regex
+    pattern: DES_(?:set_key|ecb_encrypt|cbc_encrypt)\s*\(
+  - type: regex
+    pattern: EVP_(?:md5|sha1|des_ecb|des_cbc|rc4)\s*\(
+  anti_patterns:
+  - pattern: EVP_(?:sha256|sha384|sha512|aes_256_gcm)
+    description: Using strong algorithms
+  impact: Weak algorithms can be broken, compromising data confidentiality/integrity
+  remediation: Use EVP_aes_256_gcm for encryption, EVP_sha256+ for hashing
+- rule_id: CPP-CRYPTO-002
+  title: C++ Insecure Random Number Generation
+  description: Detects use of insecure PRNG for security-sensitive operations
+  language: cpp
+  category: crypto
+  severity: High
+  confidence: 85
+  cwe: 338
+  owasp: A02:2021
+  tags:
+  - crypto
+  - cpp
+  - prng
+  - random
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: \brand\s*\(\s*\)\s*%
+  - type: regex
+    pattern: \bsrand\s*\(\s*(?:time|clock)\s*\(
+  - type: regex
+    pattern: std::mt19937[^;]*(?:token|key|secret|password|session|nonce)
+  anti_patterns:
+  - pattern: RAND_bytes|getrandom|BCryptGenRandom
+    description: Using cryptographic RNG
+  impact: Predictable random numbers enable session prediction and key guessing
+  remediation: Use RAND_bytes (OpenSSL), std::random_device, or OS CSPRNG functions
+- rule_id: CPP-PT-001
+  title: C++ Path Traversal
+  description: Detects path traversal in C++ file operations
+  language: cpp
+  category: path_traversal
+  severity: High
+  confidence: 85
+  cwe: 22
+  owasp: A01:2021
+  tags:
+  - path-traversal
+  - cpp
+  - lfi
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: fopen\s*\(\s*\w*(?:path|file|name|input)\w*\s*,
+  - type: regex
+    pattern: ifstream\s+\w+\s*\(\s*\w*(?:path|file|name|input)\w*\s*\)
+  - type: regex
+    pattern: std::filesystem::(?:exists|remove|copy|rename)\s*\(\s*\w*(?:path|file|name)\w*
+  anti_patterns:
+  - pattern: canonical|weakly_canonical|realpath
+    description: Path normalization
+  - pattern: \.find\s*\(\s*"\.\."
+    description: Traversal sequence check
+  impact: Path traversal allows reading/writing arbitrary files
+  remediation: Use std::filesystem::canonical() and verify path is within allowed directory
+- rule_id: CPP-DESER-001
+  title: C++ Unsafe Deserialization
+  description: Detects unsafe deserialization of untrusted data in C++
+  language: cpp
+  category: deserialization
+  severity: High
+  confidence: 80
+  cwe: 502
+  owasp: A08:2021
+  tags:
+  - deserialization
+  - cpp
+  - protobuf
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: ParseFromString\s*\(\s*\w*(?:input|data|buf|payload|request)\w*
+  - type: regex
+    pattern: boost::archive::(?:text|binary|xml)_iarchive\s+\w+\s*\(\s*\w*(?:input|data|stream)
+  - type: regex
+    pattern: cereal::(?:JSONInputArchive|BinaryInputArchive|XMLInputArchive)\s*\(\s*\w*(?:input|data|stream)
+  anti_patterns:
+  - pattern: ParseFromString.*\bIsInitialized\b
+    description: Validation after deserialization
+  impact: Deserializing untrusted data can lead to memory corruption or code execution
+  remediation: Validate and limit deserialized data size, use schema validation

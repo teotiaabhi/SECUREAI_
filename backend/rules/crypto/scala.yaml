@@ -1,0 +1,183 @@
+rules:
+
+  - rule_id: SCALA-CRYPTO-001
+    title: Weak Cryptographic Algorithm (DES/3DES/RC4)
+    description: >
+      Detects use of weak or deprecated cryptographic algorithms.
+    language: scala
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-327
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [weak-crypto, des, rc4]
+    patterns:
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"(?:DES|DESede|RC4|RC2|Blowfish)(?:/|\s*")'
+      - type: regex
+        pattern: 'SecretKeyFactory\.getInstance\s*\(\s*"(?:DES|DESede)"\s*\)'
+      - type: regex
+        pattern: 'KeyGenerator\.getInstance\s*\(\s*"(?:DES|DESede|RC4|Blowfish)"\s*\)'
+    anti_patterns:
+      - "AES"
+      - "ChaCha20"
+    impact: |
+      Weak cryptographic algorithms can be broken with modern hardware.
+    remediation: |
+      Use AES-256-GCM or ChaCha20-Poly1305:
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+
+  - rule_id: SCALA-CRYPTO-002
+    title: ECB Mode Usage
+    description: >
+      Detects use of ECB mode which does not provide semantic security.
+    language: scala
+    category: crypto
+    severity: High
+    confidence: 0.95
+    cwe: CWE-327
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [weak-crypto, ecb-mode]
+    patterns:
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"[^"]+/ECB/'
+      - type: regex
+        pattern: 'AES/ECB'
+    anti_patterns:
+      - "GCM"
+      - "CBC"
+      - "CTR"
+    impact: |
+      ECB mode reveals patterns in ciphertext, enabling cryptanalysis.
+    remediation: |
+      Use AES-GCM or AES-CBC with HMAC:
+        Cipher.getInstance("AES/GCM/NoPadding")
+
+  - rule_id: SCALA-CRYPTO-003
+    title: Insecure Random Number Generator
+    description: >
+      Detects use of java.util.Random or scala.util.Random for security purposes.
+    language: scala
+    category: crypto
+    severity: High
+    confidence: 0.85
+    cwe: CWE-330
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [weak-random, prng]
+    patterns:
+      - type: regex
+        pattern: '(?:new\s+Random|scala\.util\.Random|java\.util\.Random)\b'
+      - type: regex
+        pattern: 'Random\s*\(\s*\)\.(?:nextInt|nextLong|nextBytes|nextDouble)'
+      - type: regex
+        pattern: 'math\.random'
+    anti_patterns:
+      - "SecureRandom"
+      - "crypto.random"
+      - "// test"
+      - "// seed"
+    impact: |
+      Predictable random values enable session hijacking, token forgery, and crypto attacks.
+    remediation: |
+      Use java.security.SecureRandom:
+        val random = new SecureRandom()
+        val token = new Array[Byte](32)
+        random.nextBytes(token)
+
+  - rule_id: SCALA-CRYPTO-004
+    title: Hardcoded Cryptographic Key
+    description: >
+      Detects hardcoded encryption keys or initialization vectors.
+    language: scala
+    category: crypto
+    severity: Critical
+    confidence: 0.88
+    cwe: CWE-321
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [hardcoded-key, crypto-key]
+    patterns:
+      - type: regex
+        pattern: '(?:SecretKeySpec|IvParameterSpec)\s*\(\s*"[^"]{8,}"\.getBytes'
+      - type: regex
+        pattern: '(?:val|var)\s+(?:key|iv|secret|nonce)\s*=\s*"[^"]{8,}"\.getBytes'
+      - type: regex
+        pattern: '(?:val|var)\s+(?:aesKey|encryptionKey|decryptionKey)\s*=\s*"[^"]{8,}"'
+    anti_patterns:
+      - "sys.env"
+      - "config.get"
+      - "ConfigFactory"
+      - "KeyGenerator"
+      - "generateKey"
+    impact: |
+      Hardcoded keys can be extracted from source code, compromising all encrypted data.
+    remediation: |
+      Use key management systems or environment variables:
+        val key = sys.env("ENCRYPTION_KEY")
+        // Or use a KMS
+
+  - rule_id: SCALA-CRYPTO-005
+    title: Insecure TLS Configuration
+    description: >
+      Detects disabled TLS certificate verification or weak TLS versions.
+    language: scala
+    category: crypto
+    severity: Critical
+    confidence: 0.92
+    cwe: CWE-295
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [tls, certificate-verification]
+    patterns:
+      - type: regex
+        pattern: '(?:setHostnameVerifier|hostnameVerifier)\s*\(\s*(?:ALLOW_ALL|NoopHostnameVerifier|new\s+HostnameVerifier)'
+      - type: regex
+        pattern: 'TrustAllCertificates|trustAllCerts|InsecureTrustManager'
+      - type: regex
+        pattern: 'SSLContext\.getInstance\s*\(\s*"(?:SSL|TLS|TLSv1|TLSv1\.0|TLSv1\.1)"\s*\)'
+      - type: regex
+        pattern: 'checkServerTrusted.*return\s*$'
+      - type: regex
+        pattern: 'ws\.ssl\.loose\.acceptAnyCertificate\s*=\s*true'
+    anti_patterns:
+      - "TLSv1.2"
+      - "TLSv1.3"
+      - "// test"
+    impact: |
+      Disabled certificate verification enables MITM attacks.
+    remediation: |
+      Use TLS 1.2+ with proper certificate verification:
+        SSLContext.getInstance("TLSv1.3")
+      Never disable hostname verification in production.
+
+  - rule_id: SCALA-CRYPTO-006
+    title: Insecure Hash for Integrity
+    description: >
+      Detects use of MD5 or SHA-1 for data integrity verification.
+    language: scala
+    category: crypto
+    severity: Medium
+    confidence: 0.88
+    cwe: CWE-328
+    owasp: A02:2021-Cryptographic-Failures
+    detection_layer: 1
+    tags: [weak-hash, integrity]
+    patterns:
+      - type: regex
+        pattern: 'MessageDigest\.getInstance\s*\(\s*"(?:MD5|SHA-1|SHA1)"\s*\)'
+      - type: regex
+        pattern: '(?:DigestUtils|Hashing)\.(?:md5|sha1)\b'
+      - type: regex
+        pattern: '(?:checksum|integrity|verify|hash).*(?:md5|sha1)\b'
+    anti_patterns:
+      - "SHA-256"
+      - "SHA-512"
+      - "SHA3"
+    impact: |
+      MD5 and SHA-1 are vulnerable to collision attacks.
+    remediation: |
+      Use SHA-256 or SHA-3 for integrity verification:
+        MessageDigest.getInstance("SHA-256")

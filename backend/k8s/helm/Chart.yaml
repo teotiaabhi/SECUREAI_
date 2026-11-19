@@ -1,0 +1,13 @@
+apiVersion: v2
+name: secureai-analyzer
+version: 1.0.0
+appVersion: "1.0.0"
+description: SecureAI Code Analyzer — AI-powered full-stack code security analysis platform
+type: application
+keywords:
+  - security
+  - sast
+  - code-analysis
+  - vulnerability-scanner
+maintainers:
+  - name: SecureAI Team

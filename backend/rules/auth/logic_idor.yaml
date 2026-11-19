@@ -1,0 +1,594 @@
+rules:
+- rule_id: LOGIC-IDOR-001
+  title: Flask Route ID Parameter Used Directly in Database Query
+  description: 'Detects Flask route handlers that accept an ID path parameter (<int:id>, <int:doc_id>, <uuid:user_id>) and pass it directly to a database query (Model.query.get(id), filter_by(id=id)) without
+    any authorization or ownership check. This is the canonical IDOR pattern in Flask applications.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.72
+  cwe: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - idor
+  - direct-object-reference
+  - flask-route
+  - authorization-bypass
+  - access-control
+  detection_layer: 1
+  vulnerability_family: idor_direct_object_reference
+  attack_surface_type: api
+  patterns:
+  - pattern: '@(?:app|blueprint|bp|router)\.(?:route|get|post|put|patch|delete)\s*\(\s*[''"][^''"]*<(?:int|string|uuid)?:?\w*(?:id|pk|uuid)\w*>[^''"]*[''"]'
+    description: Flask route with ID path parameter in URL pattern
+  - pattern: def\s+\w+\s*\(\s*[^)]*\w*(?:_id|_pk|_uuid)\s*:\s*(?:int|str|UUID)
+    description: FastAPI handler with typed ID parameter
+  - pattern: \.query\.(?:get|get_or_404)\s*\(\s*\w*(?:id|pk)\w*\s*\)
+    description: Model.query.get() using ID variable from route
+  - pattern: \.(?:query\.)?filter_by\s*\(\s*(?:id|pk)\s*=\s*\w*(?:id|pk)\w*\s*\)
+    description: filter_by(id=...) using route parameter directly
+  anti_patterns:
+  - '@login_required'
+  - '@permission_required'
+  - '@requires_auth'
+  - flask_login
+  - flask_principal
+  - conftest
+  - pytest
+  - 'Depends('
+  - 'Security('
+  - 'current_user'
+  - 'get_current_user'
+  - 'verify_token'
+  - 'auth_required'
+  - 'authenticate'
+  - 'HTTPBearer'
+  - 'OAuth2PasswordBearer'
+  - 'api_key_header'
+  bypass_variants:
+  - variant: 'UUID instead of integer: <uuid:doc_id>'
+    description: UUIDs are harder to guess but still need authorization
+  - variant: 'Slug-based access: /items/<slug>'
+    description: Slugs can be enumerated or guessed
+  - variant: 'Nested path: /tenants/<int:tid>/items/<int:id>'
+    description: Tenant ID in URL but not validated against session tenant
+  - variant: 'Query param instead of path: ?id=123'
+    description: ID from query string rather than path
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.route'
+    - '@app.get'
+    - def get(
+    - def retrieve(
+    - def delete(
+    taint_source_indicators:
+    - <int:id>
+    - <int:doc_id>
+    - request.view_args
+    - request.args.get('id')
+    taint_sink_indicators:
+    - Model.query.get
+    - filter_by(id=
+    - get_or_404
+    - session.get(Model
+    sanitization_patterns:
+    - current_user.id
+    - g.tenant_id
+    - obj.user_id ==
+    - obj.tenant_id ==
+    - abort(403)
+    - has_permission
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: User-controlled ID parameter directly accesses arbitrary objects
+  multi_function_chain_patterns:
+  - route('<int:id>') -> Model.query.get(id) -> jsonify(obj.to_dict())
+  - route('<int:doc_id>') -> Document.query.get(doc_id) -> send_file(doc.path)
+  - route('<int:user_id>') -> User.query.get(user_id) -> return user profile
+  probable_taint_paths:
+  - source: url_path_parameter
+    sink: Model.query.get(id)
+    through: Flask route variable injection
+  - source: url_path_parameter
+    sink: Model.query.filter_by(id=param)
+    through: direct assignment to ORM filter
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 11
+    exploitability_score: High
+  impact: 'Horizontal privilege escalation. Attacker manipulates the ID parameter (incrementing integers, enumerating UUIDs) to access objects belonging to other users or tenants: documents, invoices, profiles,
+    API keys, and financial records. Sequential integer IDs are trivially enumerable.
+
+    '
+  remediation: "Always validate object ownership after fetching:\n@app.get('/documents/<int:doc_id>') @login_required def get_document(doc_id):\n    # WRONG:\n    doc = Document.query.get_or_404(doc_id)\n\
+    \    return jsonify(doc.to_dict())\n\n    # RIGHT — scope the query:\n    doc = Document.query.filter_by(\n        id=doc_id,\n        tenant_id=g.tenant_id\n    ).first_or_404()\n    return jsonify(doc.to_dict())\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-IDOR-002
+    - LOGIC-IDOR-003
+    - LOGIC-MT-003
+    - LOGIC-MT-001
+- rule_id: LOGIC-IDOR-002
+  title: Object Retrieved by ID Without Ownership or Tenant Verification
+  description: 'Detects patterns where an object fetched by user-supplied ID is used (serialized, modified, deleted) without an intervening ownership or tenant validation check. This Layer 2 rule has lower
+    confidence than LOGIC-IDOR-001 because the authorization check may exist in a decorator or middleware not visible in the immediate code context. Confidence is boosted when corroborated by LOGIC-MT-001/002
+    in the same file.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.55
+  cwe: CWE-862
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - idor
+  - missing-authz
+  - ownership-check
+  - contextual
+  detection_layer: 2
+  vulnerability_family: idor_direct_object_reference
+  attack_surface_type: api
+  patterns:
+  - pattern: return\s+[A-Z]\w{0,40}.query\.(?:get|get_or_404)\s*\(\s*\w+
+    description: Direct return of Model.query.get() result without authorization check
+  - pattern: def\s+\w+\s*\([^)]*\w*(?:_id|_pk|\bid\b)[^)]*\)[\s\S]{0,200}\.query\.(?:get|get_or_404|filter_by)\s*\(
+    description: Function accepts ID parameter and queries by it without ownership check
+    flags:
+    - DOTALL
+  - pattern: (?:db\.session|session)\.get\s*\(\s*[A-Z]\w*\s*,\s*\w+(?:_id|_pk)
+    description: session.get(Model, id) — PK lookup without ownership validation
+  - pattern: return\s+[A-Z]\w{0,40}.objects\.get\s*\(\s*(?:pk|id)\s*=
+    description: Direct return of Django objects.get() without ownership check
+  anti_patterns:
+  - '@login_required'
+  - '@permission_required'
+  - has_permission
+  - check_access
+  - verify_owner
+  - abort(403)
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Post-fetch check with TOCTOU gap: obj = get(id); if check: use(obj)'
+    description: Time-of-check-to-time-of-use in async environments
+  - variant: Decorator-based check that is easily removed
+    description: Authorization decorator on function that can be bypassed
+  - variant: 'Object graph traversal: obj.parent.children[0]'
+    description: Accessing related objects without re-checking ownership
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.route'
+    - def get(
+    - def update(
+    - def delete(
+    taint_source_indicators:
+    - <int:id>
+    - request.args.get
+    - request.json
+    - request.view_args
+    sanitization_patterns:
+    - .tenant_id == g.tenant_id
+    - .user_id == current_user.id
+    - abort(403)
+    - abort(404)
+    - check_ownership
+    - verify_access
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Fetched object used without authorization — horizontal privilege escalation
+  probable_taint_paths:
+  - source: user_supplied_id
+    sink: api_response_with_object_data
+    through: Model.query.get(id) → jsonify(obj.to_dict())
+  - source: user_supplied_id
+    sink: object_deletion
+    through: Model.query.get(id) → db.session.delete(obj)
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 9
+    exploitability_score: High
+  impact: 'Unauthorized access to arbitrary objects via ID manipulation. Depending on the endpoint type: data disclosure (GET), data modification (PUT/PATCH), or data destruction (DELETE). In multi-tenant
+    context, enables cross-tenant operations.
+
+    '
+  remediation: "Implement ownership validation between fetch and use:\n@app.put('/items/<int:item_id>') @login_required def update_item(item_id):\n    item = Item.query.filter_by(\n        id=item_id,\n\
+    \        tenant_id=g.tenant_id\n    ).first_or_404()\n    item.update(request.json)\n    db.session.commit()\n    return jsonify(item.to_dict())\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-IDOR-001
+    - LOGIC-IDOR-006
+    - LOGIC-MT-002
+    - LOGIC-MT-003
+- rule_id: LOGIC-IDOR-003
+  title: Nested Resource Access Without Parent Object Validation
+  description: 'Detects access to nested/child resources using both parent and child IDs where the parent-child relationship is not validated. Example: /tenants/<tid>/items/<item_id> where item_id is fetched
+    without verifying it belongs to the tenant identified by tid. The URL implies hierarchical scoping but the implementation may not enforce it.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.58
+  cwe: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - idor
+  - nested-resource
+  - parent-child
+  - hierarchical-access
+  detection_layer: 2
+  vulnerability_family: idor_direct_object_reference
+  attack_surface_type: api
+  patterns:
+  - pattern: '@(?:app|blueprint|bp|router)\.(?:route|get|post|put|patch|delete)\s*\(\s*[''"][^''"]*<(?:int|string|uuid)?:?\w+>[^''"]*<(?:int|string|uuid)?:?\w+>[^''"]*[''"]'
+    description: Route with two path parameters — verify parent-child relationship
+  - pattern: '[a-zA-Z_]\w{0,60}\s*=\s*[A-Z]\w{0,40}.query\.(?:get|get_or_404)\s*\(\s*\w{1,40}\s*\)[\s\S]{0,120}\w+\s*=\s*[A-Z]\w{0,40}.query\.(?:get|get_or_404)\s*\(\s*\w{1,40}\s*\)'
+    description: Two separate get() calls suggesting nested resource without relationship check
+    flags:
+    - DOTALL
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}\.w*\.query\.(?:get|get_or_404|filter_by)\s*\([^)]*\w*(?:_id|_pk)\w*[^)]*\)(?!.*(?:parent|tenant|org|owner|user)_id)'
+    description: Child resource query without parent/tenant FK in criteria
+  anti_patterns:
+  - abort(403)
+  - abort(404)
+  - check_access
+  - verify_ownership
+  - '@login_required'
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Path traversal: /tenants/1/items/999 where item 999 belongs to tenant 2'
+    description: URL implies tenant 1 but item is fetched without tenant validation
+  - variant: 'Nested delete: /users/<uid>/sessions/<sid> without verifying session ownership'
+    description: Session sid fetched independently of user uid
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.route'
+    - def get(
+    - def update(
+    taint_source_indicators:
+    - <int:parent_id>
+    - <int:child_id>
+    sanitization_patterns:
+    - child.parent_id == parent_id
+    - child.tenant_id == g.tenant_id
+    - abort(404)
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Child resource accessed without parent relationship verification
+  multi_function_chain_patterns:
+  - route('/tenants/<int:tid>/items/<int:iid>') -> Item.query.get(iid) -> jsonify() [tid ignored]
+  - route('/users/<int:uid>/docs/<int:did>') -> Document.query.get(did) -> return [uid unchecked]
+  probable_taint_paths:
+  - source: nested_url_child_id
+    sink: child_object_query
+    through: path parameter → Model.query.get(child_id) without parent FK check
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 9
+    exploitability_score: High
+  impact: 'Cross-tenant or cross-user resource access through hierarchical URL manipulation. The nested URL structure suggests access is scoped (e.g., /tenants/1/items/5) but the implementation fetches
+    the child resource without verifying it belongs to the specified parent.
+
+    '
+  remediation: "Validate parent-child relationship explicitly:\n@app.get('/tenants/<int:tid>/items/<int:item_id>') @login_required def get_item(tid, item_id):\n    # Verify tenant ownership\n    if tid\
+    \ != g.tenant_id:\n        abort(404)\n    # Fetch with relationship constraint\n    item = Item.query.filter_by(\n        id=item_id,\n        tenant_id=tid  # Enforce parent-child relationship\n \
+    \   ).first_or_404()\n    return jsonify(item.to_dict())\n"
+  cross_rule_intelligence:
+    requires_ai_validation: true
+    related_rules:
+    - LOGIC-IDOR-001
+    - LOGIC-IDOR-002
+    - LOGIC-MT-003
+- rule_id: LOGIC-IDOR-004
+  title: Bulk Fetch by User-Supplied IDs Without Ownership Validation
+  description: 'Detects endpoints that accept an array of IDs from the request body or parameters and fetch all matching objects without filtering by tenant or user ownership. Batch/bulk endpoints amplify
+    IDOR impact because a single request can exfiltrate multiple objects.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.65
+  cwe: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - idor
+  - bulk-fetch
+  - batch-api
+  - id-array
+  - amplified-idor
+  detection_layer: 2
+  vulnerability_family: idor_direct_object_reference
+  attack_surface_type: api
+  patterns:
+  - pattern: \.query\.filter\s*\(\s*[A-Z]\w{0,40}.id\.in_\s*\(\s*(?:request\.(?:json|args|form)|data|payload|body|ids)
+    description: SQLAlchemy .in_() filter with user-supplied ID array
+  - pattern: \.query\.filter\s*\(\s*[A-Z]\w{0,40}.(?:id|pk)\.in_\s*\(
+    description: SQLAlchemy .in_() bulk filter — verify tenant scope
+  - pattern: \.objects\.filter\s*\(\s*(?:id|pk)__in\s*=
+    description: Django filter with id__in — bulk fetch by user-supplied IDs
+  - pattern: \.find\s*\(\s*\{[^}]*['"]\$in['"]\s*:\s*(?:request|data|ids|payload)
+    description: PyMongo $in query with user-supplied ID list
+  anti_patterns:
+  - tenant_id
+  - current_user
+  - g.tenant_id
+  - owner_id
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Mixed-tenant IDs: [own_id_1, other_tenant_id_1, own_id_2]'
+    description: Some IDs belong to attacker, others to victim — partial exfiltration
+  - variant: 'Large ID list: pass 10000 sequential IDs to enumerate all objects'
+    description: Bulk enumeration attack via oversized ID array
+  - variant: 'GraphQL batch: query { items(ids: [...]) { sensitiveField } }'
+    description: GraphQL resolver with bulk ID argument
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.post'
+    - '@app.route'
+    - def batch_
+    - def bulk_
+    - request.json
+    taint_source_indicators:
+    - request.json['ids']
+    - request.json.get('ids')
+    - data.get('ids')
+    - request.args.getlist('id')
+    sanitization_patterns:
+    - tenant_id=
+    - g.tenant_id
+    - current_user.id
+    - owner_id=
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Bulk ID injection extracts multiple cross-tenant objects per request
+  multi_function_chain_patterns:
+  - request.json['ids'] -> Model.query.filter(Model.id.in_(ids)) -> jsonify([x.to_dict() for x in results])
+  - POST /api/items/batch -> ids from body -> bulk query -> return all matching objects
+  probable_taint_paths:
+  - source: request_body_ids_array
+    sink: bulk_orm_query_in_clause
+    through: request.json['ids'] → Model.id.in_(ids) → result set
+  - source: query_param_id_list
+    sink: bulk_orm_query_in_clause
+    through: request.args.getlist('id') → filter(id__in=ids)
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 11
+    exploitability_score: High
+  impact: 'Amplified IDOR — single request exfiltrates multiple objects across tenants. Attacker submits array of sequential or guessed IDs to extract bulk data. Impact multiplied by batch size. Can be
+    used for mass enumeration or targeted extraction of specific high-value records.
+
+    '
+  remediation: "Always include tenant scope in bulk queries:\n@app.post('/api/items/batch') @login_required def batch_get_items():\n    ids = request.json.get('ids', [])\n    # WRONG: items = Item.query.filter(Item.id.in_(ids)).all()\n\
+    \    # RIGHT:\n    items = Item.query.filter(\n        Item.id.in_(ids),\n        Item.tenant_id == g.tenant_id\n    ).all()\n    return jsonify([i.to_dict() for i in items])\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-IDOR-001
+    - LOGIC-MT-006
+    - LOGIC-MT-007
+- rule_id: LOGIC-IDOR-005
+  title: File or Document Access by ID Without Authorization
+  description: 'Detects file access endpoints where a document/file ID is used to retrieve or serve a file without ownership validation. File endpoints are particularly sensitive because they may contain
+    PII, financial reports, contracts, or internal documents. Low-entropy sequential IDs make enumeration trivial.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.7
+  cwe: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - idor
+  - file-access
+  - document-download
+  - data-exfiltration
+  detection_layer: 2
+  vulnerability_family: idor_direct_object_reference
+  attack_surface_type: api
+  patterns:
+  - pattern: \.query\.(?:get|get_or_404|filter_by)\s*\([^)]+\)[\s\S]{0,200}(?:send_file|send_from_directory)\s*\(
+    description: Database lookup followed by send_file() — verify object ownership
+    flags:
+    - DOTALL
+  - pattern: '@(?:app|blueprint|bp|router)\.(?:route|get)\s*\(\s*[''"][^''"]*(?:files?|documents?|attachments?|downloads?|media|assets?)/\s*<(?:int|string|uuid)?:?'
+    description: File/document access route with ID parameter
+  - pattern: \.query\.(?:get|get_or_404|filter_by)\s*\([^)]+\)[\s\S]{0,150}(?:FileResponse|StreamingResponse)\s*\(
+    description: Database lookup followed by FileResponse — verify ownership
+    flags:
+    - DOTALL
+  - pattern: open\s*\(\s*(?:\w+\.(?:file_path|path|filepath|storage_path|uri|location))
+    description: File opened using path from database record — verify object ownership
+  anti_patterns:
+  - abort(403)
+  - current_user
+  - g.tenant_id
+  - check_access
+  - has_permission
+  - verify_owner
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Path prediction: /files/1, /files/2, /files/3 — sequential enumeration'
+    description: Integer IDs trivially enumerable
+  - variant: 'Cached file URL: pre-signed URLs generated without tenant check'
+    description: Cache key generation doesn't include tenant scope
+  - variant: 'Thumbnail/preview endpoint: /files/<id>/preview'
+    description: Preview endpoint may have weaker access controls than download
+  context_awareness:
+    surrounding_context_patterns:
+    - send_file
+    - send_from_directory
+    - download
+    - attachment
+    taint_source_indicators:
+    - <int:file_id>
+    - <int:doc_id>
+    - request.args.get('file_id')
+    sanitization_patterns:
+    - .tenant_id == g.tenant_id
+    - abort(403)
+    - check_file_access
+    - verify_file_owner
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Direct file/document access via ID enumeration
+  multi_function_chain_patterns:
+  - route('/files/<int:fid>') -> File.query.get(fid) -> send_file(file.path)
+  - route('/documents/<int:did>/download') -> Document.query.get(did) -> FileResponse(doc.path)
+  probable_taint_paths:
+  - source: url_file_id_parameter
+    sink: send_file_with_db_path
+    through: File.query.get(id) → file.path → send_file()
+  - source: query_param_doc_id
+    sink: file_open_read
+    through: Document.query.get(id) → open(doc.path) → read()
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 12
+    exploitability_score: High
+  impact: 'Direct exfiltration of files and documents belonging to other users or tenants. Common targets: financial reports, contracts, tax documents, medical records, government IDs, internal memos. Single-file
+    access can be automated to enumerate and download entire document repositories.
+
+    '
+  remediation: "Validate file ownership before serving:\n@app.get('/files/<int:file_id>') @login_required def download_file(file_id):\n    # WRONG:\n    f = File.query.get_or_404(file_id)\n    return send_file(f.path)\n\
+    \n    # RIGHT:\n    f = File.query.filter_by(\n        id=file_id,\n        tenant_id=g.tenant_id\n    ).first_or_404()\n    return send_file(f.path, as_attachment=True)\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-IDOR-001
+    - LOGIC-IDOR-002
+    - LOGIC-MT-003
+    - LOGIC-MT-007
+- rule_id: LOGIC-IDOR-006
+  title: Object Mutation (Update/Delete) via IDOR Without Ownership Check
+  description: 'Detects update or delete operations on objects fetched by user-supplied ID without ownership or tenant verification. Mutation endpoints (PUT, PATCH, DELETE) have higher impact than read-only
+    IDOR because they enable data destruction and integrity compromise, not just disclosure. This is a chain-capable rule — severity escalates when corroborated by LOGIC-MT-004 (bulk operations without
+    tenant scope).
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.68
+  cwe: CWE-639
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - idor
+  - mutation
+  - destructive-idor
+  - update-without-authz
+  - delete-without-authz
+  detection_layer: 2
+  vulnerability_family: idor_direct_object_reference
+  attack_surface_type: api
+  patterns:
+  - pattern: '@(?:app|blueprint|bp|router)\.(?:put|patch|delete)\s*\(\s*[''"][^''"]*<(?:int|string|uuid)?:?\w*(?:id|pk|uuid)\w*>[^''"]*[''"]'
+    description: Mutation route (PUT/PATCH/DELETE) with ID path parameter
+  - pattern: \.query\.(?:get|get_or_404)\s*\([^)]+\)[\s\S]{0,200}db\.session\.delete\s*\(
+    description: Query.get() followed by db.session.delete() — verify ownership
+    flags:
+    - DOTALL
+  - pattern: \.query\.(?:get|get_or_404)\s*\([^)]+\)[\s\S]{0,200}\w+\.\w+\s*=\s*(?:request\.json|request\.form|data)
+    description: Object fetched then attributes set from request body — verify ownership
+    flags:
+    - DOTALL
+  - pattern: '[a-zA-Z_]\w{0,60}\.(?:status|name|email|description|data|config|role|content)\s*=\s*(?:request\.json|data|payload)\['
+    description: Object attribute set from request body — verify ownership first
+  anti_patterns:
+  - abort(403)
+  - abort(404)
+  - current_user
+  - g.tenant_id
+  - obj.tenant_id ==
+  - obj.user_id ==
+  - has_permission
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Mass assignment: obj.__dict__.update(request.json)'
+    description: Unguarded mass assignment bypasses field-level controls
+  - variant: 'Partial update: PATCH with selective fields but no ownership check'
+    description: PATCH endpoints often have weaker validation than PUT
+  - variant: 'Soft delete: obj.is_deleted = True without ownership check'
+    description: Soft delete is still destructive without authorization
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.put'
+    - '@app.patch'
+    - '@app.delete'
+    - def update(
+    - def delete(
+    taint_source_indicators:
+    - <int:id>
+    - request.json
+    - request.form
+    sanitization_patterns:
+    - .tenant_id == g.tenant_id
+    - .user_id == current_user.id
+    - abort(403)
+    - check_ownership
+    - verify_write_access
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Unauthorized object mutation via IDOR — data integrity compromise
+  multi_function_chain_patterns:
+  - route('/items/<int:id>') -> Item.query.get(id) -> item.update(request.json) -> commit()
+  - DELETE '/items/<int:id>' -> Item.query.get(id) -> db.session.delete(obj) -> commit()
+  probable_taint_paths:
+  - source: url_path_parameter_id
+    sink: object_attribute_mutation
+    through: Model.query.get(id) → obj.field = request.json → commit()
+  - source: url_path_parameter_id
+    sink: object_deletion
+    through: Model.query.get(id) → db.session.delete(obj) → commit()
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 12
+    exploitability_score: High
+  impact: 'Data integrity compromise and data destruction across tenants. Attacker can modify arbitrary records (changing financial data, escalating permissions, altering audit logs) or delete them entirely.
+    In multi-tenant SaaS, this enables cross-tenant data manipulation.
+
+    '
+  remediation: "Always validate ownership before mutation:\n@app.delete('/items/<int:item_id>') @login_required def delete_item(item_id):\n    # WRONG:\n    item = Item.query.get_or_404(item_id)\n    db.session.delete(item)\n\
+    \    db.session.commit()\n\n    # RIGHT:\n    item = Item.query.filter_by(\n        id=item_id,\n        tenant_id=g.tenant_id\n    ).first_or_404()\n    db.session.delete(item)\n    db.session.commit()\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-IDOR-001
+    - LOGIC-IDOR-002
+    - LOGIC-MT-003
+    - LOGIC-MT-004

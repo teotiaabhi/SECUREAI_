@@ -1,0 +1,374 @@
+rules:
+- rule_id: HTML-XSS-001
+  title: Inline JavaScript Event Handler
+  description: 'Detects inline JavaScript event handlers which bypass CSP and are XSS vectors.
+
+    '
+  language: html
+  category: xss
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - inline-javascript
+  - csp
+  patterns:
+  - type: regex
+    pattern: <\w+[^>]+\bon(?:click|load|error|mouseover|submit|focus|blur|change|input|keyup|keydown|mouseenter|mouseout)\s*=\s*['"]
+  - type: regex
+    pattern: <\w+[^>]+\bon(?:unload|beforeunload|hashchange|popstate|storage|message|abort|resize)\s*=\s*['"]
+  anti_patterns:
+  - <!--
+  - nonce=
+  impact: 'Inline event handlers are XSS attack vectors and prevent strict CSP.
+
+    '
+  remediation: "Move JavaScript to external files and use addEventListener:\n  <button id=\"myBtn\">Click</button>\n  <script src=\"app.js\"></script>\n  // In app.js: document.getElementById('myBtn').addEventListener('click',\
+    \ handler);\n"
+- rule_id: HTML-XSS-002
+  title: JavaScript URI in Href/Src
+  description: 'Detects javascript: URIs in href or src attributes.
+
+    '
+  language: html
+  category: xss
+  severity: High
+  confidence: 0.92
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - javascript-uri
+  patterns:
+  - type: regex
+    pattern: '(?:href|src|action|formaction|data)\s*=\s*[''"]?\s*javascript\s*:'
+  - type: regex
+    pattern: '(?:href|src)\s*=\s*[''"]?\s*(?:vbscript|livescript|data\s*:\s*text/html)\s*:'
+  anti_patterns:
+  - void(0)
+  impact: 'JavaScript URIs enable XSS when clicked or loaded.
+
+    '
+  remediation: 'Use proper URLs or # as href placeholder. Never use javascript: URIs.
+
+    '
+- rule_id: HTML-XSS-003
+  title: Unescaped Template Variable Output
+  description: 'Detects template engines outputting unescaped user content.
+
+    '
+  language: html
+  category: xss
+  severity: High
+  confidence: 0.88
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - template-injection
+  patterns:
+  - type: regex
+    pattern: \{\{\{[^}]+\}\}\}
+  - type: regex
+    pattern: \{!![^}]+!!\}
+  - type: regex
+    pattern: <%[-=]\s*(?:raw|html_safe|safe|unescape|unescaped)\b
+  - type: regex
+    pattern: \|\s*(?:raw|safe|noescape)\b
+  - type: regex
+    pattern: v-html\s*=\s*['"]
+  - type: regex
+    pattern: dangerouslySetInnerHTML
+  - type: regex
+    pattern: \[innerHTML\]\s*=\s*['"]
+  anti_patterns:
+  - sanitize
+  - DomSanitizer
+  - escapeHtml
+  impact: 'Unescaped template output allows stored XSS attacks.
+
+    '
+  remediation: 'Use escaped output: {{ variable }} instead of {{{ variable }}}.
+
+    Sanitize HTML content before rendering with libraries like DOMPurify.
+
+    '
+- rule_id: HTML-XSS-004
+  title: DOM-based XSS via innerHTML
+  description: 'Detects direct DOM manipulation with innerHTML using user input.
+
+    '
+  language: html
+  category: xss
+  severity: High
+  confidence: 0.85
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - dom-xss
+  - innerhtml
+  patterns:
+  - type: regex
+    pattern: \.innerHTML\s*=\s*(?:location|document\.URL|document\.referrer|window\.name|document\.cookie)
+  - type: regex
+    pattern: \.innerHTML\s*=\s*(?:unescape|decodeURI|decodeURIComponent)\s*\(
+  - type: regex
+    pattern: \.innerHTML\s*[+=]\s*(?:params|query|hash|search|input|data|response)\b
+  - type: regex
+    pattern: document\.write\s*\(\s*(?:location|document\.URL|document\.referrer|window\.name)
+  anti_patterns:
+  - textContent
+  - innerText
+  - DOMPurify
+  - sanitize
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: HTML-XSEC-001
+  title: Missing Security Headers Meta Tags
+  description: 'Detects missing security-related meta tags in HTML.
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Low
+  confidence: 0.75
+  cwe: CWE-693
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - security-headers
+  - meta-tags
+  patterns:
+  - type: regex
+    pattern: <meta[^>]+http-equiv\s*=\s*['"]X-Frame-Options['"][^>]+content\s*=\s*['"](?:ALLOWALL|allow-from\s+\*)['"]
+  - type: regex
+    pattern: <meta[^>]+http-equiv\s*=\s*['"]X-XSS-Protection['"][^>]+content\s*=\s*['"]0['"]
+  anti_patterns:
+  - DENY
+  - SAMEORIGIN
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: HTML-XSEC-002
+  title: Form Without CSRF Token
+  description: 'Detects HTML forms with POST method but no CSRF token field.
+
+    '
+  language: html
+  category: auth
+  severity: Medium
+  confidence: 0.72
+  cwe: CWE-352
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - csrf
+  - forms
+  patterns:
+  - type: regex
+    pattern: <form[^>]+method\s*=\s*['"]post['"][^>]*>
+  anti_patterns:
+  - csrf
+  - _token
+  - csrfmiddlewaretoken
+  - authenticity_token
+  - __RequestVerificationToken
+  - antiforgery
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-XSEC-003
+  title: Password Field Without Autocomplete Off
+  description: 'Detects password fields that allow browser autocomplete.
+
+    '
+  language: html
+  category: auth
+  severity: Low
+  confidence: 0.8
+  cwe: CWE-522
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - password
+  - autocomplete
+  patterns:
+  - type: regex
+    pattern: <input[^>]+type\s*=\s*['"]password['"][^>]*>
+  anti_patterns:
+  - autocomplete="off"
+  - autocomplete='off'
+  - autocomplete="new-password"
+  - autocomplete="current-password"
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-XSEC-004
+  title: Sensitive Data in Hidden Fields
+  description: 'Detects potentially sensitive data stored in hidden form fields.
+
+    '
+  language: html
+  category: secrets
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-472
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - hidden-fields
+  - sensitive-data
+  patterns:
+  - type: regex
+    pattern: <input[^>]+type\s*=\s*['"]hidden['"][^>]+(?:name|id)\s*=\s*['"](?:password|secret|token|apiKey|api_key|ssn|creditCard|credit_card)['"]
+  - type: regex
+    pattern: <input[^>]+(?:name|id)\s*=\s*['"](?:password|secret|apiKey|ssn|creditCard)['"][^>]+type\s*=\s*['"]hidden['"]
+  anti_patterns:
+  - csrf
+  - _token
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: HTML-XSEC-005
+  title: External Script Without Integrity
+  description: 'Detects external script/link tags without Subresource Integrity (SRI).
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - sri
+  - subresource-integrity
+  patterns:
+  - type: regex
+    pattern: <script[^>]+src\s*=\s*['"]https?://(?:cdn|unpkg|cdnjs|jsdelivr|cloudflare)[^'">]*['"][^>]*>
+  - type: regex
+    pattern: <link[^>]+href\s*=\s*['"]https?://(?:cdn|unpkg|cdnjs|jsdelivr|cloudflare)[^'">]*['"][^>]*rel\s*=\s*['"]stylesheet['"]
+  anti_patterns:
+  - integrity=
+  - crossorigin=
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: HTML-XSEC-006
+  title: Iframe Without Sandbox
+  description: 'Detects iframes loading external content without sandbox attribute.
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-1021
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - iframe
+  - sandbox
+  patterns:
+  - type: regex
+    pattern: <iframe[^>]+src\s*=\s*['"](?:https?://|//)[^'">]*['"][^>]*>
+  anti_patterns:
+  - sandbox
+  - sandbox=
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: HTML-XSEC-007
+  title: Mixed Content (HTTP in HTTPS Page)
+  description: 'Detects HTTP resources loaded on HTTPS pages.
+
+    '
+  language: html
+  category: crypto
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - mixed-content
+  - http
+  patterns:
+  - type: regex
+    pattern: (?:src|href|action)\s*=\s*['"]http://(?!localhost|127\.0\.0\.1)[^'">]+['"]
+  anti_patterns:
+  - '<!-- '
+  - http://localhost
+  - http://127.0.0.1
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: HTML-XSEC-008
+  title: Target _blank Without rel noopener
+  description: 'Detects links with target="_blank" without rel="noopener noreferrer".
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Low
+  confidence: 0.85
+  cwe: CWE-1022
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - tabnabbing
+  - noopener
+  patterns:
+  - type: regex
+    pattern: <a[^>]+target\s*=\s*['"]_blank['"][^>]*>
+  anti_patterns:
+  - noopener
+  - noreferrer
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: HTML-XSEC-009
+  title: Base Tag Hijacking Risk
+  description: 'Detects <base> tag which can be exploited for relative URL hijacking.
+
+    '
+  language: html
+  category: xss
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - base-tag
+  - url-hijacking
+  patterns:
+  - type: regex
+    pattern: <base[^>]+href\s*=\s*['"][^'">]*['"]
+  anti_patterns:
+  - <!-- safe
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: HTML-XSEC-010
+  title: File Upload Without Type Restriction
+  description: 'Detects file upload inputs without accept attribute restrictions.
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-434
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - file-upload
+  - unrestricted
+  patterns:
+  - type: regex
+    pattern: <input[^>]+type\s*=\s*['"]file['"][^>]*>
+  anti_patterns:
+  - accept=
+  - accept="
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

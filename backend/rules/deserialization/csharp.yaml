@@ -1,0 +1,1443 @@
+# ============================================================================
+# Deserialization Vulnerability Detection Rules - C#
+# Ruleset Version: 3.0.0
+# Last Updated: 2026-02-28
+# Category: Insecure Deserialization (CWE-502)
+# Language: C#
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # DESER-CS-001: BinaryFormatter Deserialization
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-001"
+    title: "BinaryFormatter Deserialization of Untrusted Data"
+    description: >
+      Detects usage of BinaryFormatter.Deserialize() which is inherently unsafe
+      and cannot be made secure regardless of configuration. BinaryFormatter
+      resolves types during deserialization, allowing attackers to instantiate
+      arbitrary classes with controlled constructor and property values. This
+      enables Remote Code Execution via gadget chains such as
+      TypeConfuseDelegate, ObjectDataProvider, and WindowsIdentity. Microsoft
+      has officially deprecated BinaryFormatter and it is disabled by default
+      in .NET 8+. SYSLIB0011 warning was introduced in .NET 5.
+    language: csharp
+    category: deserialization
+    severity: Critical
+    confidence: 0.96
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - BinaryFormatter
+      - dotnet
+      - csharp
+      - gadget-chain
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'BinaryFormatter\s*\(\s*\)[\s\S]{0,300}\.Deserialize\s*\('
+        description: "BinaryFormatter instantiation followed by Deserialize call"
+      - type: regex
+        pattern: 'new\s+BinaryFormatter\s*\(\s*\)'
+        description: "BinaryFormatter constructor instantiation"
+      - type: regex
+        pattern: '\.Deserialize\s*\(\s*(?:stream|memStream|networkStream|request|fileStream|ms|data)'
+        description: "Deserialize with stream from potentially untrusted source"
+      - type: regex
+        pattern: 'BinaryFormatter\s+\w+\s*=\s*new\s+BinaryFormatter'
+        description: "BinaryFormatter variable assignment"
+      - type: regex
+        pattern: 'IFormatter\s+\w+\s*=\s*new\s+BinaryFormatter'
+        description: "BinaryFormatter assigned to IFormatter interface"
+      - type: regex
+        pattern: 'typeof\s*\(\s*BinaryFormatter\s*\)'
+        description: "BinaryFormatter type reference (potential reflection usage)"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#pragma\s+warning\s+disable\s+SYSLIB0011'
+      - 'Serialize\s*\('
+      - '\.Serialize\s*\(\s*stream\s*,\s*(?:data|obj)'
+      - 'mock'
+      - 'fixture'
+      - '\[Obsolete\]'
+    bypass_variants:
+      - description: "BinaryFormatter via IFormatter interface"
+        pattern: 'IFormatter\s+\w+[\s\S]{0,100}Deserialize\s*\('
+      - description: "BinaryFormatter created via Activator.CreateInstance"
+        pattern: 'Activator\.CreateInstance\s*\([^)]*BinaryFormatter'
+      - description: "BinaryFormatter with custom SerializationBinder (still unsafe)"
+        pattern: 'BinaryFormatter[\s\S]{0,200}Binder\s*=[\s\S]{0,100}Deserialize'
+    evasion_indicators:
+      - "BinaryFormatter accessed via IFormatter interface"
+      - "Activator.CreateInstance for dynamic instantiation"
+      - "Custom SerializationBinder (does not make BinaryFormatter safe)"
+      - "BinaryFormatter loaded via reflection"
+    encoding_variants:
+      - type: "base64_payload"
+        pattern: 'Convert\.FromBase64String[\s\S]{0,200}BinaryFormatter[\s\S]{0,100}Deserialize'
+      - type: "memory_stream"
+        pattern: 'new\s+MemoryStream\s*\([^)]+\)[\s\S]{0,200}BinaryFormatter'
+      - type: "network_stream"
+        pattern: 'NetworkStream[\s\S]{0,200}BinaryFormatter[\s\S]{0,100}Deserialize'
+    multi_function_chain_patterns:
+      - "Request.InputStream -> MemoryStream -> BinaryFormatter.Deserialize -> RCE"
+      - "Convert.FromBase64String -> MemoryStream -> BinaryFormatter.Deserialize"
+      - "File.OpenRead -> BinaryFormatter.Deserialize -> object cast"
+      - "TcpClient.GetStream -> BinaryFormatter.Deserialize -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "BinaryFormatter deserialization enables arbitrary type instantiation and RCE via gadget chains"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP_request_body"
+        sink: "BinaryFormatter.Deserialize(stream)"
+        through: "MemoryStream wrapping request data"
+      - source: "file_upload"
+        sink: "BinaryFormatter.Deserialize(fileStream)"
+        through: "FileStream from uploaded file"
+      - source: "network_socket"
+        sink: "BinaryFormatter.Deserialize(networkStream)"
+        through: "TcpClient.GetStream()"
+    impact: |
+      BinaryFormatter deserialization is the most dangerous .NET deserialization vector:
+      - Arbitrary type instantiation during deserialization
+      - Well-known gadget chains (ysoserial.net) for immediate RCE
+      - Cannot be secured even with SerializationBinder
+      - Microsoft officially deprecated and disabled in .NET 8+
+      - Full system compromise with process privileges
+    remediation: |
+      Replace BinaryFormatter with safe serializers:
+
+      ```csharp
+      // VULNERABLE: BinaryFormatter
+      var formatter = new BinaryFormatter();
+      object obj = formatter.Deserialize(stream);
+
+      // SECURE: System.Text.Json (.NET Core 3.0+)
+      var obj = JsonSerializer.Deserialize<MyType>(jsonString);
+
+      // SECURE: DataContractSerializer with known types only
+      var serializer = new DataContractSerializer(typeof(MyType));
+      var obj = (MyType)serializer.ReadObject(stream);
+
+      // SECURE: MessagePack with security options
+      var options = MessagePackSerializerOptions.Standard
+          .WithSecurity(MessagePackSecurity.UntrustedData);
+      var obj = MessagePackSerializer.Deserialize<MyType>(data, options);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/standard/serialization/binaryformatter-security-guide"
+      - "https://github.com/pwntester/ysoserial.net"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'BinaryFormatter'
+        - 'Deserialize'
+        - 'IFormatter'
+        - 'MemoryStream'
+        - 'Stream'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'HttpContext'
+        - 'NetworkStream'
+        - 'TcpClient'
+        - 'File\.Open'
+      taint_sink_indicators:
+        - '\.Deserialize\s*\('
+        - 'BinaryFormatter'
+      sanitization_patterns:
+        - 'JsonSerializer'
+        - 'DataContractSerializer'
+        - 'System\.Text\.Json'
+        - 'XmlSerializer'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + gadget_chain_availability)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits BinaryFormatter in an ASP.NET application:
+        1. Application deserializes session state from cookies using BinaryFormatter
+        2. Attacker generates a malicious payload using ysoserial.net with TypeConfuseDelegate gadget
+        3. Attacker Base64-encodes the payload and sends it as the session cookie
+        4. BinaryFormatter.Deserialize instantiates the gadget chain objects
+        5. Delegate invocation triggers Process.Start("cmd.exe", "/c whoami")
+        6. Attacker achieves remote code execution with web application privileges
+      example_payload: "new BinaryFormatter().Deserialize(new MemoryStream(Convert.FromBase64String(cookie)))"
+      attacker_objective: "Achieve remote code execution via BinaryFormatter gadget chain deserialization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-002"
+        - "DESER-CS-004"
+        - "DESER-CS-005"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-002: JavaScriptSerializer with Type Resolver
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-002"
+    title: "JavaScriptSerializer with SimpleTypeResolver"
+    description: >
+      Detects usage of JavaScriptSerializer configured with SimpleTypeResolver or
+      any custom JavaScriptTypeResolver. When a type resolver is configured,
+      JavaScriptSerializer processes __type metadata in JSON payloads, enabling
+      arbitrary type instantiation. SimpleTypeResolver resolves any type by its
+      assembly-qualified name, making it equivalent to BinaryFormatter in terms
+      of exploitability. Without a type resolver, JavaScriptSerializer is safe
+      but limited in functionality.
+    language: csharp
+    category: deserialization
+    severity: Critical
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - JavaScriptSerializer
+      - SimpleTypeResolver
+      - json
+      - dotnet
+      - csharp
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+JavaScriptSerializer\s*\(\s*new\s+SimpleTypeResolver\s*\(\s*\)\s*\)'
+        description: "JavaScriptSerializer with SimpleTypeResolver"
+      - type: regex
+        pattern: 'JavaScriptSerializer\s*\(\s*(?:new\s+\w*TypeResolver|resolver|typeResolver)\s*\)'
+        description: "JavaScriptSerializer with custom type resolver"
+      - type: regex
+        pattern: 'new\s+SimpleTypeResolver\s*\(\s*\)'
+        description: "SimpleTypeResolver instantiation"
+      - type: regex
+        pattern: 'JavaScriptSerializer[\s\S]{0,200}\.Deserialize\s*\(\s*(?:request|input|json|data|body|payload)'
+        description: "JavaScriptSerializer deserializing potentially untrusted input"
+      - type: regex
+        pattern: 'JavaScriptSerializer[\s\S]{0,200}\.DeserializeObject\s*\('
+        description: "JavaScriptSerializer.DeserializeObject (untyped deserialization)"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'new\s+JavaScriptSerializer\s*\(\s*\)'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+    bypass_variants:
+      - description: "Custom type resolver that resolves unsafe types"
+        pattern: 'class\s+\w*TypeResolver\w*\s*:\s*JavaScriptTypeResolver[\s\S]{0,500}ResolveType'
+      - description: "Type resolver registered indirectly"
+        pattern: 'JavaScriptSerializer\s*\(\s*(?:config|settings|options)\.'
+      - description: "Resolver passed as variable"
+        pattern: 'JavaScriptSerializer\s*\(\s*\w+Resolver\s*\)'
+    evasion_indicators:
+      - "Custom JavaScriptTypeResolver subclass"
+      - "Type resolver loaded from configuration"
+      - "Resolver passed as constructor parameter variable"
+      - "Dynamic resolver selection at runtime"
+    encoding_variants:
+      - type: "type_metadata"
+        pattern: '__type.*JavaScriptSerializer'
+      - type: "variable_resolver"
+        pattern: 'JavaScriptTypeResolver\s+\w+[\s\S]{0,200}JavaScriptSerializer'
+      - type: "dynamic_type"
+        pattern: 'Type\.GetType[\s\S]{0,200}JavaScriptTypeResolver'
+    multi_function_chain_patterns:
+      - "Request.Body -> ReadAsString -> JavaScriptSerializer(SimpleTypeResolver).Deserialize"
+      - "HTTP POST body -> json string -> JavaScriptSerializer.DeserializeObject -> type instantiation"
+      - "Cookie value -> Base64 decode -> JavaScriptSerializer(resolver).Deserialize"
+      - "WebSocket message -> JavaScriptSerializer(SimpleTypeResolver).Deserialize"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SimpleTypeResolver enables arbitrary type instantiation from JSON __type metadata"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP_request_body"
+        sink: "JavaScriptSerializer.Deserialize(json)"
+        through: "request body to JSON string"
+      - source: "query_parameter"
+        sink: "JavaScriptSerializer.DeserializeObject(input)"
+        through: "URL parameter to deserialization"
+      - source: "cookie_value"
+        sink: "JavaScriptSerializer(resolver).Deserialize(cookie)"
+        through: "cookie to JSON deserialization"
+    impact: |
+      JavaScriptSerializer with SimpleTypeResolver enables full RCE:
+      - __type metadata controls type instantiation
+      - SimpleTypeResolver resolves any assembly-qualified type name
+      - Equivalent to BinaryFormatter in exploitability
+      - ObjectDataProvider gadget chain achieves arbitrary code execution
+      - Full system compromise with process privileges
+    remediation: |
+      Never use JavaScriptSerializer with a type resolver for untrusted data:
+
+      ```csharp
+      // VULNERABLE: JavaScriptSerializer with SimpleTypeResolver
+      var serializer = new JavaScriptSerializer(new SimpleTypeResolver());
+      var obj = serializer.Deserialize<MyType>(json);
+
+      // SECURE: System.Text.Json (no type metadata processing)
+      var obj = JsonSerializer.Deserialize<MyType>(json);
+
+      // SECURE: JavaScriptSerializer without resolver (limited but safe)
+      var serializer = new JavaScriptSerializer();
+      var obj = serializer.Deserialize<MyType>(json);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.web.script.serialization.javascriptserializer"
+      - "https://github.com/pwntester/ysoserial.net"
+      - "https://www.blackhat.com/docs/us-17/thursday/us-17-Munoz-Friday-The-13th-JSON-Attacks-wp.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'JavaScriptSerializer'
+        - 'SimpleTypeResolver'
+        - 'JavaScriptTypeResolver'
+        - 'Deserialize'
+        - '__type'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'HttpContext'
+        - 'Controller'
+        - 'WebSocket'
+      taint_sink_indicators:
+        - '\.Deserialize\s*\('
+        - '\.DeserializeObject\s*\('
+        - 'JavaScriptSerializer'
+      sanitization_patterns:
+        - 'JsonSerializer'
+        - 'System\.Text\.Json'
+        - 'Newtonsoft.*TypeNameHandling\.None'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + type_resolver_present)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits JavaScriptSerializer with SimpleTypeResolver:
+        1. ASP.NET API endpoint deserializes JSON using JavaScriptSerializer(new SimpleTypeResolver())
+        2. Attacker crafts JSON with __type pointing to ObjectDataProvider
+        3. ObjectDataProvider's ObjectInstance set to Process, MethodName to Start
+        4. JSON payload triggers Process.Start with attacker-controlled arguments
+        5. Remote code execution achieved, reverse shell established
+      example_payload: '{"__type":"System.Windows.Data.ObjectDataProvider,...","ObjectInstance":{"__type":"System.Diagnostics.Process,..."}}'
+      attacker_objective: "Execute arbitrary code via JavaScriptSerializer type confusion with SimpleTypeResolver"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-001"
+        - "DESER-CS-003"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-003: Newtonsoft Json.NET TypeNameHandling
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-003"
+    title: "Newtonsoft Json.NET with Unsafe TypeNameHandling"
+    description: >
+      Detects Newtonsoft Json.NET (Json.NET) configured with TypeNameHandling set
+      to anything other than None. TypeNameHandling.Auto, Objects, Arrays, or All
+      causes Json.NET to read $type metadata from JSON payloads and instantiate
+      the specified types. This enables deserialization attacks using gadget chains
+      via ysoserial.net payloads. Even TypeNameHandling.Auto is unsafe because
+      it processes $type for object, dynamic, and interface-typed properties.
+      The default is TypeNameHandling.None which is safe.
+    language: csharp
+    category: deserialization
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - json.net
+      - newtonsoft
+      - TypeNameHandling
+      - json
+      - dotnet
+      - csharp
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'TypeNameHandling\s*=\s*TypeNameHandling\.(?:All|Auto|Objects|Arrays)'
+        description: "TypeNameHandling set to unsafe value"
+      - type: regex
+        pattern: 'TypeNameHandling\.(?:All|Auto|Objects|Arrays)'
+        description: "Unsafe TypeNameHandling enum reference"
+      - type: regex
+        pattern: 'JsonSerializerSettings[\s\S]{0,300}TypeNameHandling\s*=\s*TypeNameHandling\.(?:All|Auto|Objects|Arrays)'
+        description: "JsonSerializerSettings with unsafe TypeNameHandling"
+      - type: regex
+        pattern: 'JsonConvert\.DeserializeObject[\s\S]{0,200}TypeNameHandling'
+        description: "JsonConvert.DeserializeObject with TypeNameHandling in settings"
+      - type: regex
+        pattern: '\[JsonProperty\s*\([^)]*TypeNameHandling\s*=\s*TypeNameHandling\.(?:All|Auto|Objects|Arrays)'
+        description: "JsonProperty attribute with unsafe TypeNameHandling"
+      - type: regex
+        pattern: 'GlobalConfiguration[\s\S]{0,300}TypeNameHandling\s*=\s*TypeNameHandling\.(?:All|Auto)'
+        description: "Global ASP.NET configuration with unsafe TypeNameHandling"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'TypeNameHandling\.None'
+      - 'TypeNameHandling\s*=\s*TypeNameHandling\.None'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'SerializationBinder'
+      - 'ISerializationBinder'
+    bypass_variants:
+      - description: "TypeNameHandling set via integer enum value"
+        pattern: 'TypeNameHandling\s*=\s*\(TypeNameHandling\)\s*[1-4]'
+      - description: "TypeNameHandling in global JSON settings"
+        pattern: 'JsonConvert\.DefaultSettings[\s\S]{0,300}TypeNameHandling'
+      - description: "Custom ContractResolver with type handling"
+        pattern: 'ContractResolver[\s\S]{0,300}TypeNameHandling'
+      - description: "TypeNameHandling from configuration"
+        pattern: 'Configuration\[\s*"[^"]*TypeNameHandling[^"]*"\s*\]'
+    evasion_indicators:
+      - "TypeNameHandling set via integer cast instead of enum"
+      - "Global default settings affecting all serialization"
+      - "TypeNameHandling configured in Startup.cs or Program.cs"
+      - "Custom SerializationBinder may not fully prevent exploitation"
+    encoding_variants:
+      - type: "dollar_type"
+        pattern: '\$type.*Newtonsoft'
+      - type: "integer_enum"
+        pattern: 'TypeNameHandling\s*=\s*\(TypeNameHandling\)\s*\d+'
+      - type: "string_config"
+        pattern: '"TypeNameHandling"\s*:\s*"(?:All|Auto|Objects|Arrays)"'
+    multi_function_chain_patterns:
+      - "Request.Body -> JsonConvert.DeserializeObject(body, settings{TypeNameHandling.All})"
+      - "API endpoint -> JSON body with $type -> JsonConvert.DeserializeObject -> gadget chain"
+      - "WebSocket message -> JsonSerializer.Deserialize(reader, settings) -> type instantiation"
+      - "SignalR message -> Newtonsoft serializer with TypeNameHandling.Auto -> RCE"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "TypeNameHandling enables $type metadata processing for arbitrary type instantiation"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP_request_body"
+        sink: "JsonConvert.DeserializeObject with TypeNameHandling"
+        through: "JSON string with $type metadata"
+      - source: "API_endpoint"
+        sink: "JsonSerializer.Deserialize with unsafe settings"
+        through: "request body deserialization"
+      - source: "SignalR_message"
+        sink: "Newtonsoft JsonSerializer with TypeNameHandling.Auto"
+        through: "SignalR payload deserialization"
+    impact: |
+      Newtonsoft Json.NET with unsafe TypeNameHandling enables full RCE:
+      - $type metadata in JSON controls type instantiation
+      - Mature gadget chains available via ysoserial.net
+      - TypeNameHandling.Auto still processes $type for object/dynamic properties
+      - Global settings affect all deserialization in the application
+      - Full system compromise with process privileges
+    remediation: |
+      Set TypeNameHandling to None (default) or use System.Text.Json:
+
+      ```csharp
+      // VULNERABLE: TypeNameHandling.All
+      var settings = new JsonSerializerSettings
+      {
+          TypeNameHandling = TypeNameHandling.All
+      };
+      var obj = JsonConvert.DeserializeObject<MyType>(json, settings);
+
+      // SECURE: TypeNameHandling.None (default)
+      var obj = JsonConvert.DeserializeObject<MyType>(json);
+
+      // SECURE: System.Text.Json (no $type support by default)
+      var obj = System.Text.Json.JsonSerializer.Deserialize<MyType>(json);
+
+      // If TypeNameHandling is needed, use strict SerializationBinder:
+      var settings = new JsonSerializerSettings
+      {
+          TypeNameHandling = TypeNameHandling.Auto,
+          SerializationBinder = new KnownTypesBinder(allowedTypes)
+      };
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://www.newtonsoft.com/json/help/html/T_Newtonsoft_Json_TypeNameHandling.htm"
+      - "https://github.com/pwntester/ysoserial.net"
+      - "https://www.blackhat.com/docs/us-17/thursday/us-17-Munoz-Friday-The-13th-JSON-Attacks-wp.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'Newtonsoft'
+        - 'Json\.NET'
+        - 'JsonConvert'
+        - 'JsonSerializer'
+        - 'TypeNameHandling'
+        - 'JsonSerializerSettings'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'HttpContext'
+        - '@RequestBody'
+        - 'SignalR'
+      taint_sink_indicators:
+        - 'DeserializeObject'
+        - 'Deserialize'
+        - 'JsonConvert'
+        - 'JsonSerializer'
+      sanitization_patterns:
+        - 'TypeNameHandling\.None'
+        - 'SerializationBinder'
+        - 'ISerializationBinder'
+        - 'System\.Text\.Json'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + type_handling_risk)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits TypeNameHandling.All in an ASP.NET Web API:
+        1. API controller deserializes JSON with TypeNameHandling.All in global settings
+        2. Attacker sends JSON with $type pointing to ObjectDataProvider
+        3. $type metadata triggers instantiation of arbitrary .NET types
+        4. Gadget chain (e.g., ObjectDataProvider -> Process.Start) executes
+        5. Attacker achieves RCE and establishes reverse shell
+      example_payload: '{"$type":"System.Windows.Data.ObjectDataProvider, ...","MethodName":"Start","ObjectInstance":{"$type":"System.Diagnostics.Process, ..."}}'
+      attacker_objective: "Achieve RCE via Newtonsoft Json.NET $type metadata processing"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-001"
+        - "DESER-CS-002"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-004: SoapFormatter Deserialization
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-004"
+    title: "SoapFormatter Deserialization of Untrusted Data"
+    description: >
+      Detects usage of SoapFormatter.Deserialize() which, like BinaryFormatter,
+      resolves arbitrary types during deserialization. SoapFormatter serializes
+      objects as SOAP XML and is vulnerable to the same gadget chain attacks.
+      It is commonly found in legacy .NET Framework applications using SOAP-based
+      web services, remoting, or XML-based inter-process communication. SoapFormatter
+      has been deprecated alongside BinaryFormatter.
+    language: csharp
+    category: deserialization
+    severity: High
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - SoapFormatter
+      - soap
+      - xml
+      - dotnet
+      - csharp
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+SoapFormatter\s*\(\s*\)'
+        description: "SoapFormatter constructor instantiation"
+      - type: regex
+        pattern: 'SoapFormatter\s*\(\s*\)[\s\S]{0,300}\.Deserialize\s*\('
+        description: "SoapFormatter followed by Deserialize call"
+      - type: regex
+        pattern: 'SoapFormatter\s+\w+\s*=\s*new\s+SoapFormatter'
+        description: "SoapFormatter variable assignment"
+      - type: regex
+        pattern: 'IFormatter\s+\w+\s*=\s*new\s+SoapFormatter'
+        description: "SoapFormatter assigned to IFormatter interface"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '\.Serialize\s*\('
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - '\[Obsolete\]'
+    bypass_variants:
+      - description: "SoapFormatter via IFormatter interface"
+        pattern: 'IFormatter[\s\S]{0,100}SoapFormatter[\s\S]{0,200}Deserialize'
+      - description: "SoapFormatter with custom Binder"
+        pattern: 'SoapFormatter[\s\S]{0,200}Binder\s*=[\s\S]{0,100}Deserialize'
+      - description: "Dynamic instantiation via reflection"
+        pattern: 'Activator\.CreateInstance[\s\S]{0,100}SoapFormatter'
+    evasion_indicators:
+      - "SoapFormatter accessed via IFormatter interface"
+      - "Custom SerializationBinder (does not make SoapFormatter safe)"
+      - "Reflection-based instantiation"
+      - "SoapFormatter in SOAP web service handler"
+    encoding_variants:
+      - type: "soap_xml"
+        pattern: 'SOAP-ENV:Envelope[\s\S]{0,200}SoapFormatter'
+      - type: "base64_soap"
+        pattern: 'Convert\.FromBase64String[\s\S]{0,200}SoapFormatter'
+      - type: "stream_wrap"
+        pattern: 'new\s+MemoryStream[\s\S]{0,200}SoapFormatter[\s\S]{0,100}Deserialize'
+    multi_function_chain_patterns:
+      - "Request.InputStream -> SoapFormatter.Deserialize -> type instantiation"
+      - "SOAP message -> MemoryStream -> SoapFormatter.Deserialize -> RCE"
+      - "File.OpenRead -> SoapFormatter.Deserialize -> object cast"
+      - "NetworkStream -> SoapFormatter.Deserialize -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SoapFormatter enables same gadget chain attacks as BinaryFormatter via SOAP XML"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "SOAP_request_body"
+        sink: "SoapFormatter.Deserialize(stream)"
+        through: "SOAP XML to MemoryStream"
+      - source: "file_upload"
+        sink: "SoapFormatter.Deserialize(fileStream)"
+        through: "uploaded SOAP XML file"
+      - source: "network_stream"
+        sink: "SoapFormatter.Deserialize(networkStream)"
+        through: ".NET Remoting channel"
+    impact: |
+      SoapFormatter deserialization is as dangerous as BinaryFormatter:
+      - Same gadget chains (ysoserial.net) apply to SoapFormatter
+      - Arbitrary type instantiation from SOAP XML payloads
+      - Commonly found in legacy .NET Remoting and SOAP services
+      - Full remote code execution with process privileges
+      - Deprecated alongside BinaryFormatter in .NET 5+
+    remediation: |
+      Replace SoapFormatter with safe serializers:
+
+      ```csharp
+      // VULNERABLE: SoapFormatter
+      var formatter = new SoapFormatter();
+      object obj = formatter.Deserialize(stream);
+
+      // SECURE: DataContractSerializer
+      var serializer = new DataContractSerializer(typeof(MyType));
+      var obj = (MyType)serializer.ReadObject(stream);
+
+      // SECURE: System.Text.Json
+      var obj = JsonSerializer.Deserialize<MyType>(json);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/standard/serialization/binaryformatter-security-guide"
+      - "https://github.com/pwntester/ysoserial.net"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'SoapFormatter'
+        - 'Deserialize'
+        - 'IFormatter'
+        - 'SOAP'
+        - 'Remoting'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'NetworkStream'
+        - 'TcpClient'
+        - 'File\.Open'
+      taint_sink_indicators:
+        - '\.Deserialize\s*\('
+        - 'SoapFormatter'
+      sanitization_patterns:
+        - 'DataContractSerializer'
+        - 'JsonSerializer'
+        - 'XmlSerializer'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + gadget_chain_availability)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Attacker exploits SoapFormatter in a .NET Remoting service:
+        1. Legacy service uses SoapFormatter for inter-process communication
+        2. Attacker intercepts the remoting channel and injects a malicious SOAP payload
+        3. SoapFormatter.Deserialize processes the SOAP XML containing gadget chain types
+        4. TypeConfuseDelegate gadget chain triggers arbitrary code execution
+        5. Attacker gains full control of the service with its process privileges
+      example_payload: "new SoapFormatter().Deserialize(networkStream)"
+      attacker_objective: "Execute arbitrary code via SoapFormatter deserialization gadget chains"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-001"
+        - "DESER-CS-005"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-005: NetDataContractSerializer
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-005"
+    title: "NetDataContractSerializer Deserialization of Untrusted Data"
+    description: >
+      Detects usage of NetDataContractSerializer which embeds .NET type information
+      in the serialized XML output. Unlike DataContractSerializer which uses known
+      types, NetDataContractSerializer resolves types from the serialized data,
+      making it vulnerable to the same deserialization attacks as BinaryFormatter.
+      Attackers can craft XML payloads with malicious type references to trigger
+      RCE via ysoserial.net gadget chains.
+    language: csharp
+    category: deserialization
+    severity: High
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - NetDataContractSerializer
+      - xml
+      - wcf
+      - dotnet
+      - csharp
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+NetDataContractSerializer\s*\(\s*\)'
+        description: "NetDataContractSerializer constructor"
+      - type: regex
+        pattern: 'NetDataContractSerializer[\s\S]{0,300}\.(?:ReadObject|Deserialize)\s*\('
+        description: "NetDataContractSerializer ReadObject or Deserialize"
+      - type: regex
+        pattern: 'NetDataContractSerializer\s+\w+\s*=\s*new\s+NetDataContractSerializer'
+        description: "NetDataContractSerializer variable assignment"
+      - type: regex
+        pattern: 'IFormatter\s+\w+\s*=\s*new\s+NetDataContractSerializer'
+        description: "NetDataContractSerializer as IFormatter"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '\.WriteObject\s*\('
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'DataContractSerializer(?!.*Net)'
+    bypass_variants:
+      - description: "NetDataContractSerializer via interface"
+        pattern: 'IFormatter[\s\S]{0,100}NetDataContractSerializer'
+      - description: "Used in WCF service configuration"
+        pattern: 'DataContractFormat[\s\S]{0,200}NetDataContractSerializer'
+      - description: "Custom DataContractResolver enabling type resolution"
+        pattern: 'DataContractResolver[\s\S]{0,300}NetDataContractSerializer'
+    evasion_indicators:
+      - "NetDataContractSerializer accessed via IFormatter"
+      - "Used in WCF service bindings"
+      - "Custom DataContractResolver for type resolution"
+      - "Loaded dynamically via reflection"
+    encoding_variants:
+      - type: "xml_payload"
+        pattern: 'z:Type=.*z:Assembly=.*NetDataContractSerializer'
+      - type: "base64_xml"
+        pattern: 'Convert\.FromBase64String[\s\S]{0,200}NetDataContractSerializer'
+      - type: "stream_wrap"
+        pattern: 'XmlReader[\s\S]{0,200}NetDataContractSerializer[\s\S]{0,100}ReadObject'
+    multi_function_chain_patterns:
+      - "WCF request -> XmlReader -> NetDataContractSerializer.ReadObject -> type instantiation"
+      - "Request body -> MemoryStream -> NetDataContractSerializer.Deserialize -> RCE"
+      - "XML file -> XmlReader -> NetDataContractSerializer.ReadObject -> gadget chain"
+      - "Message body -> NetDataContractSerializer.ReadObject -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "NetDataContractSerializer embeds full .NET type info enabling arbitrary type instantiation"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "WCF_request"
+        sink: "NetDataContractSerializer.ReadObject(reader)"
+        through: "WCF message to XML reader"
+      - source: "request_body"
+        sink: "NetDataContractSerializer.Deserialize(stream)"
+        through: "HTTP body to memory stream"
+      - source: "xml_file"
+        sink: "NetDataContractSerializer.ReadObject(xmlReader)"
+        through: "file to XmlReader"
+    impact: |
+      NetDataContractSerializer is as dangerous as BinaryFormatter for deserialization:
+      - Embeds full .NET type information (assembly-qualified names) in XML
+      - Same ysoserial.net gadget chains achieve RCE
+      - Found in WCF services and inter-process communication
+      - Full system compromise with process privileges
+    remediation: |
+      Replace with DataContractSerializer (known types only):
+
+      ```csharp
+      // VULNERABLE: NetDataContractSerializer
+      var serializer = new NetDataContractSerializer();
+      var obj = serializer.ReadObject(xmlReader);
+
+      // SECURE: DataContractSerializer with known types
+      var serializer = new DataContractSerializer(typeof(MyType),
+          new DataContractSerializerSettings
+          {
+              KnownTypes = new[] { typeof(AllowedType1), typeof(AllowedType2) }
+          });
+      var obj = (MyType)serializer.ReadObject(xmlReader);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.runtime.serialization.netdatacontractserializer"
+      - "https://github.com/pwntester/ysoserial.net"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'NetDataContractSerializer'
+        - 'ReadObject'
+        - 'WCF'
+        - 'IFormatter'
+        - 'DataContract'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'XmlReader'
+        - 'WCF'
+        - 'Message'
+      taint_sink_indicators:
+        - '\.ReadObject\s*\('
+        - '\.Deserialize\s*\('
+        - 'NetDataContractSerializer'
+      sanitization_patterns:
+        - 'DataContractSerializer'
+        - 'known.*types'
+        - 'KnownTypes'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + wcf_exposure)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Attacker exploits NetDataContractSerializer in a WCF service:
+        1. WCF service uses NetDataContractSerializer for message deserialization
+        2. Attacker crafts XML payload with z:Type and z:Assembly pointing to gadget chain types
+        3. NetDataContractSerializer resolves types from the XML and instantiates them
+        4. Gadget chain triggers Process.Start for arbitrary command execution
+        5. Attacker achieves RCE on the WCF service host
+      example_payload: "new NetDataContractSerializer().ReadObject(xmlReader)"
+      attacker_objective: "Achieve RCE via NetDataContractSerializer type resolution from malicious XML"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-001"
+        - "DESER-CS-004"
+        - "DESER-CS-008"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-006: LosFormatter Deserialization
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-006"
+    title: "LosFormatter Deserialization of Untrusted Data"
+    description: >
+      Detects usage of LosFormatter (Limited Object Serialization) which is used
+      internally by ASP.NET for ViewState serialization. LosFormatter uses
+      BinaryFormatter internally, making it vulnerable to the same deserialization
+      attacks. Custom usage of LosFormatter to deserialize user-controlled data
+      enables RCE. While ASP.NET ViewState has MAC protection by default,
+      developers sometimes use LosFormatter directly without MAC validation.
+    language: csharp
+    category: deserialization
+    severity: High
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - LosFormatter
+      - viewstate
+      - asp.net
+      - dotnet
+      - csharp
+      - critical
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+LosFormatter\s*\(\s*\)'
+        description: "LosFormatter default constructor"
+      - type: regex
+        pattern: 'new\s+LosFormatter\s*\(\s*false\s*,'
+        description: "LosFormatter with MAC validation disabled"
+      - type: regex
+        pattern: 'LosFormatter[\s\S]{0,300}\.Deserialize\s*\('
+        description: "LosFormatter.Deserialize call"
+      - type: regex
+        pattern: 'LosFormatter\s+\w+\s*=\s*new\s+LosFormatter'
+        description: "LosFormatter variable assignment"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '\.Serialize\s*\('
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'ViewStateEncryptionMode'
+    bypass_variants:
+      - description: "LosFormatter with disabled MAC"
+        pattern: 'new\s+LosFormatter\s*\(\s*false\s*,\s*(?:""|\(byte\[\]\)\s*null)'
+      - description: "LosFormatter from Base64 ViewState"
+        pattern: 'LosFormatter[\s\S]{0,200}Deserialize[\s\S]{0,100}__VIEWSTATE'
+      - description: "ViewState deserialization with no MAC key"
+        pattern: 'enableViewStateMac\s*=\s*"?false'
+    evasion_indicators:
+      - "LosFormatter used outside ASP.NET pipeline"
+      - "ViewState MAC validation disabled"
+      - "Custom LosFormatter usage for data serialization"
+      - "Base64 data passed directly to LosFormatter.Deserialize"
+    encoding_variants:
+      - type: "base64_viewstate"
+        pattern: 'Convert\.FromBase64String[\s\S]{0,200}LosFormatter'
+      - type: "viewstate_field"
+        pattern: '__VIEWSTATE[\s\S]{0,200}LosFormatter'
+      - type: "stream_input"
+        pattern: 'new\s+StringReader[\s\S]{0,200}LosFormatter[\s\S]{0,100}Deserialize'
+    multi_function_chain_patterns:
+      - "Request[\"__VIEWSTATE\"] -> LosFormatter.Deserialize -> BinaryFormatter internally -> RCE"
+      - "Base64 input -> LosFormatter.Deserialize -> object instantiation"
+      - "Hidden field -> LosFormatter(false, null).Deserialize -> gadget chain"
+      - "Cookie value -> LosFormatter.Deserialize -> type resolution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "LosFormatter uses BinaryFormatter internally, enabling same RCE gadget chains"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "ViewState_field"
+        sink: "LosFormatter.Deserialize(viewstate)"
+        through: "hidden form field to LosFormatter"
+      - source: "request_parameter"
+        sink: "LosFormatter.Deserialize(input)"
+        through: "user input to direct deserialization"
+      - source: "cookie_value"
+        sink: "LosFormatter.Deserialize(cookie)"
+        through: "cookie to LosFormatter deserialization"
+    impact: |
+      LosFormatter deserialization is equivalent to BinaryFormatter:
+      - Uses BinaryFormatter internally for object serialization
+      - Same gadget chains achieve RCE
+      - Commonly used in ASP.NET ViewState (usually MAC-protected)
+      - Direct usage without MAC enables trivial exploitation
+      - Full system compromise with web application privileges
+    remediation: |
+      Never use LosFormatter to deserialize untrusted data:
+
+      ```csharp
+      // VULNERABLE: LosFormatter without MAC
+      var formatter = new LosFormatter(false, (byte[])null);
+      object obj = formatter.Deserialize(input);
+
+      // SECURE: Use System.Text.Json instead
+      var obj = JsonSerializer.Deserialize<MyType>(json);
+
+      // For ViewState: Ensure MAC validation is enabled
+      // In web.config: <pages enableViewStateMac="true" />
+      // In .NET 4.5.2+: MAC is always enforced
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.web.ui.losformatter"
+      - "https://github.com/pwntester/ysoserial.net"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'LosFormatter'
+        - 'Deserialize'
+        - 'ViewState'
+        - '__VIEWSTATE'
+        - 'ASP\.NET'
+      taint_source_indicators:
+        - 'Request\['
+        - '__VIEWSTATE'
+        - 'HttpContext'
+        - 'hidden.*field'
+      taint_sink_indicators:
+        - '\.Deserialize\s*\('
+        - 'LosFormatter'
+      sanitization_patterns:
+        - 'enableViewStateMac.*true'
+        - 'ViewStateEncryptionMode'
+        - 'JsonSerializer'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + viewstate_exposure)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Attacker exploits direct LosFormatter usage in an ASP.NET application:
+        1. Developer uses LosFormatter to serialize/deserialize custom state data
+        2. LosFormatter(false, null) disables MAC validation
+        3. Attacker generates ysoserial.net payload and Base64-encodes it
+        4. Attacker sends the payload as the serialized state parameter
+        5. LosFormatter.Deserialize triggers BinaryFormatter internally
+        6. Gadget chain executes arbitrary commands on the server
+      example_payload: "new LosFormatter(false, (byte[])null).Deserialize(userInput)"
+      attacker_objective: "Achieve RCE via LosFormatter which internally uses BinaryFormatter"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-001"
+        - "DESER-CS-007"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-007: ObjectStateFormatter Deserialization
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-007"
+    title: "ObjectStateFormatter Deserialization of Untrusted Data"
+    description: >
+      Detects usage of ObjectStateFormatter which is used internally by ASP.NET
+      for ViewState and ControlState serialization. ObjectStateFormatter, like
+      LosFormatter, uses BinaryFormatter internally and is vulnerable to the same
+      deserialization attacks. It supports both binary and Base64 serialization
+      formats. Direct usage of ObjectStateFormatter with user-controlled input
+      enables RCE via ysoserial.net gadget chains.
+    language: csharp
+    category: deserialization
+    severity: High
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - rce
+      - ObjectStateFormatter
+      - viewstate
+      - asp.net
+      - dotnet
+      - csharp
+      - critical
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+ObjectStateFormatter\s*\(\s*\)'
+        description: "ObjectStateFormatter constructor"
+      - type: regex
+        pattern: 'ObjectStateFormatter[\s\S]{0,300}\.Deserialize\s*\('
+        description: "ObjectStateFormatter.Deserialize call"
+      - type: regex
+        pattern: 'ObjectStateFormatter\s+\w+\s*=\s*new\s+ObjectStateFormatter'
+        description: "ObjectStateFormatter variable assignment"
+      - type: regex
+        pattern: 'ObjectStateFormatter[\s\S]{0,200}\.Deserialize\s*\(\s*(?:stream|input|data|request|base64)'
+        description: "ObjectStateFormatter deserializing potentially untrusted input"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '\.Serialize\s*\('
+      - 'mock'
+      - 'fixture'
+      - 'example'
+    bypass_variants:
+      - description: "ObjectStateFormatter from String input"
+        pattern: 'ObjectStateFormatter[\s\S]{0,200}Deserialize\s*\(\s*(?:string|str|text|input)'
+      - description: "ObjectStateFormatter from Stream"
+        pattern: 'ObjectStateFormatter[\s\S]{0,200}Deserialize\s*\(\s*(?:stream|ms|memStream)'
+      - description: "Used in custom ViewState handling"
+        pattern: 'ObjectStateFormatter[\s\S]{0,200}__VIEWSTATE'
+    evasion_indicators:
+      - "ObjectStateFormatter used outside ASP.NET pipeline"
+      - "Custom ViewState handling with ObjectStateFormatter"
+      - "String input directly passed to Deserialize"
+      - "Base64-encoded data deserialized without MAC"
+    encoding_variants:
+      - type: "base64_input"
+        pattern: 'Convert\.FromBase64String[\s\S]{0,200}ObjectStateFormatter'
+      - type: "string_deserialize"
+        pattern: 'ObjectStateFormatter[\s\S]{0,200}Deserialize\s*\(\s*"'
+      - type: "stream_input"
+        pattern: 'MemoryStream[\s\S]{0,200}ObjectStateFormatter[\s\S]{0,100}Deserialize'
+    multi_function_chain_patterns:
+      - "Request parameter -> ObjectStateFormatter.Deserialize(input) -> type instantiation"
+      - "Base64 string -> ObjectStateFormatter.Deserialize(base64) -> BinaryFormatter internally"
+      - "ViewState field -> ObjectStateFormatter.Deserialize -> gadget chain -> RCE"
+      - "Hidden field -> stream -> ObjectStateFormatter.Deserialize -> command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ObjectStateFormatter uses BinaryFormatter internally, enabling RCE via gadget chains"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request_parameter"
+        sink: "ObjectStateFormatter.Deserialize(input)"
+        through: "user input to string deserialization"
+      - source: "ViewState_field"
+        sink: "ObjectStateFormatter.Deserialize(viewstate)"
+        through: "hidden field value"
+      - source: "cookie_value"
+        sink: "ObjectStateFormatter.Deserialize(cookie)"
+        through: "cookie to deserialization"
+    impact: |
+      ObjectStateFormatter deserialization is equivalent to BinaryFormatter:
+      - Uses BinaryFormatter internally for object serialization
+      - Same ysoserial.net gadget chains achieve RCE
+      - Commonly used in ASP.NET ViewState/ControlState
+      - Direct usage with untrusted input enables trivial exploitation
+      - Full system compromise with web application privileges
+    remediation: |
+      Never use ObjectStateFormatter to deserialize untrusted data:
+
+      ```csharp
+      // VULNERABLE: ObjectStateFormatter with user input
+      var formatter = new ObjectStateFormatter();
+      object obj = formatter.Deserialize(userInput);
+
+      // SECURE: System.Text.Json
+      var obj = JsonSerializer.Deserialize<MyType>(json);
+
+      // SECURE: DataContractSerializer
+      var serializer = new DataContractSerializer(typeof(MyType));
+      var obj = (MyType)serializer.ReadObject(stream);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.web.ui.objectstateformatter"
+      - "https://github.com/pwntester/ysoserial.net"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'ObjectStateFormatter'
+        - 'Deserialize'
+        - 'ViewState'
+        - 'ControlState'
+      taint_source_indicators:
+        - 'Request\['
+        - 'HttpContext'
+        - '__VIEWSTATE'
+        - 'input'
+      taint_sink_indicators:
+        - '\.Deserialize\s*\('
+        - 'ObjectStateFormatter'
+      sanitization_patterns:
+        - 'JsonSerializer'
+        - 'DataContractSerializer'
+        - 'enableViewStateMac'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + viewstate_exposure)"
+      exploitability_score: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Attacker exploits ObjectStateFormatter in custom ASP.NET state handling:
+        1. Developer uses ObjectStateFormatter.Deserialize to restore custom state from a hidden field
+        2. Attacker generates ysoserial.net TypeConfuseDelegate payload
+        3. Attacker replaces hidden field value with malicious serialized data
+        4. ObjectStateFormatter.Deserialize triggers BinaryFormatter internally
+        5. Gadget chain executes arbitrary code on the server
+      example_payload: "new ObjectStateFormatter().Deserialize(Request[\"state\"])"
+      attacker_objective: "Execute arbitrary code via ObjectStateFormatter deserialization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "low"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-CS-001"
+        - "DESER-CS-006"
+
+  # --------------------------------------------------------------------------
+  # DESER-CS-008: DataContractJsonSerializer with KnownTypes
+  # --------------------------------------------------------------------------
+  - rule_id: "DESER-CS-008"
+    title: "DataContractJsonSerializer with Dangerous Known Types"
+    description: >
+      Detects DataContractJsonSerializer configured with known types that include
+      dangerous base types like System.Object, System.IO.FileInfo, or types from
+      System.Diagnostics. While DataContractJsonSerializer is safer than
+      BinaryFormatter because it requires known types, overly permissive known type
+      lists (especially including System.Object) can enable type confusion attacks.
+      The __type metadata in JSON controls which known type is instantiated, and
+      dangerous types in the list can be exploited for information disclosure or
+      limited code execution.
+    language: csharp
+    category: deserialization
+    severity: High
+    confidence: 0.82
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - DataContractJsonSerializer
+      - known-types
+      - json
+      - type-confusion
+      - dotnet
+      - csharp
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+DataContractJsonSerializer\s*\(\s*typeof\s*\(\s*object\s*\)'
+        description: "DataContractJsonSerializer with System.Object as root type"
+      - type: regex
+        pattern: 'DataContractJsonSerializer[\s\S]{0,300}typeof\s*\(\s*(?:object|Object|System\.Object)\s*\)'
+        description: "DataContractJsonSerializer with Object known type"
+      - type: regex
+        pattern: '\[KnownType\s*\(\s*typeof\s*\(\s*(?:object|Object|System\.Object)\s*\)\s*\)\]'
+        description: "KnownType attribute with System.Object"
+      - type: regex
+        pattern: 'DataContractJsonSerializer[\s\S]{0,300}\.ReadObject\s*\(\s*(?:stream|request|input|body|data)'
+        description: "DataContractJsonSerializer.ReadObject with potentially untrusted input"
+      - type: regex
+        pattern: 'DataContractJsonSerializerSettings[\s\S]{0,200}KnownTypes\s*=[\s\S]{0,200}typeof\s*\(\s*object\s*\)'
+        description: "DataContractJsonSerializerSettings with Object known type"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'WriteObject'
+      - 'mock'
+      - 'fixture'
+      - 'typeof\s*\(\s*(?!object|Object)[A-Z][a-zA-Z]+\s*\)'
+    bypass_variants:
+      - description: "Known types list built dynamically"
+        pattern: 'DataContractJsonSerializer[\s\S]{0,200}knownTypes[\s\S]{0,200}Assembly\.GetTypes'
+      - description: "Known types from configuration"
+        pattern: 'Configuration[\s\S]{0,200}KnownTypes[\s\S]{0,200}DataContractJsonSerializer'
+      - description: "Reflection-based known type discovery"
+        pattern: 'AppDomain\.CurrentDomain\.GetAssemblies[\s\S]{0,300}DataContractJsonSerializer'
+    evasion_indicators:
+      - "Known types built from assembly scanning"
+      - "Configuration-driven known type lists"
+      - "Overly broad known type declarations"
+      - "System.Object or interface types as root type"
+    encoding_variants:
+      - type: "type_hint"
+        pattern: '__type.*DataContractJsonSerializer'
+      - type: "assembly_scan"
+        pattern: 'GetTypes[\s\S]{0,200}DataContractJsonSerializer'
+      - type: "config_types"
+        pattern: 'Configuration[\s\S]{0,200}Type\.GetType[\s\S]{0,200}DataContractJsonSerializer'
+    multi_function_chain_patterns:
+      - "Request.Body -> DataContractJsonSerializer(typeof(object)).ReadObject -> type confusion"
+      - "API endpoint -> JSON body with __type -> DataContractJsonSerializer.ReadObject"
+      - "Assembly.GetTypes -> known types list -> DataContractJsonSerializer -> ReadObject"
+      - "Configuration -> known types -> DataContractJsonSerializer -> deserialization"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Overly permissive known types enables type confusion and potential code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP_request_body"
+        sink: "DataContractJsonSerializer.ReadObject(stream)"
+        through: "JSON with __type metadata"
+      - source: "API_endpoint"
+        sink: "DataContractJsonSerializer(typeof(object)).ReadObject"
+        through: "request body with type hint"
+      - source: "message_body"
+        sink: "DataContractJsonSerializer.ReadObject(reader)"
+        through: "message to XML reader"
+    impact: |
+      DataContractJsonSerializer with dangerous known types:
+      - typeof(object) as root type allows any known type instantiation
+      - __type metadata controls type selection among known types
+      - Overly broad known type lists may include exploitable types
+      - Type confusion can lead to information disclosure
+      - In specific configurations, limited code execution is possible
+    remediation: |
+      Use strict known type lists with DataContractJsonSerializer:
+
+      ```csharp
+      // VULNERABLE: System.Object as root type
+      var serializer = new DataContractJsonSerializer(typeof(object));
+
+      // SECURE: Specific concrete type
+      var serializer = new DataContractJsonSerializer(typeof(MyType));
+
+      // SECURE: Limited known types list
+      var serializer = new DataContractJsonSerializer(typeof(MyType),
+          new DataContractJsonSerializerSettings
+          {
+              KnownTypes = new[] { typeof(AllowedType1), typeof(AllowedType2) }
+          });
+
+      // BETTER: Use System.Text.Json
+      var obj = JsonSerializer.Deserialize<MyType>(json);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.runtime.serialization.json.datacontractjsonserializer"
+      - "https://learn.microsoft.com/en-us/dotnet/framework/wcf/feature-details/stand-alone-json-serialization"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'DataContractJsonSerializer'
+        - 'ReadObject'
+        - 'KnownType'
+        - 'typeof'
+        - '__type'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'HttpContext'
+        - 'Stream'
+        - 'XmlReader'
+      taint_sink_indicators:
+        - '\.ReadObject\s*\('
+        - 'DataContractJsonSerializer'
+      sanitization_patterns:
+        - 'typeof\s*\(\s*(?!object)[A-Z]'
+        - 'System\.Text\.Json'
+        - 'JsonSerializer'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (1 + known_type_breadth)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        Attacker exploits overly permissive DataContractJsonSerializer:
+        1. WCF API uses DataContractJsonSerializer(typeof(object)) for polymorphic deserialization
+        2. Known types include System.Object and various framework types
+        3. Attacker sends JSON with __type pointing to a dangerous known type
+        4. DataContractJsonSerializer instantiates the type and populates properties
+        5. Depending on available known types, attacker achieves info disclosure or DoS
+      example_payload: '{"__type":"SomeType:#Namespace","Property":"malicious_value"}'
+      attacker_objective: "Exploit overly permissive known types for type confusion attacks"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: false
+      related_rules:
+        - "DESER-CS-003"
+        - "DESER-CS-005"

@@ -1,0 +1,274 @@
+rules:
+- rule_id: GHA-SEC-001
+  title: Unpinned Action Version
+  description: 'Detects GitHub Actions referenced by tag instead of SHA hash.
+
+    '
+  language: github_actions
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - github-actions
+  - supply-chain
+  - pinning
+  patterns:
+  - type: regex
+    pattern: uses:\s+[\w-]+/[\w-]+@(?:v\d+|main|master|latest)\s*$
+  anti_patterns:
+  - '@sha256'
+  - '# pin'
+  impact: 'Unpinned actions are vulnerable to tag-squatting and supply chain attacks.
+
+    An attacker can modify the tagged commit to inject malicious code.
+
+    '
+  remediation: "Pin actions to full-length SHA:\n  uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # v3.5.2\n"
+- rule_id: GHA-SEC-002
+  title: Script Injection via Untrusted Input
+  description: 'Detects injection of GitHub context variables into shell scripts.
+
+    '
+  language: github_actions
+  category: devops
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - github-actions
+  - script-injection
+  - command-injection
+  patterns:
+  - type: regex
+    pattern: run:.*\$\{\{\s*github\.event\.(?:issue|pull_request|comment|review|discussion)\.(?:title|body|head\.ref|label\.name)
+  - type: regex
+    pattern: run:.*\$\{\{\s*github\.event\.(?:inputs|client_payload)\.
+  - type: regex
+    pattern: run:.*\$\{\{\s*github\.(?:head_ref|ref_name)\s*\}\}
+  anti_patterns:
+  - GITHUB_ENV
+  - github.event.number
+  - github.sha
+  impact: 'Attackers can inject shell commands via PR titles, issue bodies,
+
+    or branch names that are interpolated into run steps.
+
+    '
+  remediation: "Use intermediate environment variables:\n  env:\n    TITLE: ${{ github.event.pull_request.title }}\n  run: echo \"$TITLE\"\n"
+- rule_id: GHA-SEC-003
+  title: Secrets Exposed in Logs
+  description: 'Detects potential secret exposure in GitHub Actions logs.
+
+    '
+  language: github_actions
+  category: secrets
+  severity: High
+  confidence: 0.88
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - github-actions
+  - secrets
+  - logging
+  patterns:
+  - type: regex
+    pattern: run:.*echo\s+.*\$\{\{\s*secrets\.\w+
+  - type: regex
+    pattern: run:.*(?:cat|printenv|env)\s*$
+  - type: regex
+    pattern: run:.*(?:curl|wget).*\$\{\{\s*secrets\.\w+
+  anti_patterns:
+  - '::add-mask::'
+  - GITHUB_OUTPUT
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: GHA-SEC-004
+  title: Overly Permissive Workflow Permissions
+  description: 'Detects workflows with write-all or excessive permissions.
+
+    '
+  language: github_actions
+  category: devops
+  severity: High
+  confidence: 0.9
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - github-actions
+  - permissions
+  - least-privilege
+  patterns:
+  - type: regex
+    pattern: permissions:\s*write-all
+  - type: regex
+    pattern: permissions:\s*\n\s+contents:\s*write
+  anti_patterns:
+  - 'permissions: read-all'
+  - 'permissions: {}'
+  - 'contents: read'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GHA-SEC-005
+  title: pull_request_target with Checkout
+  description: 'Detects dangerous pull_request_target trigger with code checkout.
+
+    '
+  language: github_actions
+  category: devops
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-94
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 2
+  tags:
+  - github-actions
+  - pull-request-target
+  - code-injection
+  patterns:
+  - type: regex
+    pattern: on:\s*(?:\n\s+)?pull_request_target
+  anti_patterns:
+  - 'types: [labeled]'
+  - 'if: github.event.label'
+  impact: 'pull_request_target runs in the base repo context with secrets access.
+
+    Checking out PR code can execute attacker-controlled code with secrets.
+
+    '
+  remediation: 'Never checkout PR code in pull_request_target workflows.
+
+    Use pull_request event instead, or restrict with label-based triggers.
+
+    '
+- rule_id: GHA-SEC-006
+  title: Self-Hosted Runner Risk
+  description: 'Detects workflows running on self-hosted runners without restrictions.
+
+    '
+  language: github_actions
+  category: devops
+  severity: High
+  confidence: 0.82
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - github-actions
+  - self-hosted
+  - runners
+  patterns:
+  - type: regex
+    pattern: runs-on:\s*self-hosted\b
+  - type: regex
+    pattern: runs-on:\s*\[\s*self-hosted
+  anti_patterns:
+  - 'if: github.actor'
+  - 'environment:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GHA-SEC-007
+  title: Workflow with Unprotected Environment
+  description: 'Detects deployment workflows without environment protection rules.
+
+    '
+  language: github_actions
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - github-actions
+  - environment
+  - deployment
+  patterns:
+  - type: regex
+    pattern: run:.*(?:deploy|publish|release|push).*(?:prod|production|live)\b
+  anti_patterns:
+  - 'environment:'
+  - 'concurrency:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GHA-SEC-008
+  title: Artifact Upload Without Restriction
+  description: 'Detects uploading sensitive paths as artifacts.
+
+    '
+  language: github_actions
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - github-actions
+  - artifacts
+  patterns:
+  - type: regex
+    pattern: upload-artifact.*path:\s*(?:\.\s*$|/|~)
+  - type: regex
+    pattern: upload-artifact.*path:.*(?:\.env|credentials|\.key|\.pem|secrets)
+  anti_patterns:
+  - 'retention-days: 1'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GHA-SEC-009
+  title: Actions GITHUB_TOKEN with Excessive Scope
+  description: 'Detects GITHUB_TOKEN used with write permissions on critical resources.
+
+    '
+  language: github_actions
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - github-actions
+  - github-token
+  - permissions
+  patterns:
+  - type: regex
+    pattern: packages:\s*write
+  - type: regex
+    pattern: security-events:\s*write
+  - type: regex
+    pattern: actions:\s*write
+  anti_patterns:
+  - '# required for'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GHA-SEC-010
+  title: Composite Action Without Input Sanitization
+  description: 'Detects composite actions using inputs directly in shell commands.
+
+    '
+  language: github_actions
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - github-actions
+  - composite-action
+  - injection
+  patterns:
+  - type: regex
+    pattern: run:.*\$\{\{\s*inputs\.\w+\s*\}\}
+  anti_patterns:
+  - 'env:'
+  - INPUT_
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging

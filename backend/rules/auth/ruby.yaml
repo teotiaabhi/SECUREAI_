@@ -1,0 +1,257 @@
+rules:
+- rule_id: RUBY-AUTH-001
+  title: Ruby Hardcoded Credentials
+  description: Detects hardcoded passwords and API keys in Ruby code
+  language: ruby
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 798
+  owasp: A07:2021
+  tags:
+  - hardcoded-creds
+  - ruby
+  - secrets
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: \w{0,30}(?:password|passwd|secret|api_key|token)\w{0,30}\s*=\s*["\x27][^"\x27]{8,}["\x27]
+  - type: regex
+    pattern: (?:PASSWORD|SECRET|API_KEY|TOKEN)\s*=\s*["\x27][^"\x27]{8,}["\x27]
+  anti_patterns:
+  - pattern: ENV\[|ENV\.fetch
+    description: Reading from environment
+  - pattern: Rails\.application\.credentials
+    description: Using Rails credentials
+  - pattern: '["\x27]{2}'
+    description: Empty string
+  impact: Hardcoded credentials in source code can be leaked via repositories
+  remediation: Use Rails credentials (rails credentials:edit), ENV vars, or secret managers
+- rule_id: RUBY-AUTH-002
+  title: Ruby Missing CSRF Protection
+  description: Detects disabled or missing CSRF protection in Rails controllers
+  language: ruby
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 352
+  owasp: A01:2021
+  tags:
+  - csrf
+  - ruby
+  - rails
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: skip_before_action\s+:verify_authenticity_token
+  - type: regex
+    pattern: protect_from_forgery\s+with:\s*:null_session
+  - type: regex
+    pattern: config\.action_controller\.allow_forgery_protection\s*=\s*false
+  anti_patterns:
+  - pattern: protect_from_forgery\s+with:\s*:exception
+    description: CSRF protection enabled
+  impact: Missing CSRF protection allows cross-site request forgery attacks
+  remediation: 'Enable protect_from_forgery with: :exception in ApplicationController'
+- rule_id: RUBY-AUTH-003
+  title: Ruby Mass Assignment Vulnerability
+  description: Detects mass assignment vulnerabilities in Rails
+  language: ruby
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 915
+  owasp: A04:2021
+  tags:
+  - mass-assignment
+  - ruby
+  - rails
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: \.(?:create|update|new)\s*\(\s*params\s*(?:\)|$)
+  - type: regex
+    pattern: \.update_attributes?\s*\(\s*params\s*\)
+  - type: regex
+    pattern: attr_accessible\s*$
+  - type: regex
+    pattern: permit!\s*$
+  anti_patterns:
+  - pattern: \.permit\s*\(
+    description: Strong parameters used
+  impact: Mass assignment allows attackers to modify protected fields like admin flags
+  remediation: 'Use strong parameters: params.require(:model).permit(:field1, :field2)'
+- rule_id: RUBY-CRYPTO-001
+  title: Ruby Weak Cryptography
+  description: Detects weak hashing and encryption in Ruby
+  language: ruby
+  category: crypto
+  severity: High
+  confidence: 90
+  cwe: 327
+  owasp: A02:2021
+  tags:
+  - crypto
+  - ruby
+  - weak-algorithm
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: Digest::MD5\.
+  - type: regex
+    pattern: Digest::SHA1\.
+  - type: regex
+    pattern: OpenSSL::Cipher\.new\s*\(\s*["\x27](?:des|rc4|blowfish)
+  - type: regex
+    pattern: OpenSSL::Cipher::DES\.new
+  anti_patterns:
+  - pattern: Digest::SHA256|Digest::SHA384|Digest::SHA512
+    description: Using strong hash algorithms
+  impact: Weak crypto algorithms can be broken
+  remediation: Use Digest::SHA256+, OpenSSL::Cipher::AES for encryption, bcrypt for passwords
+- rule_id: RUBY-CRYPTO-002
+  title: Ruby Insecure TLS Configuration
+  description: Detects disabled SSL verification in Ruby HTTP clients
+  language: ruby
+  category: crypto
+  severity: Critical
+  confidence: 90
+  cwe: 295
+  owasp: A02:2021
+  tags:
+  - tls
+  - ruby
+  - cert-validation
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: verify_mode\s*=\s*OpenSSL::SSL::VERIFY_NONE
+  - type: regex
+    pattern: ssl_verify_mode:\s*(?:0|OpenSSL::SSL::VERIFY_NONE)
+  - type: regex
+    pattern: Faraday\.new[^;]*ssl:\s*\{[^}]*verify:\s*false
+  - type: regex
+    pattern: RestClient::Request\.execute[^;]*verify_ssl:\s*false
+  anti_patterns:
+  - pattern: VERIFY_PEER
+    description: SSL verification enabled
+  impact: Disabled SSL verification enables man-in-the-middle attacks
+  remediation: Use OpenSSL::SSL::VERIFY_PEER, ensure CA certificates are configured
+- rule_id: RUBY-XSS-001
+  title: Ruby Cross-Site Scripting
+  description: Detects unescaped user output in Ruby/Rails views
+  language: ruby
+  category: xss
+  severity: High
+  confidence: 85
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - xss
+  - ruby
+  - rails
+  - erb
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: raw\s*\(\s*(?:params|@\w+|request\.)
+  - type: regex
+    pattern: \.html_safe\b
+  - type: regex
+    pattern: content_tag\s*\([^)]*raw\s*\(
+  - type: regex
+    pattern: render\s+inline:\s*params
+  anti_patterns:
+  - pattern: sanitize\s*\(
+    description: HTML sanitization applied
+  - pattern: ERB::Util\.html_escape
+    description: Explicit HTML escaping
+  impact: XSS allows stealing session cookies and impersonating users
+  remediation: Use ERB's default escaping (<%= %>), avoid .html_safe and raw() on user data
+- rule_id: RUBY-SSRF-001
+  title: Ruby Server-Side Request Forgery
+  description: Detects SSRF vulnerabilities in Ruby HTTP client calls
+  language: ruby
+  category: ssrf
+  severity: High
+  confidence: 80
+  cwe: 918
+  owasp: A10:2021
+  tags:
+  - ssrf
+  - ruby
+  - http-client
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: URI\.parse\s*\(\s*params\[
+  - type: regex
+    pattern: Net::HTTP\.get\s*\(\s*URI\s*\(\s*(?:params|request)
+  - type: regex
+    pattern: open\s*\(\s*params\[
+  - type: regex
+    pattern: HTTParty\.get\s*\(\s*params\[
+  - type: regex
+    pattern: Faraday\.get\s*\(\s*params\[
+  anti_patterns:
+  - pattern: URI\.parse.*private\?|allowed_hosts
+    description: URL validation present
+  impact: SSRF allows accessing internal services and cloud metadata endpoints
+  remediation: Validate URLs against allowlist, block private/reserved IP ranges
+- rule_id: RUBY-PT-001
+  title: Ruby Path Traversal
+  description: Detects path traversal in Ruby file operations
+  language: ruby
+  category: path_traversal
+  severity: High
+  confidence: 85
+  cwe: 22
+  owasp: A01:2021
+  tags:
+  - path-traversal
+  - ruby
+  - lfi
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: File\.read\s*\(\s*(?:params\[|"[^"]*#\{)
+  - type: regex
+    pattern: File\.open\s*\(\s*(?:params\[|"[^"]*#\{)
+  - type: regex
+    pattern: send_file\s*\(\s*(?:params\[|"[^"]*#\{)
+  - type: regex
+    pattern: File\.join\s*\(\s*\w+\s*,\s*params\[
+  anti_patterns:
+  - pattern: Pathname.*cleanpath|realpath
+    description: Path normalization
+  - pattern: start_with\?
+    description: Path prefix validation
+  impact: Path traversal allows reading arbitrary files from the server
+  remediation: Use Pathname#cleanpath and verify the resolved path starts with expected directory
+- rule_id: RUBY-RCE-002
+  title: Ruby ERB Template Injection
+  description: Detects server-side template injection via ERB with user input
+  language: ruby
+  category: rce
+  severity: Critical
+  confidence: 85
+  cwe: 94
+  owasp: A03:2021
+  tags:
+  - ssti
+  - ruby
+  - erb
+  - template-injection
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: ERB\.new\s*\(\s*(?:params|request|@?\w*input)
+  - type: regex
+    pattern: render\s+inline:\s*(?:params|request)
+  - type: regex
+    pattern: Erubis::Eruby\.new\s*\(\s*(?:params|request)
+  anti_patterns:
+  - pattern: ERB\.new\s*\(\s*File\.read
+    description: Loading from file
+  impact: Template injection enables arbitrary Ruby code execution on the server
+  remediation: Never pass user input to ERB.new(), use parameterized templates

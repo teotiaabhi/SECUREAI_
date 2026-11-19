@@ -1,0 +1,307 @@
+rules:
+- rule_id: SWIFT-INJ-002
+  title: Swift SQL Injection via String Interpolation
+  description: Detects SQL queries built with Swift string interpolation
+  language: swift
+  category: injection
+  severity: Critical
+  confidence: 95
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - sqli
+  - swift
+  - string-interpolation
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: execute(?:Query|Update)\s*\(\s*"[^"]*\\[^"]*"\s*\)
+  - type: regex
+    pattern: sqlite3_exec\s*\([^,]*,\s*"[^"]*\\[^"]*"
+  - type: regex
+    pattern: db\.execute\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\\[^"]*"
+  anti_patterns:
+  - pattern: sqlite3_bind
+    description: Using parameter binding
+  - pattern: \?
+    description: Parameterized query placeholder
+  impact: SQL injection leading to data breach or database compromise
+  remediation: Use SQLite parameter binding (sqlite3_bind_text) or GRDB/SQLite.swift query builders
+- rule_id: SWIFT-INJ-003
+  title: Swift Command Injection
+  description: Detects OS command execution with user input in Swift
+  language: swift
+  category: injection
+  severity: Critical
+  confidence: 90
+  cwe: 78
+  owasp: A03:2021
+  tags:
+  - cmdi
+  - swift
+  - process
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: Process\s*\(\s*\)[\s\S]{0,200}launchPath\s*=\s*"?/bin/(?:sh|bash)"?[\s\S]{0,200}arguments\s*=\s*\[.*\w+
+  - type: regex
+    pattern: NSTask\s*\(\s*\)[\s\S]{0,100}arguments\s*=.*\w+Input
+  - type: regex
+    pattern: Process\s*\(\s*\)[\s\S]{0,100}arguments\s*=\s*\["-c",\s*\w+
+  anti_patterns:
+  - pattern: arguments\s*=\s*\["[^\\]*"\]
+    description: Static command arguments
+  impact: Remote code execution through shell command injection
+  remediation: Use Process with explicit argument arrays, avoid shell interpretation
+- rule_id: SWIFT-INJ-004
+  title: Swift XSS in WKWebView
+  description: Detects loading user-controlled content in WKWebView without sanitization
+  language: swift
+  category: xss
+  severity: High
+  confidence: 85
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - xss
+  - swift
+  - webview
+  - ios
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: webView\.loadHTMLString\s*\(\s*"[^"]*\\\(
+  - type: regex
+    pattern: evaluateJavaScript\s*\(\s*"[^"]*\\\(
+  - type: regex
+    pattern: webView\.load\s*\(\s*URLRequest\s*\(\s*url:\s*URL\s*\(\s*string:\s*\w+
+  anti_patterns:
+  - pattern: WKContentRuleList
+    description: Content rules applied
+  - pattern: sanitize|escape
+    description: Input sanitization
+  impact: XSS in WebView can access device APIs and steal app data
+  remediation: Sanitize HTML content before loading, use WKContentRuleList, validate URLs
+- rule_id: SWIFT-AUTH-001
+  title: Swift Hardcoded Credentials
+  description: Detects hardcoded secrets in Swift source code
+  language: swift
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 798
+  owasp: A07:2021
+  tags:
+  - hardcoded-creds
+  - swift
+  - secrets
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: let\s+\w*(?:password|apiKey|secret|token)\w*\s*(?::\s*String\s*)?=\s*"[^"]{8,}"
+  - type: regex
+    pattern: static\s+let\s+\w*(?:PASSWORD|API_KEY|SECRET|TOKEN)\w*\s*=\s*"[^"]{8,}"
+  anti_patterns:
+  - pattern: ProcessInfo\.processInfo\.environment
+    description: Reading from environment
+  - pattern: Keychain
+    description: Using Keychain
+  - pattern: '""'
+    description: Empty string placeholder
+  impact: Credentials in source code can be extracted from compiled iOS/macOS apps
+  remediation: Use iOS Keychain, environment variables, or secure server-side configuration
+- rule_id: SWIFT-AUTH-002
+  title: Swift Insecure Keychain Configuration
+  description: Detects insecure Keychain access control settings
+  language: swift
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 522
+  owasp: A07:2021
+  tags:
+  - keychain
+  - swift
+  - ios
+  - storage
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: kSecAttrAccessible.*kSecAttrAccessibleAlways\b
+  - type: regex
+    pattern: kSecAttrAccessible.*kSecAttrAccessibleAlwaysThisDeviceOnly\b
+  - type: regex
+    pattern: SecItemAdd\s*\([^)]*\)[^;]*kSecAttrAccessible[^;]*(?!WhenUnlocked)
+  anti_patterns:
+  - pattern: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+    description: Secure keychain access level
+  impact: Data accessible even when device is locked can be extracted by malware
+  remediation: Use kSecAttrAccessibleWhenUnlockedThisDeviceOnly for sensitive data
+- rule_id: SWIFT-CRYPTO-001
+  title: Swift Weak Cryptography
+  description: Detects use of deprecated or weak crypto algorithms in Swift
+  language: swift
+  category: crypto
+  severity: High
+  confidence: 90
+  cwe: 327
+  owasp: A02:2021
+  tags:
+  - crypto
+  - swift
+  - weak-algorithm
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: CC_MD5\s*\(
+  - type: regex
+    pattern: CC_SHA1\s*\(
+  - type: regex
+    pattern: Insecure\.MD5|Insecure\.SHA1
+  - type: regex
+    pattern: CCAlgorithm\s*\(\s*kCCAlgorithmDES\s*\)
+  anti_patterns:
+  - pattern: SHA256|SHA384|SHA512|AES\.GCM
+    description: Using strong algorithms
+  impact: Weak hash functions can be reversed or collided
+  remediation: 'Use CryptoKit: SHA256, AES.GCM, P256 for signing'
+- rule_id: SWIFT-CRYPTO-002
+  title: Swift Insecure TLS Configuration
+  description: Detects disabled TLS certificate validation in Swift
+  language: swift
+  category: crypto
+  severity: Critical
+  confidence: 90
+  cwe: 295
+  owasp: A02:2021
+  tags:
+  - tls
+  - swift
+  - cert-validation
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: allowsExpiredCertificates\s*=\s*true
+  - type: regex
+    pattern: allowsExpiredRoots\s*=\s*true
+  - type: regex
+    pattern: validatesDomainName\s*=\s*false
+  - type: regex
+    pattern: ServerTrust.*completionHandler\s*\(\s*\.useCredential
+  - type: regex
+    pattern: ATS.*NSAllowsArbitraryLoads.*true
+  anti_patterns:
+  - pattern: evaluateAsync|SecTrustEvaluate
+    description: Performing certificate evaluation
+  impact: Disabled TLS validation enables man-in-the-middle attacks
+  remediation: Enable proper TLS certificate validation, use certificate pinning
+- rule_id: SWIFT-DESER-001
+  title: Swift Unsafe Deserialization
+  description: Detects unsafe deserialization in Swift using NSKeyedUnarchiver
+  language: swift
+  category: deserialization
+  severity: High
+  confidence: 85
+  cwe: 502
+  owasp: A08:2021
+  tags:
+  - deserialization
+  - swift
+  - nscoding
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: NSKeyedUnarchiver\.unarchiveObject\s*\(
+  - type: regex
+    pattern: NSKeyedUnarchiver\.unarchivedObject\s*\(\s*ofClasses:\s*\[\s*NSObject\.self\s*\]
+  - type: regex
+    pattern: NSCoding.*init\?\s*\(\s*coder
+  anti_patterns:
+  - pattern: 'unarchivedObject\s*\(\s*ofClass:'
+    description: Type-restricted unarchiving
+  - pattern: NSSecureCoding
+    description: Using secure coding protocol
+  impact: Unsafe deserialization can lead to arbitrary code execution
+  remediation: Use NSSecureCoding protocol and NSKeyedUnarchiver with specific class types
+- rule_id: SWIFT-PT-001
+  title: Swift Path Traversal
+  description: Detects path traversal vulnerabilities in Swift file operations
+  language: swift
+  category: path_traversal
+  severity: High
+  confidence: 85
+  cwe: 22
+  owasp: A01:2021
+  tags:
+  - path-traversal
+  - swift
+  - lfi
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: FileManager\.default\.contents\s*\(\s*atPath:\s*\w+\s*\+\s*\w*(?:path|file|name)
+  - type: regex
+    pattern: URL\s*\(\s*fileURLWithPath:\s*\w*(?:path|file|name)\w*\s*\)
+  - type: regex
+    pattern: appendingPathComponent\s*\(\s*\w*(?:path|file|name|input)\w*\s*\)
+  anti_patterns:
+  - pattern: standardizedFileURL|resolvingSymlinksInPath
+    description: Path normalization
+  - pattern: hasPrefix
+    description: Path prefix validation
+  impact: Path traversal allows reading sensitive files from the device
+  remediation: Normalize paths and validate they stay within allowed directories
+- rule_id: SWIFT-SSRF-001
+  title: Swift Server-Side Request Forgery
+  description: Detects SSRF vulnerabilities in Swift Vapor/server-side applications
+  language: swift
+  category: ssrf
+  severity: High
+  confidence: 80
+  cwe: 918
+  owasp: A10:2021
+  tags:
+  - ssrf
+  - swift
+  - vapor
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: req\.client\.get\s*\(\s*"[^"]*\\\(\w+
+  - type: regex
+    pattern: URLSession\.shared\.dataTask\s*\(\s*with:\s*URL\s*\(\s*string:\s*(?:req\.\w+|request\.\w+)
+  - type: regex
+    pattern: HTTPClient\.request\s*\(\s*"[^"]*\\\(\w+
+  anti_patterns:
+  - pattern: isAllowedURL|validateURL|whitelist
+    description: URL validation present
+  impact: SSRF allows access to internal services and cloud metadata endpoints
+  remediation: Validate and whitelist allowed URLs, block private IP ranges
+- rule_id: SWIFT-RCE-001
+  title: Swift Remote Code Execution via Dynamic Library Loading
+  description: Detects dynamic library loading that could enable code injection
+  language: swift
+  category: rce
+  severity: Critical
+  confidence: 85
+  cwe: 94
+  owasp: A03:2021
+  tags:
+  - rce
+  - swift
+  - dylib
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: dlopen\s*\(\s*\w+\s*,
+  - type: regex
+    pattern: NSBundle\s*\(\s*path:\s*\w+
+  - type: regex
+    pattern: Bundle\s*\(\s*url:\s*\w+
+  anti_patterns:
+  - pattern: dlopen\s*\(\s*nil
+    description: Loading main bundle
+  - pattern: Bundle\.main
+    description: Using main bundle
+  impact: Loading dynamic libraries from untrusted paths enables arbitrary code execution
+  remediation: Only load libraries from trusted, hardcoded paths within the app bundle

@@ -1,0 +1,513 @@
+    ✖ CRITICAL L31     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      28            self._scan_starts: Dict[str, deque] = defaultdict(deque)
+    ✖ CRITICAL L45     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      42            window.append(now)
+
+  ── app\middleware\rate_limiter.py 
+    ✖ CRITICAL L46     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      43        def _get_limit(self, group: str) -> Tuple[int, int]:
+
+  ── app\middleware\tenant_context.py 
+    ✖ CRITICAL L17     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      14    )
+
+  ── app\orchestration\parallel_controller.py 
+    ✖ CRITICAL L50     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      47    _scan_progress: Dict[str, dict] = {}
+    ✖ CRITICAL L58     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      55        return _scan_progress.get(scan_id)
+    ✖ CRITICAL L63     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      60        _scan_progress[scan_id] = data
+
+  ── app\orchestration\progress_tracker.py 
+    ✖ CRITICAL L25     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      22    class ScanProgressTracker:
+    ✖ CRITICAL L96     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      93            await db.commit()
+
+  ── app\orchestration\report_aggregator.py 
+    ✖ CRITICAL L55     Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      52    class ReportAggregator:
+
+  ── app\orchestration\scan_diagnostics.py 
+    ✖ CRITICAL L32     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      29    
+    ✖ CRITICAL L66     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      63    
+    ✖ CRITICAL L107    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      104    
+    ✖ CRITICAL L107    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      104    
+    ✖ CRITICAL L155    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      152        Also provides Phase 4 executor state logging via `update_executor_sta
+    ✖ CRITICAL L329    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      326        Provides the watchdog for file-level progress tracking.
+
+  ── app\orchestration\scan_orchestrator.py 
+    ✖ CRITICAL L38     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      35    logger = logging.getLogger("orchestration.scan_orchestrator")
+    ✖ CRITICAL L79     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      76                )
+    ✖ CRITICAL L989    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      986    
+    ✖ CRITICAL L1132   Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      1129    
+
+  ── app\orchestration\session_manager.py 
+    ✖ CRITICAL L94     Exploit Chain: Auth Bypass + SQL Injection → Database Takeover  (89)
+      91    
+    ✖ CRITICAL L167    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      164            self._active_sessions.clear()
+    ✖ CRITICAL L256    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      253                "status": ScanStatus.QUEUED.value,
+    ✖ CRITICAL L298    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      295    
+    ✖ CRITICAL L343    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      340            logger.info("Scan %s cancelled", scan_id)
+    ✖ CRITICAL L350    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      347                return False
+    ✖ CRITICAL L357    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      354                return session.cancel_event
+    ✖ CRITICAL L370    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      367            elapsed = time.monotonic() - session.phase_started_at
+    ✖ CRITICAL L380    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      377                    if not user_scans:
+
+  ── app\orchestration\zip_extractor.py 
+    ✖ CRITICAL L246    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      243            )
+    ✖ HIGH L260    ZIP Slip via Python zipfile Module  (CWE-22)
+      257    
+
+  ── app\queue\base.py 
+    ✖ CRITICAL L101    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      98            """
+
+  ── app\queue\dead_letter.py 
+    ✖ CRITICAL L91     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      88                )
+    ✖ CRITICAL L96     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      93            async with self._lock:
+
+  ── app\queue\memory_backend.py 
+    ✖ CRITICAL L80     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      77                )
+
+  ── app\queue\redis_backend.py 
+    ✖ CRITICAL L139    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      136                    tasks.append(ScanTask.from_json(task_json))
+
+  ── app\scanner\risk_engine.py 
+    ✖ CRITICAL L72     Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      69        return dist
+
+  ── app\scanner\rule_engine.py 
+    ▲ MEDIUM L292    ReDoS via re.compile with User-Controlled Pattern  (CWE-1333)
+      289            for pattern in rule["patterns"]:
+
+  ── app\services\baseline_service.py 
+    ✖ CRITICAL L53     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      50        return ((line_reference - 1) // _LINE_BUCKET_SIZE) * _LINE_BUCKET_SIZE
+    ✖ CRITICAL L84     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      81    
+    ✖ CRITICAL L191    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      188    
+    ✖ CRITICAL L219    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      216        return findings
+    ✖ CRITICAL L257    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      254    
+    ✖ CRITICAL L290    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      287    
+
+  ── app\services\data_retention.py 
+    ✖ CRITICAL L28     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      25        """GDPR data lifecycle operations."""
+    ✖ CRITICAL L124    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      121            return counts
+    ✖ CRITICAL L124    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      121            return counts
+
+  ── app\services\delta_engine.py 
+    ✖ CRITICAL L226    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      223    
+
+  ── app\services\diff_detector.py 
+    ✖ CRITICAL L60     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      57    
+    ✖ CRITICAL L100    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      97            raise DiffDetectionError(f"JWT creation failed: {exc}")
+    ✖ HIGH L218    aiohttp ClientSession with User-Controlled URL  (CWE-918)
+      215    
+
+  ── app\services\github_webhook.py 
+    ✖ CRITICAL L50     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      47    class ReplayAttackDetected(WebhookError):
+    ✖ CRITICAL L66     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      63    class RepositoryNotFoundError(WebhookError):
+    ✖ CRITICAL L90     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      87    _MAX_DELIVERIES = 10_000
+    ✖ CRITICAL L117    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      114        return False
+    ✖ CRITICAL L158    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      155        return hmac.compare_digest(expected, signature)
+    ✖ CRITICAL L165    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      162    
+    ✖ CRITICAL L192    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      189    }
+    ✖ CRITICAL L450    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      447    _SUPPORTED_EVENTS = {"push", "pull_request"}
+
+  ── app\services\ingestion.py 
+    ✖ HIGH L233    ZIP Slip via Python zipfile Module  (CWE-22)
+      230    
+    ✖ HIGH L235    ZIP Slip via Python zipfile Module  (CWE-22)
+      232                    try:
+    ✖ HIGH L242    ZIP Slip via Python zipfile Module  (CWE-22)
+      239                    # Reject symlinks (external_attr >> 28 == 0xA for symlink
+    ✖ HIGH L247    ZIP Slip via Python zipfile Module  (CWE-22)
+      244                        continue
+    ✖ HIGH L248    ZIP Slip via Python zipfile Module  (CWE-22)
+      245    
+    ✖ HIGH L251    ZIP Slip via Python zipfile Module  (CWE-22)
+      248                        logger.info("[SKIP] %s (ignored dir/extension)", info
+    ✖ HIGH L252    ZIP Slip via Python zipfile Module  (CWE-22)
+      249                        files_skipped_ignored += 1
+    ✖ HIGH L269    ZIP Slip via Python zipfile Module  (CWE-22)
+      266                        size_mb = info.file_size / (1024 * 1024)
+    ✖ HIGH L280    ZIP Slip via Python zipfile Module  (CWE-22)
+      277                        ratio = info.file_size / info.compress_size
+    ✖ HIGH L286    ZIP Slip via Python zipfile Module  (CWE-22)
+      283    
+    ✖ HIGH L290    ZIP Slip via Python zipfile Module  (CWE-22)
+      287    
+    ✖ HIGH L295    ZIP Slip via Python zipfile Module  (CWE-22)
+      292                            continue
+    ✖ HIGH L298    ZIP Slip via Python zipfile Module  (CWE-22)
+      295                        ext = os.path.splitext(info.filename)[1].lower()
+    ✖ HIGH L299    ZIP Slip via Python zipfile Module  (CWE-22)
+      296                        errors = _validate_file(content, info.filename)
+    ✖ HIGH L307    ZIP Slip via Python zipfile Module  (CWE-22)
+      304                        ))
+
+  ── app\services\scan_insert_service.py 
+    ✖ CRITICAL L16     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      13    logger = get_logger("scan_insert_service")
+    ✖ CRITICAL L102    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      99            raise  # Let the get_db dependency handle rollback
+
+  ── app\services\scan_service.py 
+    ✖ CRITICAL L28     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      25    _scan_progress: dict = {}
+    ✖ CRITICAL L32     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      29        return _scan_progress.get(scan_id, {})
+    ✖ CRITICAL L38     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      35        _scan_progress[scan_id].update(kwargs)
+
+  ── app\services\usage_aggregator.py 
+    ✖ CRITICAL L115    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      112        }
+    ✖ CRITICAL L176    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      173        await db.flush()
+
+  ── app\services\user_service.py 
+    ✖ CRITICAL L13     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      10    logger = get_logger("user_service")
+    ✖ CRITICAL L61     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      58        return user
+
+  ── cli\utils\file_filter.py 
+    ✖ CRITICAL L16     open() with User-Controlled File Path  (CWE-22)
+      13    def is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
+    ✖ CRITICAL L16     open() with User-Controlled File Path  (CWE-22)
+      13    def is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
+
+  ── engine\ai_validation.py 
+    ✖ HIGH L96     aiohttp ClientSession with User-Controlled URL  (CWE-918)
+      93    
+
+  ── engine\dataflow_analysis.py 
+    ✖ CRITICAL L257    Attack Chain: File Upload + Deserialization → RCE  (CWE-502)
+      254            (r"render_template_string\s*\(", "template_render"),
+    ✖ CRITICAL L355    Attack Chain: File Upload + Deserialization → RCE  (CWE-502)
+      352            (r"\bassert\s*\(", "eval"),
+    ✖ CRITICAL L420    Attack Chain: File Upload + Deserialization → RCE  (CWE-502)
+      417            (r"\.Deserialize\s*\(", "deserialization"),
+
+  ── engine\detection_engine.py 
+    ✖ CRITICAL L26     Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      23    logger = logging.getLogger("engine.detection_engine")
+    ✖ CRITICAL L26     Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      23    logger = logging.getLogger("engine.detection_engine")
+
+  ── engine\developer_learning.py 
+    ✖ CRITICAL L150    os.system/os.popen with User-Controlled Input  (CWE-78)
+      147            ),
+    ✖ CRITICAL L174    open() with User-Controlled File Path  (CWE-22)
+      171                "or overwrite critical system files."
+    ✖ CRITICAL L217    Pickle Deserialization of Untrusted Data Leading to Remote Code Execution  (CWE-502)
+      214                "of the application."
+    ✖ CRITICAL L237    Pickle Deserialization of Untrusted Data Leading to Remote Code Execution  (CWE-502)
+      234            ),
+    ✖ CRITICAL L247    PyYAML yaml.load Without SafeLoader Enabling Code Execution  (CWE-502)
+      244                "    raise ValueError('Tampered payload')"
+    ✖ CRITICAL L263    Cloud Metadata Endpoint SSRF in Python  (CWE-918)
+      260            ),
+    ✖ CRITICAL L458    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      455            "secure_code_python": (
+    ✖ CRITICAL L462    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      459                "    return db.query(User).get(user_id)\n\n"
+    ✖ CRITICAL L752    Admin Endpoint Protected Only by Header-Derived Authorization  (CWE-284)
+      749            ),
+    ✖ CRITICAL L757    Admin Endpoint Protected Only by Header-Derived Authorization  (CWE-284)
+      754                "    user_id = request.json['user_id']\n"
+    ✖ CRITICAL L854    PyYAML yaml.load Without SafeLoader Enabling Code Execution  (CWE-502)
+      851            "real_world_exploit": "Attacker crafts serialized payload with ga
+    ✖ CRITICAL L858    Flask Debug Mode Enabled in Production  (CWE-489)
+      855        },
+    ✖ CRITICAL L924    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      921    # =====================================================================
+    ✖ CRITICAL L1000   Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      997        }
+    ✖ HIGH L71     ORM Filter by Non-Tenant Fields — Missing Tenant Scope in Query  (CWE-284)
+      68                "# SECURE:\n"
+    ✖ HIGH L194    os.path.join with User-Controlled Path Segments  (CWE-22)
+      191            ),
+    ✖ HIGH L197    os.path.join with User-Controlled Path Segments  (CWE-22)
+      194                "path = os.path.join(UPLOAD_DIR, user_filename)\n"
+    ✖ HIGH L217    Pickle Deserialization Injection  (CWE-502)
+      214                "of the application."
+    ✖ HIGH L217    Pickle Deserialization Injection  (CWE-502)
+      214                "of the application."
+    ✖ HIGH L237    Pickle Deserialization Injection  (CWE-502)
+      234            ),
+    ✖ HIGH L237    Pickle Deserialization Injection  (CWE-502)
+      234            ),
+    ✖ HIGH L286    DNS Rebinding via Socket-Level Resolution  (CWE-918)
+      283                "# SECURE:\n"
+    ✖ HIGH L286    DNS Rebinding via Socket-Level Resolution  (CWE-918)
+      283                "# SECURE:\n"
+    ✖ HIGH L287    DNS Rebinding via Socket-Level Resolution  (CWE-918)
+      284                "import ipaddress, urllib.parse\n"
+    ✖ HIGH L306    Password Stored in Plaintext  (CWE-256)
+      303                "administrative functions."
+    ✖ HIGH L327    Password Stored in Plaintext  (CWE-256)
+      324            ),
+    ✖ HIGH L415    Insecure Password Hashing with MD5 or SHA1  (CWE-916)
+      412            "secure_code_python": (
+    ✖ HIGH L415    Weak Hash Algorithm via hashlib (MD5/SHA1)  (CWE-328)
+      412            "secure_code_python": (
+    ✖ HIGH L415    Weak Hash Algorithm via hashlib (MD5/SHA1)  (CWE-328)
+      412            "secure_code_python": (
+    ✖ HIGH L681    Insecure SSL/TLS Context Configuration  (CWE-295)
+      678            ),
+    ✖ HIGH L715    Dependency Confusion - .npmrc Misconfiguration  (427)
+      712                "# VULNERABLE (.npmrc):\n"
+    ✖ HIGH L797    os.path.join with User-Controlled Path Segments  (CWE-22)
+      794            ),
+    ▲ MEDIUM L858    Django DEBUG=True in Production Settings  (CWE-489)
+      855        },
+
+  ── engine\exploit_chains.py 
+    ✖ CRITICAL L91     Attack Chain: File Upload + Deserialization → RCE  (CWE-502)
+      88            ),
+    ✖ CRITICAL L384    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      381    # ─── Summary ─────────────────────────────────────────────────────────
+
+  ── engine\exploit_graph.py 
+    ✖ CRITICAL L235    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      232            self.reverse_adj[edge.target_id].append(edge)
+    ✖ CRITICAL L239    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      236            """Return (neighbor_id, edge) pairs for outgoing edges."""
+    ✖ CRITICAL L445    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      442    # ═══════════════════════════════════════════════════════════════════════
+
+  ── engine\logic_detectors.py 
+    ✖ CRITICAL L1184   Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      1181        return findings
+
+  ── engine\remediation_engine.py 
+    ✖ CRITICAL L793    os.system/os.popen with User-Controlled Input  (CWE-78)
+      790        "python": _T(
+    ✖ CRITICAL L1275   PyYAML yaml.load Without SafeLoader Enabling Code Execution  (CWE-502)
+      1272        "ruby": _T(
+    ✖ CRITICAL L2250   Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      2247        return fix
+    ✖ HIGH L295    Exploit Chain: IDOR + Sequential IDs → Mass Data Exfiltration  (639)
+      292        ),
+    ✖ HIGH L312    Exploit Chain: IDOR + Sequential IDs → Mass Data Exfiltration  (639)
+      309            ),
+    ✖ HIGH L992    os.path.join with User-Controlled Path Segments  (CWE-22)
+      989        "python": _T(
+    ✖ HIGH L997    os.path.join with User-Controlled Path Segments  (CWE-22)
+      994            ),
+    ✖ HIGH L1314   Insecure Password Hashing with MD5 or SHA1  (CWE-916)
+      1311            vulnerable=(
+    ✖ HIGH L1314   Weak Hash Algorithm via hashlib (MD5/SHA1)  (CWE-328)
+      1311            vulnerable=(
+    ✖ HIGH L1314   Weak Hash Algorithm via hashlib (MD5/SHA1)  (CWE-328)
+      1311            vulnerable=(
+    ✖ HIGH L1919   ORM Filter by Non-Tenant Fields — Missing Tenant Scope in Query  (CWE-284)
+      1916            "django": {
+    ✖ HIGH L1944   ORM Filter by Non-Tenant Fields — Missing Tenant Scope in Query  (CWE-284)
+      1941                    ')\n'
+    ✖ HIGH L1958   ORM Filter by Non-Tenant Fields — Missing Tenant Scope in Query  (CWE-284)
+      1955                    '\n'
+    ✖ HIGH L1989   Insecure Direct Object Reference — Missing Ownership Check  (CWE-639)
+      1986            "express": {
+
+  ── engine\rule_intelligence.py 
+    ✖ CRITICAL L1419   Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      1416    # ─── Intelligence Summary (for report aggregation) ───────────────────
+    ✖ HIGH L398    requests.get/post with User-Controlled URL  (CWE-918)
+      395        """Check if multi_function_chain_patterns have evidence in the file.
+
+  ── engine\rule_loader.py 
+    ✖ CRITICAL L362    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      359        def rules_for_category(self, category: str) -> List[EngineRule]:
+
+  ── engine\rule_profiler.py 
+    ✖ CRITICAL L164    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      161    
+    ✖ CRITICAL L368    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      365    
+    ✖ CRITICAL L453    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      450    
+
+  ── engine\streaming_scanner.py 
+    ✖ CRITICAL L250    Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration  (CWE-284)
+      247    # ─── Snippet Extraction ──────────────────────────────────────────────
+
+  ── engine\yaml_scanner.py 
+    ✖ CRITICAL L128    PyYAML yaml.load Without SafeLoader Enabling Code Execution  (CWE-502)
+      125        old_limit = sys.getrecursionlimit()
+    ✖ CRITICAL L128    PyYAML yaml.load Without SafeLoader Enabling Code Execution  (CWE-502)
+      125        old_limit = sys.getrecursionlimit()
+    ✖ CRITICAL L128    PyYAML yaml.load Without SafeLoader Enabling Code Execution  (CWE-502)
+      125        old_limit = sys.getrecursionlimit()
+    ✖ CRITICAL L239    Flask Route ID Parameter Used Directly in Database Query  (CWE-639)
+      236    
+    ✖ HIGH L128    YAML Deserialization Injection  (CWE-502)
+      125        old_limit = sys.getrecursionlimit()
+
+  ── k8s\helm\templates\deployment-api.yaml 
+    ✖ HIGH L1      Missing Network Policy  (CWE-284)
+      1 >> apiVersion: apps/v1
+    ✖ HIGH L2      Missing Network Policy  (CWE-284)
+      1    apiVersion: apps/v1
+    ▲ MEDIUM L2      Missing Network Policy Template  (CWE-284)
+      1    apiVersion: apps/v1
+
+  ── k8s\helm\templates\deployment-worker.yaml 
+    ✖ HIGH L2      Missing Network Policy  (CWE-284)
+      1    {{- if .Values.worker.enabled }}
+    ✖ HIGH L3      Missing Network Policy  (CWE-284)
+      1    {{- if .Values.worker.enabled }}
+    ▲ MEDIUM L3      Missing Network Policy Template  (CWE-284)
+      1    {{- if .Values.worker.enabled }}
+
+  ── k8s\helm\templates\hpa.yaml 
+    ✖ HIGH L11     Missing Network Policy  (CWE-284)
+      8    spec:
+    ✖ HIGH L53     Missing Network Policy  (CWE-284)
+      50    spec:
+    ▲ MEDIUM L11     Missing Pod Disruption Budget  (CWE-400)
+      8    spec:
+    ▲ MEDIUM L11     Missing Network Policy Template  (CWE-284)
+      8    spec:
+    ▲ MEDIUM L53     Missing Pod Disruption Budget  (CWE-400)
+      50    spec:
+    ▲ MEDIUM L53     Missing Network Policy Template  (CWE-284)
+      50    spec:
+
+  ── k8s\helm\values.yaml 
+    ✖ CRITICAL L84     Hardcoded Secrets in Values  (CWE-798)
+      81      port: 5432
+    ✖ CRITICAL L84     Hardcoded Secrets in Values  (CWE-798)
+      81      port: 5432
+    ✖ CRITICAL L149    Hardcoded Secrets in Values  (CWE-798)
+      146    # These create a Kubernetes Secret; leave empty to use existingSecret ref
+
+  ── migrations\001_add_user_columns.sql 
+    ✖ CRITICAL L34     Stacked Queries SQL Injection  (CWE-89)
+      31    -- │ STEP 2: Add columns (NULLABLE with DEFAULT — safe for existing rows) 
+    ✖ CRITICAL L35     Stacked Queries SQL Injection  (CWE-89)
+      32    -- └──────────────────────────────────────────────────────────────────────
+    ✖ CRITICAL L36     Stacked Queries SQL Injection  (CWE-89)
+      33    
+    ✖ CRITICAL L37     Stacked Queries SQL Injection  (CWE-89)
+      34    ALTER TABLE users ADD COLUMN IF NOT EXISTS role            user_role   DEF
+    ✖ CRITICAL L38     Stacked Queries SQL Injection  (CWE-89)
+      35    ALTER TABLE users ADD COLUMN IF NOT EXISTS status          user_status DEF
+    ✖ CRITICAL L39     Stacked Queries SQL Injection  (CWE-89)
+      36    ALTER TABLE users ADD COLUMN IF NOT EXISTS tier            user_tier   DEF
+    ✖ CRITICAL L40     Stacked Queries SQL Injection  (CWE-89)
+      37    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_paid         BOOLEAN     DEF
+    ✖ CRITICAL L48     Stacked Queries SQL Injection  (CWE-89)
+      45    -- │ STEP 3: Backfill existing rows (idempotent — only touches NULLs)     
+    ✖ CRITICAL L49     Stacked Queries SQL Injection  (CWE-89)
+      46    -- └──────────────────────────────────────────────────────────────────────
+    ✖ CRITICAL L50     Stacked Queries SQL Injection  (CWE-89)
+      47    
+    ✖ CRITICAL L51     Stacked Queries SQL Injection  (CWE-89)
+      48    UPDATE users SET role              = 'developer' WHERE role IS NULL;
+    ✖ CRITICAL L52     Stacked Queries SQL Injection  (CWE-89)
+      49    UPDATE users SET status            = 'active'    WHERE status IS NULL;
+    ✖ CRITICAL L53     Stacked Queries SQL Injection  (CWE-89)
+      50    UPDATE users SET tier              = 'free'      WHERE tier IS NULL;
+    ✖ CRITICAL L62     Stacked Queries SQL Injection  (CWE-89)
+      59    -- │ STEP 4: Add NOT NULL constraints (safe — no NULLs remain)
+    ✖ CRITICAL L63     Stacked Queries SQL Injection  (CWE-89)
+      60    -- └──────────────────────────────────────────────────────────────────────
+    ✖ CRITICAL L64     Stacked Queries SQL Injection  (CWE-89)
+      61    
+    ✖ CRITICAL L65     Stacked Queries SQL Injection  (CWE-89)
+      62    ALTER TABLE users ALTER COLUMN role              SET NOT NULL;
+    ✖ CRITICAL L66     Stacked Queries SQL Injection  (CWE-89)
+      63    ALTER TABLE users ALTER COLUMN status            SET NOT NULL;
+    ✖ CRITICAL L67     Stacked Queries SQL Injection  (CWE-89)
+      64    ALTER TABLE users ALTER COLUMN tier              SET NOT NULL;
+    ✖ CRITICAL L76     Stacked Queries SQL Injection  (CWE-89)
+      73    -- │ STEP 5: Ensure server defaults are set (for future INSERTs)
+    ✖ CRITICAL L77     Stacked Queries SQL Injection  (CWE-89)
+      74    -- └──────────────────────────────────────────────────────────────────────
+    ✖ CRITICAL L78     Stacked Queries SQL Injection  (CWE-89)
+      75    
+    ✖ CRITICAL L79     Stacked Queries SQL Injection  (CWE-89)
+      76    ALTER TABLE users ALTER COLUMN role              SET DEFAULT 'developer';
+    ✖ CRITICAL L80     Stacked Queries SQL Injection  (CWE-89)
+      77    ALTER TABLE users ALTER COLUMN status            SET DEFAULT 'active';
+    ✖ CRITICAL L81     Stacked Queries SQL Injection  (CWE-89)
+      78    ALTER TABLE users ALTER COLUMN tier              SET DEFAULT 'free';
+
+  ── rules\devops\advanced_detection.yaml 
+    ✖ CRITICAL L392    Serverless IAM Wildcard Permissions  (CWE-250)
+      389        patterns:
+    ✖ CRITICAL L396    Serverless IAM Wildcard Permissions  (CWE-250)
+      393            flags: [DOTALL]
+    ✖ CRITICAL L400    Serverless IAM Wildcard Permissions  (CWE-250)        
+      397            flags: [DOTALL]
+
+  ── test_remediation_engine.py 
+    ✖ CRITICAL L59     Django Raw SQL Without Parameters  (89)
+      56            rule_id="SQLI-001", cwe="CWE-89",
+    ✖ CRITICAL L59     SQL Injection via String Formatting  (CWE-89)
+      56            rule_id="SQLI-001", cwe="CWE-89",
+    ✖ CRITICAL L193    Django Raw SQL Without Parameters  (89)
+    ✖ CRITICAL L193    SQL Injection via String Formatting  (CWE-89)    
+      190    
+    ✖ CRITICAL L344    Django Raw SQL Without Parameters  (89)
+      341                rule_id=f"SQLI-{i}", cwe="CWE-89",
+    ✖ CRITICAL L344    SQL Injection via String Formatting  (CWE-89)    
+      341                rule_id=f"SQLI-{i}", cwe="CWE-89",
+    ✖ HIGH L208    Exploit Chain: IDOR + Sequential IDs → Mass Data Exfiltrat  Summary
+  Summary
+  ──────────────────────────────────────────────────        
+  Files scanned  : 293
+  Time elapsed   : 51.2s
+  Total findings : 234
+
+    CRITICAL 165
+    HIGH    61
+    MEDIUM  8
+
+  Report saved: C:\Users\Admin\Desktop\security\backend\secureai-report.json

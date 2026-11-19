@@ -1,0 +1,73 @@
+# ==============================================================================
+# Test:     positive_04_root_user
+# Expected: TRIGGER rule DEVOPS-YAML-006 (Container running as root)
+# Category: DevOps
+# Language: YAML (Kubernetes)
+# ==============================================================================
+# Description: Kubernetes Deployment where the container explicitly runs as
+# root (UID 0). Running as root inside a container increases the impact of
+# container escapes and allows modification of critical filesystem paths.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-api-server
+  namespace: backend
+  labels:
+    app: legacy-api
+    team: backend-services
+    environment: production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: legacy-api
+  template:
+    metadata:
+      labels:
+        app: legacy-api
+        version: "1.8.3"
+    spec:
+      serviceAccountName: legacy-api-sa
+      containers:
+        - name: api-server
+          image: registry.internal.io/backend/legacy-api:1.8.3
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+            - containerPort: 443
+              name: https
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: legacy-db-creds
+                  key: connection-string
+            - name: LOG_FORMAT
+              value: "json"
+          securityContext:
+            runAsUser: 0                  # VULNERABLE: running as root
+            runAsGroup: 0                 # VULNERABLE: running as root group
+            allowPrivilegeEscalation: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5

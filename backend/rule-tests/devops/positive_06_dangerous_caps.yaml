@@ -1,0 +1,69 @@
+# ==============================================================================
+# Test:     positive_06_dangerous_caps
+# Expected: TRIGGER rule DEVOPS-YAML-009 (Dangerous capabilities added)
+# Category: DevOps
+# Language: YAML (Kubernetes)
+# ==============================================================================
+# Description: Kubernetes Pod with SYS_ADMIN and NET_ADMIN capabilities added.
+# SYS_ADMIN is nearly equivalent to full root and allows mount, bpf, and
+# namespace operations. NET_ADMIN allows network reconfiguration and sniffing.
+# ==============================================================================
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cni-installer
+  namespace: kube-system
+  labels:
+    app: cni-installer
+    component: networking
+    managed-by: cluster-ops
+spec:
+  hostNetwork: true
+  serviceAccountName: cni-installer-sa
+  initContainers:
+    - name: install-cni-plugin
+      image: registry.internal.io/networking/cni-plugin:1.2.0
+      command: ["/install-cni.sh"]
+      securityContext:
+        capabilities:
+          add:
+            - SYS_ADMIN      # VULNERABLE: near-root capability
+            - NET_ADMIN       # VULNERABLE: network reconfiguration
+      volumeMounts:
+        - name: cni-bin
+          mountPath: /host/opt/cni/bin
+        - name: cni-conf
+          mountPath: /host/etc/cni/net.d
+  containers:
+    - name: cni-watcher
+      image: registry.internal.io/networking/cni-watcher:1.2.0
+      securityContext:
+        capabilities:
+          add:
+            - NET_ADMIN       # VULNERABLE: allows packet capture & routing changes
+          drop:
+            - ALL
+      env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: WATCH_INTERVAL
+          value: "30"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+  volumes:
+    - name: cni-bin
+      hostPath:
+        path: /opt/cni/bin
+        type: DirectoryOrCreate
+    - name: cni-conf
+      hostPath:
+        path: /etc/cni/net.d
+        type: DirectoryOrCreate

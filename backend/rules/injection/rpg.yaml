@@ -1,0 +1,196 @@
+rules:
+- rule_id: RPG-INJ-001
+  title: SQL Injection via String Operations
+  description: 'Detects SQL injection in embedded SQL within RPG programs.
+
+    '
+  language: rpg
+  category: injection
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - embedded-sql
+  - rpg
+  patterns:
+  - type: regex
+    pattern: EXEC\s+SQL\s+(?:EXECUTE\s+IMMEDIATE|PREPARE)\s+
+  - type: regex
+    pattern: (?:sqlStmt|sqlString|wkSQL)\s*=\s*'(?:SELECT|INSERT|UPDATE|DELETE)\b.*'\s*\+\s*\w+
+  - type: regex
+    pattern: EXEC\s+SQL\s+(?:SELECT|INSERT|UPDATE|DELETE)\b[^;]*\|\|
+  anti_patterns:
+  - parameter marker
+  - :hostvar
+  - USING
+  impact: 'SQL injection on IBM i can compromise DB2 for i databases
+
+    and potentially access IFS file system.
+
+    '
+  remediation: "Use parameter markers in embedded SQL:\n  EXEC SQL SELECT * FROM CUSTFILE WHERE CUSTNO = :wsCustNo;\n"
+- rule_id: RPG-INJ-002
+  title: Command Injection via QCMDEXC
+  description: 'Detects OS command execution via QCMDEXC with dynamic commands.
+
+    '
+  language: rpg
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - command-injection
+  - qcmdexc
+  patterns:
+  - type: regex
+    pattern: CALL(?:P)?\s+'QCMDEXC'\b
+  - type: regex
+    pattern: QCMDEXC\s*\(\s*(?:wk|ws|lc)\w+
+  - type: regex
+    pattern: QCMDCHK\s*\(\s*(?:wk|ws|lc)\w+
+  anti_patterns:
+  - constant
+  - CONST
+  - validate_cmd
+  impact: 'QCMDEXC command injection can execute arbitrary CL commands on IBM i.
+
+    '
+  remediation: 'Use constant command strings. Validate user input against allowlists.
+
+    Use specific APIs instead of QCMDEXC when possible.
+
+    '
+- rule_id: RPG-AUTH-001
+  title: Hardcoded Credentials in RPG
+  description: 'Detects hardcoded passwords or credentials in RPG programs.
+
+    '
+  language: rpg
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: (?:password|passwd|secret|apiKey)\s*=\s*'[^']{4,}'
+  - type: regex
+    pattern: DCL-C\s+(?:PASSWORD|PASSWD|SECRET|API_KEY)\s+'[^']{4,}'
+  - type: regex
+    pattern: D\s+(?:password|passwd|secret)\s+C\s+CONST\s*\(\s*'[^']{4,}
+  anti_patterns:
+  - '*BLANKS'
+  - RTVDTAARA
+  - data area
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: RPG-AUTH-002
+  title: Missing Object Authority Check
+  description: 'Detects file operations without authority verification.
+
+    '
+  language: rpg
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - authorization
+  - object-authority
+  patterns:
+  - type: regex
+    pattern: OPEN\s*\(\s*(?:wk|ws|lc)\w+\s*\)
+  - type: regex
+    pattern: CALL(?:P)?\s+.*(?:wk|ws|lc)\w+
+  anti_patterns:
+  - CHKOBJ
+  - QSYRUSRA
+  - authority
+  - QSYGETPH
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: RPG-CRYPTO-001
+  title: Weak Encryption in RPG
+  description: 'Detects weak or custom encryption in RPG programs.
+
+    '
+  language: rpg
+  category: crypto
+  severity: High
+  confidence: 0.8
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 2
+  tags:
+  - weak-crypto
+  patterns:
+  - type: regex
+    pattern: (?:BITXOR|%BITXOR)\s*\(
+  - type: regex
+    pattern: Qc3(?:EncryptData|DecryptData).*(?:DES|RC4|Qc3_DES)\b
+  anti_patterns:
+  - AES
+  - Qc3_AES
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: RPG-SEC-001
+  title: Sensitive Data in Job Log
+  description: 'Detects sensitive data written to job log via DSPLY.
+
+    '
+  language: rpg
+  category: secrets
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - data-exposure
+  - dsply
+  patterns:
+  - type: regex
+    pattern: DSPLY\s+(?:password|passwd|secret|token|ssn|credit)\b
+  - type: regex
+    pattern: DSPLY\s+(?:ws|wk|lc)(?:Password|Passwd|Secret|Token|SSN)\b
+  anti_patterns:
+  - mask
+  - '****'
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: RPG-SEC-002
+  title: Program Adopted Authority Exposure
+  description: 'Detects programs using adopted authority which can escalate privileges.
+
+    '
+  language: rpg
+  category: auth
+  severity: High
+  confidence: 0.78
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - adopted-authority
+  - privilege-escalation
+  patterns:
+  - type: regex
+    pattern: USRPRF\s*\(\s*\*OWNER\s*\)
+  - type: regex
+    pattern: USEADPAUT\s*\(\s*\*YES\s*\)
+  anti_patterns:
+  - USRPRF(*USER)
+  - USEADPAUT(*NO)
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege

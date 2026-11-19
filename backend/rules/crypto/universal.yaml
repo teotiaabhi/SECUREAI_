@@ -1,0 +1,245 @@
+rules:
+- rule_id: CRYPTO-RUST-001
+  title: Weak Cryptography in Rust
+  description: 'Detects use of weak hash algorithms or insecure random number generation in Rust.
+
+    '
+  language: rust
+  category: crypto
+  severity: High
+  confidence: 0.87
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  tags:
+  - weak-crypto
+  - md5
+  - sha1
+  patterns:
+  - type: regex
+    pattern: use\s+md5\b
+  - type: regex
+    pattern: use\s+sha1\b
+  - type: regex
+    pattern: Md5::(?:new|digest)\s*\(
+  - type: regex
+    pattern: Sha1::(?:new|digest)\s*\(
+  - type: regex
+    pattern: rand::thread_rng\s*\(\s*\).*(?:key|token|secret|password)\b
+  - type: regex
+    pattern: use\s+des\b.*(?:encrypt|cipher)
+  - type: regex
+    pattern: ecb::Encryptor|Ecb<[^>]*>
+  - type: regex
+    pattern: StdRng::seed_from_u64\s*\(\s*\d+\s*\)
+  anti_patterns:
+  - 'sha2::'
+  - 'sha3::'
+  - OsRng
+  - 'ring::'
+  - // non-crypto
+  - '#[test]'
+  - '#[cfg(test)]'
+  - test_
+  - mock
+  context_awareness:
+    surrounding_context_patterns:
+    - password
+    - token
+    - secret
+    - authenticate
+    - encrypt
+    - sign
+    - verify
+    taint_source_indicators:
+    - std::io::stdin
+    - std::env::args
+    - request.body
+    - Form::from_request
+    - Json::from_request
+    taint_sink_indicators:
+    - diesel::insert_into
+    - sqlx::query
+    - std::fs::write
+    - Response::builder
+    - Cookie::new
+    sanitization_patterns:
+    - OsRng
+    - Sha256::new
+    - ring::aead
+    - argon2::hash
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * pattern_strength
+    exploitability_score: 0.6
+  exploit_scenario:
+    attack_example: 'A Rust web service uses the md5 crate to hash API keys before storage. An attacker who gains read access
+      to the database computes rainbow tables to recover valid API keys. Using thread_rng for session tokens makes them predictable
+      if the attacker can observe timing.
+
+      '
+    example_payload: 'use md5; let digest = md5::compute(api_key.as_bytes()); let token: u64 = rand::thread_rng().gen();
+
+      '
+    attacker_objective: Reverse MD5 hashes of API keys or predict thread_rng outputs
+  confidence_factors:
+    pattern_strength: 0.87
+    context_match: 0.82
+    proximity_to_user_input: 0.7
+    sanitization_absence: 0.85
+  impact: 'Weak hash algorithms in Rust compromise integrity guarantees.
+
+    '
+  remediation: '- Use sha2::Sha256 or sha3::Sha3_256 for hashing
+
+    - Use ring or rust-crypto for authenticated encryption
+
+    - Use OsRng for cryptographic randomness
+
+    - Use argon2 crate for password hashing
+
+    - Prefer the ring crate for all cryptographic operations
+
+    - Use cargo-audit to check for known vulnerabilities in crypto crates
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/327.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - CRYPTO-GO-001
+    - CRYPTO-CPP-001
+    - CRYPTO-JS-001
+  detection_layer: 1
+- rule_id: CRYPTO-CPP-001
+  title: Weak Cryptography in C/C++
+  description: 'Detects use of weak OpenSSL ciphers, broken hashes, or insecure RNG.
+
+    '
+  language: cpp
+  category: crypto
+  severity: High
+  confidence: 0.89
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  tags:
+  - weak-crypto
+  - openssl
+  - md5
+  - des
+  patterns:
+  - type: regex
+    pattern: EVP_(?:md5|sha1|des_ecb|des_cbc|rc4|bf_ecb)\s*\(
+  - type: regex
+    pattern: MD5_(?:Init|Update|Final)\s*\(
+  - type: regex
+    pattern: SHA1_(?:Init|Update|Final)\s*\(
+  - type: regex
+    pattern: DES_set_key\s*\(
+  - type: regex
+    pattern: \brand\s*\(\s*\).*(?:key|token|secret|password|nonce|iv)\b
+  - type: regex
+    pattern: DES_ecb_encrypt\s*\(
+  - type: regex
+    pattern: EVP_EncryptInit_ex\s*\([^,]*,\s*EVP_(?:des|rc4|bf|rc2|cast5)_
+  - type: regex
+    pattern: srand\s*\(\s*time\s*\(\s*NULL\s*\)\s*\)
+  anti_patterns:
+  - EVP_aes_256_gcm
+  - EVP_sha256
+  - RAND_bytes
+  - // legacy
+  - // compatibility
+  - test
+  - TEST_
+  - EXPECT_
+  - ASSERT_
+  context_awareness:
+    surrounding_context_patterns:
+    - password
+    - encrypt
+    - decrypt
+    - key_material
+    - signature
+    - certificate
+    - authentication
+    taint_source_indicators:
+    - argv[
+    - fgets
+    - scanf
+    - recv(
+    - read(
+    - getenv(
+    taint_sink_indicators:
+    - fwrite
+    - send(
+    - write(
+    - sqlite3_exec
+    - mysql_query
+    sanitization_patterns:
+    - RAND_bytes
+    - EVP_aes_256_gcm
+    - EVP_sha256
+    - EVP_sha3_256
+    - crypto_secretbox
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + exploitability_score / 10)
+    exploitability_score: 0.8
+  exploit_scenario:
+    attack_example: 'A C++ server uses MD5_Init/MD5_Update/MD5_Final to hash authentication tokens. An attacker performs a
+      collision attack to forge valid tokens. Using rand() seeded with time(NULL) allows an attacker who knows the approximate
+      start time to predict all generated keys.
+
+      '
+    example_payload: 'MD5_CTX ctx; MD5_Init(&ctx); MD5_Update(&ctx, password, strlen(password)); MD5_Final(digest, &ctx);
+      srand(time(NULL)); int key = rand();
+
+      '
+    attacker_objective: Forge authentication tokens via MD5 collisions or predict rand()-based secrets
+  confidence_factors:
+    pattern_strength: 0.89
+    context_match: 0.84
+    proximity_to_user_input: 0.82
+    sanitization_absence: 0.9
+  impact: 'Weak C/C++ cryptography compromises data protection at the system level.
+
+    '
+  remediation: '- Use EVP_aes_256_gcm() for authenticated encryption
+
+    - Use EVP_sha256() or EVP_sha3_256() for hashing
+
+    - Use RAND_bytes() for cryptographic random data
+
+    - Use libsodium for high-level crypto operations
+
+    - Replace all rand()/srand() with RAND_bytes() in security paths
+
+    - Use constant-time comparison functions to prevent timing attacks
+
+    - Compile with -Wdeprecated-declarations to catch deprecated OpenSSL APIs
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/327.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - CRYPTO-RUST-001
+    - CRYPTO-GO-001
+    - CRYPTO-CS-001
+  detection_layer: 1

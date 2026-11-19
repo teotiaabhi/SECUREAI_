@@ -1,0 +1,329 @@
+rules:
+- rule_id: VBNET-INJ-001
+  title: SQL Injection via String Concatenation
+  description: 'Detects SQL queries built with string concatenation in VB.NET.
+
+    '
+  language: vbnet
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - string-concatenation
+  patterns:
+  - type: regex
+    pattern: (?:ExecuteNonQuery|ExecuteReader|ExecuteScalar)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)[^"]*"\s*[&+]\s*(?:Request|txtUser|param|input|user)\b
+  - type: regex
+    pattern: (?:SqlCommand|OleDbCommand|OdbcCommand)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)[^"]*"\s*[&+]\s*(?:Request|txtUser|param|input|user)\b
+  - type: regex
+    pattern: \.CommandText\s*=\s*"(?:SELECT|INSERT|UPDATE|DELETE)[^"]*"\s*[&+]\s*(?:Request|txtUser|param|input|user)\b
+  - type: regex
+    pattern: \$"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\{(?:Request|txtUser|param|input|user)\b
+  anti_patterns:
+  - Parameters.Add
+  - '@param'
+  - SqlParameter
+  - AddWithValue
+  impact: 'SQL injection enables database compromise, data theft, and RCE.
+
+    '
+  remediation: "Use parameterized queries:\n  Dim cmd As New SqlCommand(\"SELECT * FROM Users WHERE Id = @id\", conn)\n  cmd.Parameters.AddWithValue(\"@id\", userId)\n"
+- rule_id: VBNET-INJ-002
+  title: Command Injection via Process.Start
+  description: 'Detects OS command injection in VB.NET.
+
+    '
+  language: vbnet
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - command-injection
+  - process
+  patterns:
+  - type: regex
+    pattern: Process\.Start\s*\(\s*(?:Request|param|input|user|txt\w+)\b
+  - type: regex
+    pattern: Shell\s*\(\s*(?:Request|param|input|user|txt\w+)\b
+  - type: regex
+    pattern: Interaction\.Shell\s*\(\s*(?:Request|param|input|user)\b
+  - type: regex
+    pattern: ProcessStartInfo.*FileName\s*=\s*(?:Request|param|input|user)\b
+  anti_patterns:
+  - sanitize
+  - allowlist
+  - whitelist
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: VBNET-INJ-003
+  title: LDAP Injection
+  description: 'Detects LDAP queries with user-controlled input in VB.NET.
+
+    '
+  language: vbnet
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-90
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - ldap-injection
+  patterns:
+  - type: regex
+    pattern: DirectorySearcher.*Filter\s*=\s*"[^"]*"\s*[&+]\s*(?:Request|txtUser|param|input|user)\b
+  - type: regex
+    pattern: \$"\(\w+={(?:Request|txtUser|param|input|user)\b[^"]*\)"
+  anti_patterns:
+  - Encoder.LdapFilter
+  - EscapeLdap
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: VBNET-XAUTH-001
+  title: Hardcoded Credentials
+  description: 'Detects hardcoded passwords and secrets in VB.NET.
+
+    '
+  language: vbnet
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: (?:Dim|Private|Public)\s+(?:password|passwd|secret|apiKey|token)\s+As\s+String\s*=\s*"[^"]{4,}"
+  - type: regex
+    pattern: (?:password|passwd|secret|apiKey|token)\s*=\s*"[^"]{4,}"
+  - type: regex
+    pattern: ConnectionString\s*=\s*"[^"]*Password\s*=\s*[^;"]{4,}
+  anti_patterns:
+  - ConfigurationManager
+  - Environment.GetEnvironmentVariable
+  - placeholder
+  - changeme
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: VBNET-XAUTH-002
+  title: Missing Authorization Attribute
+  description: 'Detects ASP.NET MVC/Web API controller actions without authorization.
+
+    '
+  language: vbnet
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - authorization
+  - asp-net
+  patterns:
+  - type: regex
+    pattern: <Http(?:Post|Put|Delete|Patch)>\s*\n\s*Public\s+(?:Function|Sub)\s+(?:Delete|Update|Create|Admin|Remove)\w*
+  anti_patterns:
+  - <Authorize>
+  - <Authorize(
+  - <AllowAnonymous>
+  - Authorize
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: VBNET-XCRYPTO-001
+  title: Weak Cryptographic Algorithm
+  description: 'Detects use of weak cryptographic algorithms in VB.NET.
+
+    '
+  language: vbnet
+  category: crypto
+  severity: High
+  confidence: 0.92
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-crypto
+  patterns:
+  - type: regex
+    pattern: (?:New|Create)\s+(?:DES|TripleDES|RC2|MD5|SHA1)(?:CryptoServiceProvider|Managed)?\b
+  - type: regex
+    pattern: MD5\.Create\s*\(\s*\)
+  - type: regex
+    pattern: SHA1\.Create\s*\(\s*\)
+  - type: regex
+    pattern: DESCryptoServiceProvider
+  anti_patterns:
+  - Aes
+  - SHA256
+  - SHA512
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: VBNET-XCRYPTO-002
+  title: Insecure Random Number Generator
+  description: 'Detects use of System.Random for security-sensitive operations.
+
+    '
+  language: vbnet
+  category: crypto
+  severity: High
+  confidence: 0.82
+  cwe: CWE-330
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-random
+  patterns:
+  - type: regex
+    pattern: New\s+Random\s*\(\s*\)
+  - type: regex
+    pattern: Rnd\s*\(\s*\)
+  anti_patterns:
+  - RNGCryptoServiceProvider
+  - RandomNumberGenerator
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: VBNET-XSS-001
+  title: Cross-Site Scripting in ASP.NET
+  description: 'Detects XSS via direct output of user input.
+
+    '
+  language: vbnet
+  category: xss
+  severity: High
+  confidence: 0.88
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - asp-net
+  patterns:
+  - type: regex
+    pattern: Response\.Write\s*\(\s*(?:Request|txtUser|param|input|user)\b
+  - type: regex
+    pattern: (?:Label|Literal)\d*\.Text\s*=\s*(?:Request|param|input|user)\b
+  - type: regex
+    pattern: HtmlEncode\s*=\s*False
+  anti_patterns:
+  - HttpUtility.HtmlEncode
+  - AntiXss
+  - Server.HtmlEncode
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: VBNET-DESER-001
+  title: Unsafe Deserialization
+  description: 'Detects unsafe deserialization in VB.NET.
+
+    '
+  language: vbnet
+  category: deserialization
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - deserialization
+  patterns:
+  - type: regex
+    pattern: BinaryFormatter\s*\(\s*\)\.Deserialize\s*\(
+  - type: regex
+    pattern: SoapFormatter\s*\(\s*\)\.Deserialize\s*\(
+  - type: regex
+    pattern: ObjectStateFormatter.*Deserialize\s*\(
+  - type: regex
+    pattern: LosFormatter.*Deserialize\s*\(
+  - type: regex
+    pattern: NetDataContractSerializer.*Deserialize\s*\(
+  anti_patterns:
+  - SerializationBinder
+  - AllowedTypes
+  impact: Unsafe deserialization can lead to remote code execution via gadget chains
+  remediation: Use safe serialization formats (JSON), implement type filtering, avoid deserializing untrusted data
+- rule_id: VBNET-PATH-001
+  title: Path Traversal
+  description: 'Detects file operations with user-controlled paths.
+
+    '
+  language: vbnet
+  category: path_traversal
+  severity: High
+  confidence: 0.85
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - path-traversal
+  patterns:
+  - type: regex
+    pattern: File\.(?:ReadAllText|WriteAllText|Open|Delete|Copy|Move)\s*\(\s*(?:Request|param|input|user)\b
+  - type: regex
+    pattern: FileStream\s*\(\s*(?:Request|param|input|user)\b
+  - type: regex
+    pattern: Server\.MapPath\s*\(\s*(?:Request|param|input|user)\b
+  anti_patterns:
+  - Path.GetFullPath
+  - Path.Combine
+  - StartsWith
+  impact: Path traversal enables reading or writing arbitrary files on the server
+  remediation: Canonicalize paths and verify they remain within expected base directories
+- rule_id: VBNET-SSRF-001
+  title: Server-Side Request Forgery
+  description: 'Detects HTTP requests with user-controlled URLs.
+
+    '
+  language: vbnet
+  category: ssrf
+  severity: High
+  confidence: 0.85
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  detection_layer: 1
+  tags:
+  - ssrf
+  patterns:
+  - type: regex
+    pattern: (?:WebRequest|HttpWebRequest|WebClient|HttpClient).*(?:Request|param|input|user|url)\b
+  - type: regex
+    pattern: New\s+Uri\s*\(\s*(?:Request|param|input|user)\b
+  anti_patterns:
+  - allowedHosts
+  - whitelist
+  impact: Server-side request forgery enables access to internal resources and cloud metadata
+  remediation: Validate and allowlist URLs, block private IP ranges and cloud metadata endpoints
+- rule_id: VBNET-XSEC-001
+  title: Connection String in Source Code
+  description: 'Detects hardcoded connection strings with credentials.
+
+    '
+  language: vbnet
+  category: secrets
+  severity: High
+  confidence: 0.88
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - connection-string
+  - secrets
+  patterns:
+  - type: regex
+    pattern: (?:ConnectionString|connStr)\s*=\s*"[^"]*(?:Password|pwd)\s*=\s*[^;"]{4,}
+  - type: regex
+    pattern: Data Source\s*=\s*[^;]+;\s*.*Password\s*=\s*[^;"]{4,}
+  anti_patterns:
+  - ConfigurationManager
+  - Integrated Security=True
+  - Trusted_Connection
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately

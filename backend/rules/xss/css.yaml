@@ -1,0 +1,148 @@
+rules:
+- rule_id: CSS-INJ-001
+  title: CSS Expression (IE Legacy XSS)
+  description: 'Detects CSS expressions which can execute JavaScript (IE vulnerability).
+
+    '
+  language: css
+  category: xss
+  severity: High
+  confidence: 0.92
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - css-expression
+  - xss
+  - ie
+  patterns:
+  - type: regex
+    pattern: expression\s*\(\s*(?:eval|alert|document|window|location|this)\b
+  - type: regex
+    pattern: -moz-binding\s*:\s*url\s*\(
+  anti_patterns:
+  - /* safe */
+  impact: 'CSS expressions execute JavaScript in Internet Explorer,
+
+    enabling XSS attacks.
+
+    '
+  remediation: 'Remove all CSS expressions. Use JavaScript event listeners instead.
+
+    '
+- rule_id: CSS-INJ-002
+  title: CSS Import from External Source
+  description: 'Detects @import loading CSS from external untrusted sources.
+
+    '
+  language: css
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - css-import
+  - external-resource
+  patterns:
+  - type: regex
+    pattern: '@import\s+(?:url\s*\(\s*)?[''"]?https?://(?!(?:fonts\.googleapis|cdnjs\.cloudflare|cdn\.jsdelivr))[^''")\s]+'
+  anti_patterns:
+  - fonts.googleapis
+  - cdnjs.cloudflare
+  - integrity
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: CSS-INJ-003
+  title: CSS Data Exfiltration via Background Image
+  description: 'Detects potential CSS-based data exfiltration using background-image URLs.
+
+    '
+  language: css
+  category: xss
+  severity: High
+  confidence: 0.75
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - data-exfiltration
+  - css-attack
+  patterns:
+  - type: regex
+    pattern: input\[(?:type|value|name)\s*[~|^$*]?=\s*['"][^'"]*['"].*\]\s*\{[^}]*background(?:-image)?\s*:\s*url\s*\(\s*['"]?https?://
+  - type: regex
+    pattern: \[(?:value|data-)[^]]*\]\s*\{[^}]*background(?:-image)?\s*:\s*url\s*\(\s*['"]?https?://(?!(?:cdn|static|assets|images)\.)
+  anti_patterns:
+  - localhost
+  - 127.0.0.1
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: CSS-INJ-004
+  title: Unsafe CSS url() Function
+  description: 'Detects url() functions that could load arbitrary external resources.
+
+    '
+  language: css
+  category: framework_misuse
+  severity: Low
+  confidence: 0.72
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - css-url
+  - external-resource
+  patterns:
+  - type: regex
+    pattern: url\s*\(\s*['"]?(?:javascript|data\s*:\s*text/html|data\s*:\s*application/x-javascript)\b
+  anti_patterns:
+  - data:image
+  - data:font
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: CSS-SEC-001
+  title: Sensitive Data in CSS Content Property
+  description: 'Detects CSS content property potentially exposing attribute values.
+
+    '
+  language: css
+  category: secrets
+  severity: Low
+  confidence: 0.7
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - data-exposure
+  - css-content
+  patterns:
+  - type: regex
+    pattern: content\s*:\s*attr\s*\(\s*(?:data-password|data-token|data-secret|data-api-key|data-ssn)\s*\)
+  anti_patterns:
+  - /* debug */
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: CSS-SEC-002
+  title: CSS Keylogger Pattern
+  description: 'Detects CSS-based keylogger patterns using input value selectors.
+
+    '
+  language: css
+  category: xss
+  severity: Critical
+  confidence: 0.8
+  cwe: CWE-200
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - css-keylogger
+  - data-exfiltration
+  patterns:
+  - type: regex
+    pattern: input\[value\$=\s*['"][a-zA-Z0-9]['"].*\]\s*\{[^}]*background(?:-image)?\s*:\s*url\s*\(\s*['"]?https?://
+  anti_patterns:
+  - localhost
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers

@@ -1,0 +1,32 @@
+# Default configuration for the rule validation test framework.
+# Values here are overridden by environment variables (RULE_TEST_*)
+# and CLI arguments.
+
+# Path to the directory containing YAML rule definitions.
+# Relative paths are resolved from the rule-tests directory.
+rules_dir: ../rules
+
+# Path to the directory containing test sample files.
+# Defaults to the rule-tests directory itself (scans category sub-dirs).
+tests_dir: .
+
+# Directory where generated reports (JSON, Markdown) are written.
+reports_dir: ./reports
+
+# Directory where baseline snapshots and regression reports are stored.
+baselines_dir: ./baselines
+
+# Number of parallel worker threads for test execution.
+# Set to 1 for deterministic sequential execution.
+parallel_workers: 4
+
+# Minimum confidence score (0.0 - 1.0) for a pattern match to be
+# counted as a detection. Matches below this threshold are ignored.
+confidence_threshold: 0.5
+
+# Maximum time in milliseconds allowed per rule evaluation against
+# a single test file.  Exceeding this triggers a timeout warning.
+timeout_per_rule_ms: 5000
+
+# Enable verbose/debug logging output.
+verbose: false

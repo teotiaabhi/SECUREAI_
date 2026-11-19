@@ -1,0 +1,362 @@
+rules:
+- rule_id: XML-INJ-001
+  title: XML External Entity (XXE) Declaration
+  description: 'Detects DTD entity declarations that could enable XXE attacks.
+
+    '
+  language: xml
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-611
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - xxe
+  - dtd
+  - entity
+  patterns:
+  - type: regex
+    pattern: <!ENTITY\s+\w+\s+SYSTEM\s+['"](?:file://|http://|https://|ftp://|expect://|php://)
+  - type: regex
+    pattern: <!ENTITY\s+%\s*\w+\s+SYSTEM\s+['"]
+  - type: regex
+    pattern: <!DOCTYPE\s+\w+\s+\[\s*<!ENTITY
+  - type: regex
+    pattern: <!ENTITY\s+\w+\s+SYSTEM\s+['"](?:/etc/passwd|/etc/shadow|C:\\\\)
+  anti_patterns:
+  - <!-- example
+  - <!-- test
+  impact: 'XXE attacks can read local files, perform SSRF, execute denial of service,
+
+    and in some cases achieve remote code execution.
+
+    '
+  remediation: "Disable external entity processing in XML parsers:\n  factory.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true);\nUse JSON instead of XML where possible.\n"
+- rule_id: XML-INJ-002
+  title: XSLT Injection Risk
+  description: 'Detects XSLT processing that could enable code execution.
+
+    '
+  language: xml
+  category: injection
+  severity: High
+  confidence: 0.82
+  cwe: CWE-91
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xslt
+  - code-execution
+  patterns:
+  - type: regex
+    pattern: <xsl:(?:value-of|copy-of)\s+select\s*=\s*['"](?:document|unparsed-text)\s*\(
+  - type: regex
+    pattern: xsl:(?:script|extension-function|java)\b
+  - type: regex
+    pattern: <xsl:stylesheet[^>]+(?:xmlns:(?:rt|msxsl|exsl))\s*=\s*['"]
+  - type: regex
+    pattern: <msxsl:script\b
+  anti_patterns:
+  - version="1.0"
+  impact: 'XSLT injection can lead to arbitrary code execution on the server.
+
+    '
+  remediation: 'Disable XSLT extensions and restrict to XSLT 1.0 without scripting.
+
+    '
+- rule_id: XML-INJ-003
+  title: XInclude Injection
+  description: 'Detects XInclude directives that could include external resources.
+
+    '
+  language: xml
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-611
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - xinclude
+  - xxe
+  patterns:
+  - type: regex
+    pattern: <xi:include\s+(?:href|parse)\s*=\s*['"](?:file://|http://|https://|ftp://)
+  - type: regex
+    pattern: xmlns:xi\s*=\s*['"]http://www\.w3\.org/2001/XInclude['"]
+  anti_patterns:
+  - <!-- disallowed
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: XML-SEC-001
+  title: Billion Laughs Attack (XML Bomb)
+  description: 'Detects entity expansion patterns that could cause denial of service.
+
+    '
+  language: xml
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-776
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - xml-bomb
+  - dos
+  - entity-expansion
+  patterns:
+  - type: regex
+    pattern: <!ENTITY\s+\w+\s+['"](&\w+;){2,}['"]
+  - type: regex
+    pattern: <!ENTITY\s+(?:lol|bomb|x)\d+\s+['"](?:&(?:lol|bomb|x)\d+;)+
+  anti_patterns:
+  - <!-- demo
+  impact: 'XML bomb attacks cause exponential entity expansion leading to memory
+
+    exhaustion and denial of service.
+
+    '
+  remediation: 'Disable DTD processing entirely or set entity expansion limits.
+
+    '
+- rule_id: XML-SEC-002
+  title: Insecure XML Schema Location
+  description: 'Detects external schema references that could be hijacked.
+
+    '
+  language: xml
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - schema
+  - external-reference
+  patterns:
+  - type: regex
+    pattern: schemaLocation\s*=\s*['"]http://[^'">]*['"]
+  anti_patterns:
+  - https://
+  - w3.org
+  - xmlsoap.org
+  - spring
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: XML-SEC-003
+  title: SOAP Injection Risk
+  description: 'Detects SOAP messages with potential injection points.
+
+    '
+  language: xml
+  category: injection
+  severity: High
+  confidence: 0.78
+  cwe: CWE-91
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - soap
+  - injection
+  patterns:
+  - type: regex
+    pattern: <soap:(?:Body|Header)>[^<]*(?:\$\{|<%=|{{|#\{)
+  - type: regex
+    pattern: <wsse:Password[^>]*>(?:\$\{|<%=|{{|#\{)
+  anti_patterns:
+  - sanitize
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: XML-SEC-004
+  title: SVG Script Injection
+  description: 'Detects script elements or event handlers in SVG files.
+
+    '
+  language: xml
+  category: xss
+  severity: High
+  confidence: 0.9
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - svg
+  - xss
+  - script-injection
+  patterns:
+  - type: regex
+    pattern: <svg[^>]*>.*<script\b
+  - type: regex
+    pattern: <svg[^>]+on(?:load|error|click|mouseover)\s*=\s*['"]
+  - type: regex
+    pattern: '<(?:foreignObject|use|image)[^>]+(?:href|xlink:href)\s*=\s*[''"](?:javascript|data):'
+  anti_patterns:
+  - sanitized
+  impact: 'SVG files can contain JavaScript that executes in the browser context.
+
+    '
+  remediation: 'Sanitize SVG files by stripping script elements and event handlers.
+
+    Serve user-uploaded SVGs with Content-Type: image/svg+xml
+
+    and Content-Disposition: attachment.
+
+    '
+- rule_id: XML-SEC-005
+  title: Android Manifest Exported Component
+  description: 'Detects exported Android components without permission restrictions.
+
+    '
+  language: xml
+  category: framework_misuse
+  severity: High
+  confidence: 0.82
+  cwe: CWE-926
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - android
+  - exported-component
+  patterns:
+  - type: regex
+    pattern: <(?:activity|service|receiver|provider)[^>]+android:exported\s*=\s*['"]true['"][^>]*>
+  anti_patterns:
+  - android:permission
+  - android:protectionLevel
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: XML-SEC-006
+  title: Android Backup Enabled
+  description: 'Detects Android manifest allowing application backup.
+
+    '
+  language: xml
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-921
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - android
+  - backup
+  patterns:
+  - type: regex
+    pattern: android:allowBackup\s*=\s*['"]true['"]
+  anti_patterns:
+  - backupAgent
+  - fullBackupContent
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: XML-SEC-007
+  title: Android Cleartext Traffic Allowed
+  description: 'Detects Android network security config allowing cleartext traffic.
+
+    '
+  language: xml
+  category: crypto
+  severity: High
+  confidence: 0.9
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - android
+  - cleartext
+  - http
+  patterns:
+  - type: regex
+    pattern: android:usesCleartextTraffic\s*=\s*['"]true['"]
+  - type: regex
+    pattern: cleartextTrafficPermitted\s*=\s*['"]true['"]
+  anti_patterns:
+  - localhost
+  - 10.0.2.2
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: XML-SEC-008
+  title: Maven POM Insecure Repository
+  description: 'Detects Maven POM files referencing HTTP (non-HTTPS) repositories.
+
+    '
+  language: xml
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - maven
+  - insecure-repository
+  patterns:
+  - type: regex
+    pattern: <url>\s*http://(?!localhost|127\.0\.0\.1)[^<]*</url>
+  - type: regex
+    pattern: <repository>[^<]*<url>\s*http://[^<]*</url>
+  anti_patterns:
+  - https://
+  - localhost
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: XML-SEC-009
+  title: Web.xml Security Misconfiguration
+  description: 'Detects insecure web.xml configurations (Java servlets).
+
+    '
+  language: xml
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-16
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - web-xml
+  - servlet
+  - misconfiguration
+  patterns:
+  - type: regex
+    pattern: <session-timeout>\s*(?:[3-9]\d{2,}|\d{4,})\s*</session-timeout>
+  - type: regex
+    pattern: <listing>true</listing>
+  - type: regex
+    pattern: <http-only>false</http-only>
+  - type: regex
+    pattern: <secure>false</secure>
+  - type: regex
+    pattern: <tracking-mode>URL</tracking-mode>
+  anti_patterns:
+  - <!-- disabled
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: XML-SEC-010
+  title: Spring Security Misconfiguration
+  description: 'Detects insecure Spring Security XML configurations.
+
+    '
+  language: xml
+  category: framework_misuse
+  severity: High
+  confidence: 0.85
+  cwe: CWE-306
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - spring
+  - security-config
+  patterns:
+  - type: regex
+    pattern: <security:http[^>]+security\s*=\s*['"]none['"]
+  - type: regex
+    pattern: <csrf\s+disabled\s*=\s*['"]true['"]
+  - type: regex
+    pattern: <headers[^>]+disabled\s*=\s*['"]true['"]
+  - type: regex
+    pattern: <frame-options[^>]+policy\s*=\s*['"]ALLOW-FROM['"]
+  anti_patterns:
+  - <!-- test
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

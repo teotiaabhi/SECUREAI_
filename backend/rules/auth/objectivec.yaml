@@ -1,0 +1,406 @@
+rules:
+- rule_id: OBJC-AUTH-001
+  title: Insecure Keychain Access
+  description: 'Detects keychain items stored without proper access control flags.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.88
+  cwe: CWE-522
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - keychain
+  - auth
+  patterns:
+  - type: regex
+    pattern: kSecAttrAccessible.*kSecAttrAccessibleAlways\b
+  - type: regex
+    pattern: kSecAttrAccessible.*kSecAttrAccessibleAlwaysThisDeviceOnly\b
+  anti_patterns:
+  - kSecAttrAccessibleWhenUnlocked
+  - kSecAttrAccessibleAfterFirstUnlock
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: OBJC-AUTH-002
+  title: Weak Biometric Authentication
+  description: 'Detects LAContext usage without fallback validation.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.82
+  cwe: CWE-287
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 2
+  tags:
+  - objectivec
+  - biometric
+  - authentication
+  patterns:
+  - type: regex
+    pattern: LAPolicyDeviceOwnerAuthentication\b
+  - type: regex
+    pattern: canEvaluatePolicy.*error:\s*nil
+  anti_patterns:
+  - LAPolicyDeviceOwnerAuthenticationWithBiometrics
+  - LAErrorBiometryLockout
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: OBJC-AUTH-003
+  title: Hardcoded Password in Source
+  description: 'Detects hardcoded passwords in Objective-C source code.
+
+    '
+  language: objectivec
+  category: auth
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - hardcoded
+  - password
+  patterns:
+  - type: regex
+    pattern: (?:password|passwd|pwd)\s*=\s*@"[^"]{4,}
+  - type: regex
+    pattern: (?:apiKey|api_key|secret)\s*=\s*@"[^"]{8,}
+  anti_patterns:
+  - placeholder
+  - example
+  - test
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: OBJC-AUTH-004
+  title: Missing SSL Certificate Pinning
+  description: 'Detects NSURLSession without certificate pinning delegates.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.8
+  cwe: CWE-295
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 2
+  tags:
+  - objectivec
+  - ssl
+  - pinning
+  patterns:
+  - type: regex
+    pattern: NSURLSession\s+\w+Session
+  - type: regex
+    pattern: sharedSession\]
+  anti_patterns:
+  - didReceiveChallenge
+  - URLSession:didReceiveChallenge
+  - SecTrustEvaluate
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: OBJC-AUTH-005
+  title: Disabled App Transport Security
+  description: 'Detects ATS exceptions allowing insecure connections.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - ats
+  - transport-security
+  patterns:
+  - type: regex
+    pattern: NSAllowsArbitraryLoads.*true
+  - type: regex
+    pattern: NSExceptionAllowsInsecureHTTPLoads.*true
+  anti_patterns:
+  - NSAllowsLocalNetworking
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: OBJC-CRYPTO-001
+  title: Weak Encryption Algorithm
+  description: 'Detects usage of weak or deprecated encryption algorithms.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: High
+  confidence: 0.9
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - crypto
+  - weak-algorithm
+  patterns:
+  - type: regex
+    pattern: kCCAlgorithmDES\b
+  - type: regex
+    pattern: kCCAlgorithm3DES\b
+  - type: regex
+    pattern: kCCAlgorithmRC4\b
+  - type: regex
+    pattern: kCCAlgorithmRC2\b
+  anti_patterns:
+  - kCCAlgorithmAES
+  - kCCAlgorithmAES128
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: OBJC-CRYPTO-002
+  title: ECB Mode Usage
+  description: 'Detects usage of ECB block cipher mode.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: High
+  confidence: 0.92
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - crypto
+  - ecb
+  patterns:
+  - type: regex
+    pattern: kCCOptionECBMode\b
+  - type: regex
+    pattern: kCCModeECB\b
+  anti_patterns:
+  - kCCModeCBC
+  - kCCModeGCM
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: OBJC-CRYPTO-003
+  title: Hardcoded Encryption Key
+  description: 'Detects hardcoded cryptographic keys in source code.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-321
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - crypto
+  - hardcoded-key
+  patterns:
+  - type: regex
+    pattern: (?:key|encryptionKey|aesKey)\s*=\s*@"[A-Fa-f0-9]{16,}
+  - type: regex
+    pattern: (?:key|iv|nonce)\s*=\s*\[\s*NSData\s+dataWithBytes:\s*"
+  anti_patterns:
+  - keychain
+  - SecItemCopy
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: OBJC-CRYPTO-004
+  title: Insecure Random Number Generation
+  description: 'Detects use of weak random number generators.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: High
+  confidence: 0.88
+  cwe: CWE-330
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - crypto
+  - random
+  patterns:
+  - type: regex
+    pattern: \brand\(\)
+  - type: regex
+    pattern: \brandom\(\)
+  - type: regex
+    pattern: \barc4random\(\)
+  anti_patterns:
+  - SecRandomCopyBytes
+  - arc4random_uniform
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: OBJC-CRYPTO-005
+  title: Weak Hash for Password Storage
+  description: 'Detects MD5/SHA1 used for password hashing.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: High
+  confidence: 0.88
+  cwe: CWE-916
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - crypto
+  - hash
+  - password
+  patterns:
+  - type: regex
+    pattern: CC_MD5\s*\(
+  - type: regex
+    pattern: CC_SHA1\s*\(
+  anti_patterns:
+  - CC_SHA256
+  - CC_SHA512
+  - PBKDF2
+  - kCCPBKDF2
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: OBJC-RCE-001
+  title: Dynamic Library Loading
+  description: 'Detects dynamic library loading from untrusted paths.
+
+    '
+  language: objectivec
+  category: rce
+  severity: High
+  confidence: 0.85
+  cwe: CWE-426
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - dlopen
+  - library-injection
+  patterns:
+  - type: regex
+    pattern: \bdlopen\s*\(
+  - type: regex
+    pattern: NSBundle.*bundleWithPath
+  anti_patterns:
+  - System/Library
+  - /usr/lib
+  impact: Remote code execution enables complete system compromise and lateral movement
+  remediation: Avoid dynamic code execution, sandbox untrusted input, use allowlists
+- rule_id: OBJC-RCE-002
+  title: Insecure Deserialization
+  description: 'Detects NSKeyedUnarchiver usage without secure coding.
+
+    '
+  language: objectivec
+  category: rce
+  severity: High
+  confidence: 0.88
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - objectivec
+  - deserialization
+  - NSCoding
+  patterns:
+  - type: regex
+    pattern: 'unarchiveObjectWithData:'
+  - type: regex
+    pattern: 'NSKeyedUnarchiver\s+\w+ForKey:'
+  - type: regex
+    pattern: requiresSecureCoding.*NO
+  anti_patterns:
+  - unarchivedObjectOfClass
+  - requiresSecureCoding = YES
+  impact: Remote code execution enables complete system compromise and lateral movement
+  remediation: Avoid dynamic code execution, sandbox untrusted input, use allowlists
+- rule_id: OBJC-RCE-003
+  title: URL Scheme Handler Without Validation
+  description: 'Detects custom URL scheme handling without input validation.
+
+    '
+  language: objectivec
+  category: rce
+  severity: High
+  confidence: 0.82
+  cwe: CWE-749
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - objectivec
+  - url-scheme
+  - deep-link
+  patterns:
+  - type: regex
+    pattern: 'application:openURL:.*options:'
+  - type: regex
+    pattern: 'handleOpenURL:'
+  anti_patterns:
+  - host isEqualToString
+  - scheme isEqualToString
+  - canOpenURL
+  impact: Remote code execution enables complete system compromise and lateral movement
+  remediation: Avoid dynamic code execution, sandbox untrusted input, use allowlists
+- rule_id: OBJC-RCE-004
+  title: Pasteboard Data Leakage
+  description: 'Detects sensitive data being stored in pasteboard.
+
+    '
+  language: objectivec
+  category: rce
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-200
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 2
+  tags:
+  - objectivec
+  - pasteboard
+  - data-leakage
+  patterns:
+  - type: regex
+    pattern: UIPasteboard.*generalPasteboard.*set(?:String|Data|Items)
+  - type: regex
+    pattern: \[UIPasteboard\s+generalPasteboard\].*string\s*=
+  anti_patterns:
+  - localOnly
+  - expirationDate
+  impact: Remote code execution enables complete system compromise and lateral movement
+  remediation: Avoid dynamic code execution, sandbox untrusted input, use allowlists
+- rule_id: OBJC-RCE-005
+  title: Insecure WebView Configuration
+  description: 'Detects WKWebView with JavaScript enabled and insecure settings.
+
+    '
+  language: objectivec
+  category: rce
+  severity: High
+  confidence: 0.85
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - objectivec
+  - webview
+  - javascript
+  patterns:
+  - type: regex
+    pattern: javaScriptEnabled\s*=\s*YES
+  - type: regex
+    pattern: allowsInlineMediaPlayback\s*=\s*YES
+  - type: regex
+    pattern: UIWebView\b
+  anti_patterns:
+  - WKContentRuleList
+  - decidePolicyForNavigationAction
+  impact: Remote code execution enables complete system compromise and lateral movement
+  remediation: Avoid dynamic code execution, sandbox untrusted input, use allowlists

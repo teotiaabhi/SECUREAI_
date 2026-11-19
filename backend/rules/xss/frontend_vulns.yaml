@@ -1,0 +1,333 @@
+rules:
+- rule_id: FE-XSS-001
+  title: DOM XSS via innerHTML Assignment
+  description: Detects innerHTML/outerHTML assignment with user-controlled data
+  language: javascript
+  category: xss
+  severity: Critical
+  confidence: 90
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - dom-xss
+  - javascript
+  - innerHTML
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: \.innerHTML\s*=\s*(?:location\.|document\.URL|document\.referrer|window\.name)
+  - type: regex
+    pattern: \.innerHTML\s*=\s*(?:decodeURI|unescape)\s*\(
+  - type: regex
+    pattern: \.innerHTML\s*(?:\+|=)\s*.*(?:location\.hash|location\.search|location\.href)
+  - type: regex
+    pattern: \.outerHTML\s*=\s*(?:location\.|document\.URL|window\.name)
+  anti_patterns:
+  - pattern: DOMPurify\.sanitize|sanitizeHtml|textContent
+    description: HTML sanitization or safe property
+  impact: DOM-based XSS executes in the user's browser without server interaction
+  remediation: Use textContent instead of innerHTML, or sanitize with DOMPurify
+- rule_id: FE-XSS-002
+  title: DOM XSS via document.write
+  description: Detects document.write with user-controlled sources
+  language: javascript
+  category: xss
+  severity: Critical
+  confidence: 90
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - dom-xss
+  - javascript
+  - document-write
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: document\.write(?:ln)?\s*\(\s*(?:location\.|document\.URL|document\.referrer|window\.name)
+  - type: regex
+    pattern: document\.write(?:ln)?\s*\(\s*.*(?:location\.hash|location\.search)
+  - type: regex
+    pattern: document\.write(?:ln)?\s*\(\s*(?:decodeURI|unescape)\s*\(
+  anti_patterns:
+  - pattern: DOMPurify\.sanitize
+    description: Sanitization applied
+  impact: document.write with tainted data enables DOM XSS
+  remediation: Avoid document.write entirely; use DOM manipulation methods with textContent
+- rule_id: FE-XSS-003
+  title: DOM XSS via eval-like Sinks
+  description: Detects eval, setTimeout, setInterval with user-controlled strings
+  language: javascript
+  category: xss
+  severity: Critical
+  confidence: 85
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - dom-xss
+  - javascript
+  - eval
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: eval\s*\(\s*(?:location\.|document\.URL|window\.name|decodeURI)
+  - type: regex
+    pattern: setTimeout\s*\(\s*(?:location\.|document\.URL|window\.name)
+  - type: regex
+    pattern: setInterval\s*\(\s*(?:location\.|document\.URL|window\.name)
+  - type: regex
+    pattern: new\s+Function\s*\(\s*(?:location\.|document\.URL|window\.name)
+  anti_patterns:
+  - pattern: setTimeout\s*\(\s*function\s*\(
+    description: Using function reference, not string
+  - pattern: setTimeout\s*\(\s*\(\s*\)\s*=>
+    description: Using arrow function
+  impact: Code injection via eval-like functions with tainted input
+  remediation: Never pass strings to eval/setTimeout/setInterval; use function references
+- rule_id: FE-XSS-004
+  title: DOM XSS via jQuery HTML Methods
+  description: Detects jQuery HTML manipulation with user-controlled data
+  language: javascript
+  category: xss
+  severity: High
+  confidence: 85
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - dom-xss
+  - javascript
+  - jquery
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: \$\s*\(\s*(?:location\.|document\.URL|window\.name)
+  - type: regex
+    pattern: \.html\s*\(\s*(?:location\.|document\.URL|decodeURI)
+  - type: regex
+    pattern: \.append\s*\(\s*(?:location\.|document\.URL|window\.name)
+  - type: regex
+    pattern: \$\s*\(\s*["\x27]\s*<[^>]*>\s*["\x27]\s*\+\s*(?:location\.|document\.URL)
+  anti_patterns:
+  - pattern: \.text\s*\(
+    description: Using .text() instead of .html()
+  impact: jQuery HTML manipulation with tainted data enables XSS
+  remediation: Use .text() instead of .html(), or sanitize with DOMPurify before .html()
+- rule_id: FE-PROTO-001
+  title: Prototype Pollution via Object Merge
+  description: Detects prototype pollution through recursive object merge or deep copy
+  language: javascript
+  category: injection
+  severity: High
+  confidence: 80
+  cwe: 1321
+  owasp: A03:2021
+  tags:
+  - prototype-pollution
+  - javascript
+  - object-merge
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: function\s+\w*(?:merge|extend|assign|defaults|deep[Cc]opy)\w*\s*\([^)]*\)\s*\{[^}]*for\s*\(\s*(?:var|let|const)\s+\w+\s+in\b
+  - type: regex
+    pattern: (?:Object\.assign|_\.extend|_\.merge|_\.defaults)\s*\(\s*\{\}\s*,\s*(?:req\.body|req\.query|JSON\.parse)
+  - type: regex
+    pattern: \[\s*(?:key|prop|attr)\s*\]\s*=.*\[\s*(?:key|prop|attr)\s*\]
+  anti_patterns:
+  - pattern: hasOwnProperty|Object\.keys|Object\.entries
+    description: Property ownership validation
+  - pattern: __proto__|constructor|prototype
+    description: Dangerous key filtering
+  impact: Prototype pollution can modify Object.prototype, affecting application logic globally
+  remediation: Use Object.create(null) as base, filter __proto__/constructor keys, use Map instead
+- rule_id: FE-PROTO-002
+  title: Prototype Pollution via JSON Parse
+  description: Detects potential prototype pollution through parsed JSON being merged without sanitization
+  language: javascript
+  category: injection
+  severity: High
+  confidence: 75
+  cwe: 1321
+  owasp: A03:2021
+  tags:
+  - prototype-pollution
+  - javascript
+  - json
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: JSON\.parse\s*\([^)]*\)\s*(?:;|\))[^;]*(?:merge|extend|assign|defaults)\s*\(
+  - type: regex
+    pattern: Object\.assign\s*\(\s*\w+\s*,\s*JSON\.parse\s*\(\s*(?:req\.|ctx\.|event\.)
+  anti_patterns:
+  - pattern: JSON\.parse[^;]*reviver
+    description: JSON reviver function for filtering
+  impact: Parsed JSON with __proto__ keys can pollute Object.prototype
+  remediation: Use a JSON reviver to filter dangerous keys, or use lodash.merge with recent versions
+- rule_id: FE-POSTMSG-001
+  title: Insecure postMessage Origin Validation
+  description: Detects missing or wildcard origin validation in postMessage handlers
+  language: javascript
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 346
+  owasp: A07:2021
+  tags:
+  - postMessage
+  - javascript
+  - origin-validation
+  - cross-origin
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: addEventListener\s*\(\s*["\x27]message["\x27]\s*,\s*(?:function|\([^)]*\)\s*=>)\s*[^}]*(?!event\.origin|e\.origin)
+  - type: regex
+    pattern: postMessage\s*\(\s*[^,]+,\s*["\x27]\*["\x27]\s*\)
+  - type: regex
+    pattern: onmessage\s*=\s*(?:function|\([^)]*\)\s*=>)\s*[^}]*(?!\.origin)
+  anti_patterns:
+  - pattern: event\.origin\s*(?:===|!==|==)
+    description: Origin validation present
+  - pattern: e\.origin\s*(?:===|!==|==)
+    description: Origin validation present
+  impact: Missing origin validation allows any website to send messages to the application
+  remediation: Always validate event.origin against expected values, never use '*' for sensitive data
+- rule_id: FE-STORAGE-001
+  title: Sensitive Data in localStorage/sessionStorage
+  description: Detects storage of sensitive tokens or credentials in browser storage
+  language: javascript
+  category: secrets
+  severity: High
+  confidence: 80
+  cwe: 922
+  owasp: A04:2021
+  tags:
+  - localstorage
+  - javascript
+  - token-leakage
+  - client-storage
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: localStorage\.setItem\s*\(\s*["\x27](?:token|jwt|access_token|refresh_token|session|auth|password|secret|api_key)["\x27]
+  - type: regex
+    pattern: sessionStorage\.setItem\s*\(\s*["\x27](?:token|jwt|access_token|refresh_token|session|auth|password)["\x27]
+  - type: regex
+    pattern: localStorage\s*\[\s*["\x27](?:token|jwt|access_token|password|secret)["\x27]\s*\]\s*=
+  anti_patterns:
+  - pattern: httpOnly|Secure
+    description: Using secure cookies instead
+  impact: Tokens in localStorage are accessible to any XSS and persist across sessions
+  remediation: Use httpOnly secure cookies for authentication tokens, not browser storage
+- rule_id: FE-STORAGE-002
+  title: Token Leakage via URL Parameters
+  description: Detects sensitive tokens being passed in URL query parameters
+  language: javascript
+  category: secrets
+  severity: High
+  confidence: 80
+  cwe: 598
+  owasp: A04:2021
+  tags:
+  - token-leakage
+  - javascript
+  - url-params
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: (?:window\.location|location\.href)\s*=\s*[^;]*[?&](?:token|api_key|secret|password|session_id)=
+  - type: regex
+    pattern: fetch\s*\(\s*`[^`]*\?[^`]*(?:token|api_key|secret)=\$\{
+  - type: regex
+    pattern: XMLHttpRequest[^;]*\.open\s*\([^,]*,\s*[^,]*[?&](?:token|api_key|secret)=
+  anti_patterns:
+  - pattern: Authorization.*Bearer
+    description: Using Authorization header
+  impact: Tokens in URLs are logged in server logs, browser history, and referrer headers
+  remediation: Pass tokens in Authorization headers or POST body, never in URL parameters
+- rule_id: FE-CORS-001
+  title: Client-Side CORS Bypass Attempt
+  description: 'Detects attempts to bypass CORS using mode: ''no-cors'' or misconfigured credentials'
+  language: javascript
+  category: auth
+  severity: Medium
+  confidence: 75
+  cwe: 346
+  owasp: A07:2021
+  tags:
+  - cors
+  - javascript
+  - cross-origin
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: fetch\s*\([^)]*mode\s*:\s*["\x27]no-cors["\x27]
+  - type: regex
+    pattern: credentials\s*:\s*["\x27]include["\x27][^}]*(?:mode\s*:\s*["\x27]cors["\x27])?[^}]*(?!Access-Control)
+  anti_patterns:
+  - pattern: Access-Control-Allow-Origin
+    description: CORS headers properly configured
+  impact: Improper CORS usage can expose sensitive data or bypass security controls
+  remediation: 'Configure proper CORS headers server-side, use credentials: ''same-origin'' by default'
+- rule_id: FE-TEMPLATE-001
+  title: Client-Side Template Injection
+  description: Detects client-side template injection in Angular/Vue expressions
+  language: javascript
+  category: xss
+  severity: High
+  confidence: 80
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - csti
+  - javascript
+  - angular
+  - vue
+  - template-injection
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: \$compile\s*\(\s*(?:\w+input|\$scope\.\w+|userData|userContent)
+  - type: regex
+    pattern: v-html\s*=\s*"(?:userData|userInput|response\.|data\.)
+  - type: regex
+    pattern: \$sce\.trustAsHtml\s*\(\s*(?:user|input|data|response)
+  - type: regex
+    pattern: ng-bind-html\s*=\s*"(?:user|input|data)\w*"
+  anti_patterns:
+  - pattern: \$sanitize|\$sce\.trustAs
+    description: Angular sanitization service
+  - pattern: DOMPurify
+    description: DOMPurify sanitization
+  impact: Client-side template injection can execute arbitrary JavaScript
+  remediation: Use framework-provided sanitization, avoid v-html/trustAsHtml with user data
+- rule_id: FE-OPEN-REDIRECT-001
+  title: Open Redirect via Location Assignment
+  description: Detects redirects to user-controlled URLs
+  language: javascript
+  category: auth
+  severity: Medium
+  confidence: 80
+  cwe: 601
+  owasp: A01:2021
+  tags:
+  - open-redirect
+  - javascript
+  - phishing
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: window\.location(?:\.href)?\s*=\s*(?:params|searchParams|req\.query)\.\w+
+  - type: regex
+    pattern: location\.assign\s*\(\s*(?:params|searchParams|req\.query)\.\w+
+  - type: regex
+    pattern: location\.replace\s*\(\s*(?:params|searchParams|new URLSearchParams)
+  - type: regex
+    pattern: window\.open\s*\(\s*(?:params|searchParams|req\.query)\.\w+
+  anti_patterns:
+  - pattern: startsWith\s*\(\s*["\x27]/
+    description: Relative URL validation
+  - pattern: new URL.*\.origin
+    description: Origin validation
+  impact: Open redirect enables phishing attacks by redirecting to malicious sites
+  remediation: Validate redirect URLs against allowlist, use relative URLs only

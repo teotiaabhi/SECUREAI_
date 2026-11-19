@@ -1,0 +1,765 @@
+rules:
+- rule_id: LOGIC-MT-001
+  title: Unscoped ORM Query — All Records Without Tenant Filter
+  description: 'Detects ORM queries that retrieve all records without any filtering (.query.all(), .objects.all(), session.query(Model).all()). In multi-tenant applications, unscoped queries return data
+    across ALL tenants, enabling cross-tenant data leakage. Each query must include an explicit tenant_id/org_id filter.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.5
+  cwe: CWE-284
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - unscoped-query
+  - data-leakage
+  - orm
+  - sqlalchemy
+  - django-orm
+  detection_layer: 1
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.query\.all\s*\('
+    description: SQLAlchemy Model.query.all() — unscoped full table scan
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.objects\.all\s*\('
+    description: Django Model.objects.all() — unscoped full table scan
+  - pattern: (?:session|db\.session)\.query\s*\([^)]+\)\.all\s*\(
+    description: SQLAlchemy session.query().all() — unscoped query
+  - pattern: (?:db\.)?select\s*\(\s*[A-Z][a-zA-Z0-9_]*\s*\)(?:\.(?:order_by|limit|offset|distinct)\s*\([^)]*\))*(?!\s*\.where)
+    description: SQLAlchemy 2.0 select() without where() clause
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - '@shared_task'
+  - '@celery_app.task'
+  - class Migration
+  - alembic
+  - seed_data
+  - load_fixtures
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Paginated unscoped query: Model.query.paginate()'
+    description: Adding pagination does not add tenant scope
+  - variant: 'Ordered unscoped query: Model.query.order_by(...).all()'
+    description: Sorting without filtering still returns all tenants
+  - variant: 'Deferred loading: Model.query.options(lazyload(...)).all()'
+    description: Eager/lazy loading strategies don't affect tenant scope
+  context_awareness:
+    surrounding_context_patterns:
+    - tenant_id
+    - org_id
+    - organization_id
+    - from flask import
+    - from sqlalchemy
+    taint_source_indicators:
+    - request.args
+    - request.json
+    - request.form
+    tenant_indicators:
+    - g.tenant_id
+    - current_tenant
+    - session['tenant_id']
+    sanitization_patterns:
+    - .filter_by(tenant_id=
+    - .filter(.*tenant_id
+    - .where(.*tenant_id
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Cross-tenant data access via missing scope filter
+  probable_taint_paths:
+  - source: unscoped_orm_query
+    sink: api_response_serialization
+    through: Model.query.all() → jsonify(results)
+  - source: unscoped_orm_query
+    sink: template_rendering
+    through: Model.objects.all() → render_template(items=results)
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 9
+    exploitability_score: High
+  impact: 'Cross-tenant data exposure. Every record in the table is returned regardless of tenant ownership. In multi-tenant SaaS, this means Tenant A''s users see Tenant B''s data: customers, invoices,
+    documents, audit logs, and PII. Severity scales with the sensitivity of the model being queried.
+
+    '
+  remediation: "Always scope queries to the current tenant:\n# WRONG: users = User.query.all() # RIGHT: users = User.query.filter_by(tenant_id=g.tenant_id).all()\nBetter: use a base query class that injects\
+    \ tenant scope automatically:\nclass TenantQuery(BaseQuery):\n    def tenant_scoped(self):\n        return self.filter_by(tenant_id=g.tenant_id)\n\nusers = User.query.tenant_scoped().all()\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-002
+    - LOGIC-MT-003
+    - LOGIC-MT-007
+    - LOGIC-IDOR-001
+- rule_id: LOGIC-MT-002
+  title: ORM Filter by Non-Tenant Fields — Missing Tenant Scope in Query
+  description: 'Detects ORM filter/filter_by calls that filter by non-tenant fields (id, status, email, name, etc.) without including a tenant_id or org_id parameter. In multi-tenant context, filtering
+    by only non-tenant fields returns records from all tenants matching the criteria. This rule uses line-level anti-patterns from the intelligence layer for per-finding suppression when tenant_id appears
+    nearby.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.55
+  cwe: CWE-284
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - missing-scope
+  - orm-filter
+  - sqlalchemy
+  - django-orm
+  detection_layer: 1
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: \.filter_by\s*\(\s*(?:id|status|email|name|type|active|is_active|role|category|slug|username)\s*=
+    description: SQLAlchemy filter_by() with non-tenant filter field
+  - pattern: \.filter\s*\(\s*[A-Z][a-zA-Z0-9_]{0,40}.(?:id|status|email|name|type|active|is_active|role)\s*==
+    description: SQLAlchemy filter() comparing non-tenant Model attribute
+  - pattern: \.objects\.(?:filter|exclude)\s*\(\s*(?:id|status|email|name|type|active|is_active)\s*=
+    description: Django ORM filter() with non-tenant field
+  - pattern: \.objects\.get\s*\(\s*(?:id|pk|email|username|slug)\s*=
+    description: Django ORM get() by non-tenant field
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - '@shared_task'
+  - class Migration
+  - alembic
+  - conftest
+  - pytest
+  - '@superuser_required'
+  bypass_variants:
+  - variant: 'Chained filter: Model.query.filter(status=''active'').filter(id=req_id)'
+    description: Multiple filters chained but none include tenant scope
+  - variant: 'Q object combination: Model.objects.filter(Q(status=''active'') | Q(name=name))'
+    description: Django Q objects combining non-tenant conditions
+  - variant: 'Dynamic filter: Model.query.filter_by(**request.json)'
+    description: User-controlled filter kwargs — attacker omits tenant_id
+  context_awareness:
+    surrounding_context_patterns:
+    - tenant_id
+    - org_id
+    - organization_id
+    - '@app.route'
+    - def get
+    - def list
+    tenant_indicators:
+    - g.tenant_id
+    - current_tenant
+    - request.tenant
+    sanitization_patterns:
+    - tenant_id=
+    - org_id=
+    - organization_id=
+    - .tenant_scoped()
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Query returns cross-tenant records matching non-unique criteria
+  probable_taint_paths:
+  - source: user_request_parameter
+    sink: orm_filter_without_tenant
+    through: request.args.get('status') → filter_by(status=value)
+  - source: url_path_parameter
+    sink: orm_get_without_tenant
+    through: route <id> → Model.objects.get(id=param)
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 8
+    exploitability_score: High
+  impact: 'Cross-tenant data leakage through unscoped filters. Filtering by non-unique fields like status or email without tenant scope returns records from all tenants. Attacker can enumerate and access
+    other tenants'' records by manipulating filter parameters.
+
+    '
+  remediation: "Always include tenant scope in filter queries:\n# WRONG: users = User.query.filter_by(status='active').all()\n# RIGHT: users = User.query.filter_by(\n    tenant_id=g.tenant_id,\n    status='active'\n\
+    ).all()\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-003
+    - LOGIC-IDOR-002
+- rule_id: LOGIC-MT-003
+  title: Direct ID Fetch Without Tenant Validation — Cross-Tenant Access
+  description: 'Detects direct database lookups using an ID parameter (Model.query.get(), get_or_404(), session.get()) without subsequent tenant ownership validation. In multi-tenant applications, retrieving
+    an object by its primary key without verifying it belongs to the current tenant enables IDOR-style cross-tenant access. This is detection_layer 2: confidence is boosted when corroborated by LOGIC-MT-001
+    or LOGIC-MT-002 in the same file.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.62
+  cwe: CWE-863
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - idor
+  - direct-object-reference
+  - tenant-validation
+  - sqlalchemy
+  detection_layer: 2
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.query\.get\s*\(\s*[a-z_][a-z_0-9]*\s*\)'
+    description: SQLAlchemy Model.query.get(variable) — PK lookup without tenant check
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.query\.get_or_404\s*\('
+    description: Flask-SQLAlchemy get_or_404() — returns object without tenant validation
+  - pattern: (?:db\.session|session)\.get\s*\(\s*[A-Z][a-zA-Z0-9_]*\s*,\s*[a-z_]
+    description: SQLAlchemy session.get(Model, id) — PK lookup
+  - pattern: get_object_or_404\s*\(\s*[A-Z][a-zA-Z0-9_]*\s*,\s*(?:pk|id)\s*=
+    description: Django get_object_or_404() by PK without tenant filter
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.objects\.get\s*\(\s*(?:id|pk)\s*=\s*[a-z_]'
+    description: Django Model.objects.get() by PK without tenant filter
+  - pattern: '\.find_one\s*\(\s*\{\s*[''"]_id[''"]\s*:'
+    description: PyMongo find_one by _id without tenant field in query
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - '@shared_task'
+  - class Migration
+  - conftest
+  - pytest
+  bypass_variants:
+  - variant: 'Chained get: User.query.get(id).organization check post-fetch'
+    description: Fetch-then-check pattern — race condition window
+  - variant: 'Indirect ID: User.query.get(data[''user_id''])'
+    description: ID sourced from request body rather than URL path
+  - variant: 'UUID-based ID: User.query.get(uuid_param)'
+    description: UUIDs are harder to guess but still need tenant validation
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.route'
+    - '@app.get'
+    - def get(
+    - def retrieve(
+    tenant_indicators:
+    - g.tenant_id
+    - current_tenant
+    - .tenant_id ==
+    - obj.tenant_id != g.tenant_id
+    sanitization_patterns:
+    - obj.tenant_id == g.tenant_id
+    - if.*tenant_id.*!=
+    - abort(403)
+    - abort(404)
+    - .filter_by(tenant_id=
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Direct object reference bypasses tenant isolation boundary
+  multi_function_chain_patterns:
+  - request.view_args['id'] -> Model.query.get(id) -> jsonify(obj.to_dict())
+  - request.args.get('doc_id') -> Document.query.get(doc_id) -> send_file(doc.path)
+  probable_taint_paths:
+  - source: url_path_parameter_id
+    sink: Model.query.get(id)
+    through: Flask route <int:id> variable
+  - source: request_body_id
+    sink: session.get(Model, id)
+    through: JSON body 'id' field
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 10
+    exploitability_score: High
+  impact: 'Direct cross-tenant object access. Attacker changes the ID parameter (incrementing integer IDs, guessing UUIDs) to access objects belonging to other tenants: documents, invoices, user profiles,
+    API keys. This is the most common multi-tenant vulnerability pattern.
+
+    '
+  remediation: "Always validate tenant ownership after fetching by ID:\n# WRONG: doc = Document.query.get_or_404(doc_id) return jsonify(doc.to_dict())\n# RIGHT: doc = Document.query.get_or_404(doc_id) if\
+    \ doc.tenant_id != g.tenant_id:\n    abort(404)  # Return 404, not 403, to prevent enumeration\nreturn jsonify(doc.to_dict())\n# BEST: scope the query itself doc = Document.query.filter_by(\n    id=doc_id,\
+    \ tenant_id=g.tenant_id\n).first_or_404()\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-002
+    - LOGIC-IDOR-001
+    - LOGIC-IDOR-002
+- rule_id: LOGIC-MT-004
+  title: Bulk Operation Without Tenant Scope — Cross-Tenant Modification
+  description: 'Detects bulk delete or update operations on ORM querysets that lack a visible tenant filter. Unscoped bulk operations can modify or destroy data across ALL tenants in a single request. This
+    is detection_layer 2 because bulk operations in system jobs (migrations, cleanup tasks) are intentionally unscoped — file-level context determines risk.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.65
+  cwe: CWE-915
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - bulk-operation
+  - mass-update
+  - mass-delete
+  - destructive
+  detection_layer: 2
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.query\.(?:filter|filter_by)\s*\([^)]*\)\.delete\s*\('
+    description: SQLAlchemy filtered query with .delete() — verify tenant scope in filter
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.query\.delete\s*\('
+    description: SQLAlchemy .query.delete() — unfiltered bulk delete
+  - pattern: \.objects\.(?:filter|exclude|all)\s*\([^)]*\)\.delete\s*\(
+    description: Django ORM bulk delete — verify tenant scope
+  - pattern: '[A-Z][a-zA-Z0-9_]{0,40}.query\.(?:filter|filter_by)\s*\([^)]*\)\.update\s*\('
+    description: SQLAlchemy filtered query with .update() — verify tenant scope
+  - pattern: (?:db\.session|session)\.query\s*\([^)]+\)(?:\.(?:filter|filter_by)\s*\([^)]*\))*\.delete\s*\(
+    description: SQLAlchemy session query bulk delete
+  - pattern: \.objects\.(?:filter|exclude|all)\s*\([^)]*\)\.update\s*\(
+    description: Django ORM bulk update — verify tenant scope
+  - pattern: \.delete\s*\(\s*synchronize_session\s*=
+    description: SQLAlchemy delete with synchronize_session — check tenant scope in preceding query
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - '@shared_task'
+  - class Migration
+  - alembic
+  - conftest
+  - pytest
+  - cleanup_expired
+  - purge_old_records
+  bypass_variants:
+  - variant: 'Raw SQL DELETE: db.session.execute(''DELETE FROM ...'')'
+    description: Raw SQL bypasses ORM layer entirely
+  - variant: 'Bulk delete via list comprehension: [obj.delete() for obj in objs]'
+    description: Loop-based deletion with unscoped source query
+  - variant: 'Soft delete: Model.query.filter(id=id).update({''deleted'': True})'
+    description: Soft delete still needs tenant scope
+  context_awareness:
+    surrounding_context_patterns:
+    - '@app.route'
+    - '@app.delete'
+    - def delete(
+    - def bulk_delete(
+    tenant_indicators:
+    - tenant_id=
+    - g.tenant_id
+    - current_tenant
+    sanitization_patterns:
+    - tenant_id=
+    - org_id=
+    - filter_by(tenant_id=
+    - filter(.*tenant_id
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Unscoped bulk operation destroys or modifies cross-tenant data
+  probable_taint_paths:
+  - source: request_parameter
+    sink: bulk_delete_operation
+    through: filter by user-supplied criteria → .delete()
+  - source: request_body
+    sink: bulk_update_operation
+    through: filter kwargs from request → .update(values)
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 12
+    exploitability_score: High
+  impact: 'Mass data destruction or modification across all tenants. A single unscoped bulk delete could erase every record in a table. Unscoped bulk updates could modify financial data, permissions, or
+    status fields for all tenants simultaneously.
+
+    '
+  remediation: "Always include tenant_id in bulk operation filters:\n# WRONG: Order.query.filter_by(status='cancelled').delete()\n# RIGHT: Order.query.filter_by(\n    tenant_id=g.tenant_id,\n    status='cancelled'\n\
+    ).delete()\nAdditionally, add a pre-delete/pre-update hook that validates tenant scope is present in the query's WHERE clause.\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-007
+    - LOGIC-IDOR-006
+- rule_id: LOGIC-MT-005
+  title: Loop-Nested Secondary Query Without Tenant Filter
+  description: 'Detects a secondary database query executed inside a loop body (for item in results: sub = SubModel.query.filter_by(parent_id=...)) where the inner query lacks tenant scoping. Even if the
+    outer query is tenant-scoped, the inner query may leak cross-tenant related records. This is a Layer 2 contextual rule requiring loop context.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.5
+  cwe: CWE-284
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - n-plus-one
+  - nested-query
+  - loop-leakage
+  - cross-tenant
+  detection_layer: 2
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: for\s+\w+\s+in\s+[^:]+:[\s\S]{0,200}[A-Z][a-zA-Z0-9_]{0,40}.query\.(?:filter_by|filter|get)\s*\(
+    description: SQLAlchemy query inside for-loop — check for tenant scope
+    flags:
+    - DOTALL
+  - pattern: for\s+\w+\s+in\s+[^:]+:[\s\S]{0,200}[A-Z][a-zA-Z0-9_]{0,40}.objects\.(?:filter|get|exclude)\s*\(
+    description: Django ORM query inside for-loop — check for tenant scope
+    flags:
+    - DOTALL
+  - pattern: \[\s*[^\]]*\.query\.(?:filter_by|filter|get)\s*\([^\]]*for\s+\w+\s+in
+    description: SQLAlchemy query inside list comprehension
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - '@shared_task'
+  - class Migration
+  - conftest
+  bypass_variants:
+  - variant: 'Nested query via relationship: item.comments — lazy-loaded unscoped'
+    description: SQLAlchemy lazy loading fetches related objects without tenant scope
+  - variant: 'Indirect nesting: helper function called from loop'
+    description: Query is in a helper function, obscuring the loop context
+  context_awareness:
+    surrounding_context_patterns:
+    - 'for '
+    - tenant_id
+    - org_id
+    - '@app.route'
+    tenant_indicators:
+    - g.tenant_id
+    - current_tenant
+    - tenant_id=
+    sanitization_patterns:
+    - filter_by(tenant_id=
+    - filter(.*tenant_id
+    - .tenant_scoped()
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Inner query bypasses outer query tenant scope
+  multi_function_chain_patterns:
+  - outer_query.filter_by(tenant_id=...) -> for item in results -> inner_query.filter_by(parent_id=item.id) -> cross-tenant child records
+  probable_taint_paths:
+  - source: parent_object_id
+    sink: unscoped_child_query
+    through: for loop iteration → child query without tenant_id
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 8
+    exploitability_score: Medium
+  impact: 'Cross-tenant data leakage through related object queries. Even when the primary query is correctly scoped, nested queries that fetch child or related records by parent_id (without tenant_id)
+    can return records belonging to other tenants with matching foreign keys.
+
+    '
+  remediation: "Scope all nested queries to the current tenant:\n# WRONG: for order in tenant_orders:\n    items = OrderItem.query.filter_by(order_id=order.id).all()\n\n# RIGHT: for order in tenant_orders:\n\
+    \    items = OrderItem.query.filter_by(\n        order_id=order.id,\n        tenant_id=g.tenant_id  # Redundant but defensive\n    ).all()\n\nPreferred: use eager loading with scoped relationships:\
+    \ orders = Order.query.filter_by(tenant_id=g.tenant_id).options(\n    joinedload(Order.items)\n).all()\n"
+  cross_rule_intelligence:
+    requires_ai_validation: true
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-002
+    - LOGIC-MT-003
+- rule_id: LOGIC-MT-006
+  title: List Comprehension with Unscoped Database Call
+  description: 'Detects list comprehensions or generator expressions that embed a database query call without tenant scoping. Patterns like [get_data(item.id) for item in request.json[''ids'']] are common
+    in batch API endpoints and frequently omit tenant validation.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.52
+  cwe: CWE-284
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - list-comprehension
+  - batch-fetch
+  - missing-scope
+  detection_layer: 2
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: \[\s*[A-Z][a-zA-Z0-9_]{0,40}.query\.(?:get|get_or_404|filter_by)\s*\([^\]]*for\s+\w+\s+in
+    description: List comprehension with SQLAlchemy query call
+  - pattern: \[\s*(?:db\.session|session)\.get\s*\([^\]]*for\s+\w+\s+in
+    description: List comprehension with session.get() call
+  - pattern: \{[^}]*for\s+\w+\s+in\s+[A-Z][a-zA-Z0-9_]{0,40}.query\.(?:filter|all|filter_by)\s*\(
+    description: Dict comprehension iterating unscoped query results
+  - pattern: \[\s*\w+\s+for\s+\w+\s+in\s+[A-Z][a-zA-Z0-9_]{0,40}.objects\.(?:filter|all|exclude)\s*\(
+    description: List comprehension iterating Django ORM query results
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - '@shared_task'
+  - class Migration
+  - conftest
+  context_awareness:
+    surrounding_context_patterns:
+    - request.json
+    - request.args
+    - '@app.route'
+    - def batch_
+    tenant_indicators:
+    - g.tenant_id
+    - tenant_id=
+    - current_tenant
+    sanitization_patterns:
+    - tenant_id=
+    - filter_by(tenant_id=
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Batch fetch by user-supplied IDs bypasses tenant isolation
+  probable_taint_paths:
+  - source: request_json_ids_array
+    sink: unscoped_batch_query
+    through: list comprehension iterating user-supplied IDs
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 8
+    exploitability_score: High
+  impact: 'Batch cross-tenant data access. Attacker supplies arbitrary IDs in a batch API request body to fetch objects from other tenants. List comprehension patterns bypass per-item tenant validation.
+
+    '
+  remediation: "Validate tenant ownership for batch fetches:\n# WRONG: items = [Item.query.get(id) for id in request.json['ids']]\n# RIGHT: items = Item.query.filter(\n    Item.id.in_(request.json['ids']),\n\
+    \    Item.tenant_id == g.tenant_id\n).all()\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-002
+    - LOGIC-IDOR-004
+- rule_id: LOGIC-MT-007
+  title: Export Endpoint Without Tenant Scoping — Bulk Data Exfiltration
+  description: 'Detects export, download, or bulk data retrieval endpoints that query data without explicit tenant filtering. Export endpoints are high-value targets because they return large datasets —
+    a single missing tenant filter can expose the entire table across all tenants. This is detection_layer 2 — the export context amplifies the severity of any co-occurring LOGIC-MT-001/002 findings.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.68
+  cwe: CWE-284
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - data-export
+  - bulk-exfiltration
+  - csv-export
+  - download
+  detection_layer: 2
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  requires:
+    route_decorator: true
+    database_query: true
+    framework:
+    - fastapi
+    - flask
+    - django
+    exclude_educational: true
+    not_file_paths:
+    - "*/tests/*"
+    - "*/test_*"
+    - "*/engine/*"
+    - "*/cli/*"
+    - "*/rule-tests/*"
+  patterns:
+  - pattern: '@(?:app|blueprint|bp|router|api)\.(?:route|get|post)\s*\(\s*[''"][^''"]*(?:export|download|dump|backup|bulk[_\-]?get|extract)[^''"]*[''"]'
+    description: Route decorator with export/download/dump in URL path
+  - pattern: '@(?:app|blueprint|bp|router|api)\.(?:route|get|post)\s*\([^)]*\)\s*\n\s*(?:async\s+)?def\s+\w*(?:export|download|dump|bulk_export|extract|get_all|list_all)\w*\s*\('
+    description: Route-decorated function with export/download naming
+    flags:
+    - DOTALL
+  - pattern: (?:csv\.writer|openpyxl|xlsxwriter|pandas\.DataFrame|StringIO|BytesIO)[\s\S]{0,300}\.query\.(?:all|filter|filter_by)\s*\(
+    description: CSV/Excel generation using ORM query — check tenant scope
+    flags:
+    - DOTALL
+  - pattern: (?:send_file|send_from_directory|StreamingResponse|FileResponse)[\s\S]{0,200}\.query\.
+    description: File response using query results — check tenant scope
+    flags:
+    - DOTALL
+  anti_patterns:
+  - BaseCommand
+  - celery.task
+  - '@shared_task'
+  - class Migration
+  - '@superuser_required'
+  - '@system_admin_only'
+  - conftest
+  - generate_report(self
+  - generate_chain_summary
+  - generate_intelligence_summary
+  - def _generate
+  - def generate_batch
+  - __init__(self
+  - rule_profiler
+  - developer_learning
+  bypass_variants:
+  - variant: 'Cached export: export from Redis/memcache containing all-tenant data'
+    description: Cache poisoning via unscoped warm-up query
+  - variant: 'Async export: Celery task generates export without request context'
+    description: Background job loses tenant context from original request
+  - variant: 'Paginated export: multiple pages fetched without tenant filter'
+    description: Pagination does not imply tenant scoping
+  context_awareness:
+    surrounding_context_patterns:
+    - csv
+    - export
+    - download
+    - send_file
+    - '@app.route'
+    tenant_indicators:
+    - g.tenant_id
+    - tenant_id=
+    - current_tenant
+    sanitization_patterns:
+    - filter_by(tenant_id=
+    - filter(.*tenant_id
+    - .tenant_scoped()
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Bulk export endpoint without tenant scope enables mass data exfiltration
+  multi_function_chain_patterns:
+  - '@app.get(''/export/users'') -> User.query.all() -> csv.writer.writerows() -> send_file()'
+  - def export_invoices() -> Invoice.query.filter_by(status='paid').all() -> DataFrame -> to_csv()
+  probable_taint_paths:
+  - source: export_endpoint_request
+    sink: unscoped_query_to_file_response
+    through: route handler → Model.query.all() → CSV generation → send_file()
+  - source: download_request
+    sink: unscoped_query_to_streaming_response
+    through: handler → query → StreamingResponse
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 13
+    exploitability_score: High
+  impact: 'Mass data exfiltration across all tenants via a single export request. Attacker downloads CSV/Excel/JSON containing every record in the table: customer data, financial records, PII, API keys,
+    internal documents. Impact scales linearly with number of tenants and records.
+
+    '
+  remediation: "Always scope export queries to the current tenant:\n@app.get('/export/users') @login_required def export_users():\n    # WRONG: users = User.query.all()\n    # RIGHT:\n    users = User.query.filter_by(tenant_id=g.tenant_id).all()\n\
+    \    # ... generate CSV from scoped results\n\nFor async exports, pass tenant_id explicitly to the background job: export_task.delay(tenant_id=g.tenant_id, format='csv')\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-004
+    - LOGIC-PRIV-004
+    - LOGIC-IDOR-004
+- rule_id: LOGIC-MT-008
+  title: Raw SQL Without Tenant-Scoped WHERE Clause
+  description: 'Detects raw SQL execution (db.session.execute, cursor.execute, db.engine.execute, connection.execute) with SELECT/DELETE/UPDATE statements that lack a tenant_id or org_id parameter. Raw
+    SQL bypasses ORM-level scoping abstractions and is frequently written without tenant awareness.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.6
+  cwe: CWE-284
+  owasp: A01:2021 — Broken Access Control
+  tags:
+  - multi-tenant
+  - raw-sql
+  - unscoped-query
+  - sqlalchemy
+  - psycopg2
+  detection_layer: 1
+  vulnerability_family: multi_tenant_isolation
+  attack_surface_type: api
+  patterns:
+  - pattern: (?:db\.session|session|connection|conn|cursor)\.execute\s*\(\s*(?:text\s*\(\s*)?['"]\s*(?:SELECT|DELETE|UPDATE)\s
+    description: Raw SQL execution — verify tenant_id in WHERE clause
+  - pattern: (?:db\.engine|engine)\.execute\s*\(\s*['"]\s*(?:SELECT|DELETE|UPDATE)\s
+    description: Engine-level raw SQL execution — verify tenant scope
+  - pattern: pd\.read_sql(?:_query)?\s*\(\s*['"]\s*(?:SELECT|DELETE|UPDATE)\s
+    description: Pandas read_sql with raw query — verify tenant scope
+  anti_patterns:
+  - BaseCommand
+  - management.base
+  - celery.task
+  - class Migration
+  - alembic
+  - conftest
+  - create_all
+  - drop_all
+  bypass_variants:
+  - variant: 'f-string SQL: db.session.execute(f''SELECT ... WHERE id = {id}'')'
+    description: f-string interpolation also has SQL injection risk
+  - variant: 'String concatenation: ''SELECT ... '' + where_clause'
+    description: Dynamic WHERE may or may not include tenant filter
+  - variant: 'Stored procedure: db.session.execute(text(''CALL proc(:id)''))'
+    description: Stored procedure may not enforce tenant scope internally
+  context_awareness:
+    surrounding_context_patterns:
+    - from sqlalchemy import text
+    - import psycopg2
+    - '@app.route'
+    tenant_indicators:
+    - tenant_id
+    - org_id
+    - organization_id
+    sanitization_patterns:
+    - tenant_id
+    - org_id
+    - WHERE.*tenant
+  privilege_context_flags:
+    requires_auth_context: true
+    admin_only_risk: false
+    escalation_vector: Raw SQL bypasses ORM tenant scoping abstractions
+  probable_taint_paths:
+  - source: raw_sql_string
+    sink: database_execution
+    through: db.session.execute(text(sql)) without tenant WHERE
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  severity_scoring:
+    severity_weight: 9
+    exploitability_score: High
+  impact: 'Raw SQL queries bypass all ORM-level tenant isolation. Missing tenant_id in WHERE clause returns or modifies data across all tenants. Combined with SQL injection risk from string interpolation.
+
+    '
+  remediation: "Include tenant_id in all raw SQL queries:\n# WRONG: db.session.execute(text(\"SELECT * FROM users WHERE status = :status\"),\n                   {\"status\": \"active\"})\n\n# RIGHT: db.session.execute(text(\n\
+    \    \"SELECT * FROM users WHERE tenant_id = :tid AND status = :status\"\n), {\"tid\": g.tenant_id, \"status\": \"active\"})\nPrefer ORM queries with automatic tenant scoping over raw SQL.\n"
+  cross_rule_intelligence:
+    requires_ai_validation: false
+    related_rules:
+    - LOGIC-MT-001
+    - LOGIC-MT-002
+    - LOGIC-MT-004

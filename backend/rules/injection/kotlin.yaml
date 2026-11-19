@@ -1,0 +1,352 @@
+rules:
+- rule_id: KOTLIN-INJ-002
+  title: Kotlin SQL Injection via String Template
+  description: Detects SQL queries built using Kotlin string templates with user input
+  language: kotlin
+  category: injection
+  severity: Critical
+  confidence: 95
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - sqli
+  - kotlin
+  - string-template
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: createQuery\s*\(\s*"[^"]*\$\{?\w+\}?[^"]*"\s*\)
+  - type: regex
+    pattern: rawQuery\s*\(\s*"[^"]*\$\{?\w+\}?[^"]*"\s*\)
+  - type: regex
+    pattern: execSQL\s*\(\s*"[^"]*\$\{?\w+\}?[^"]*"\s*\)
+  - type: regex
+    pattern: query\s*\(\s*"SELECT\b[^"]*\$\{?\w+
+  anti_patterns:
+  - pattern: prepareStatement
+    description: Using parameterized queries
+  - pattern: \?
+    description: Using parameter placeholders
+  impact: SQL injection can lead to data breach, data manipulation, or full database compromise
+  remediation: Use parameterized queries via Room DAO, Exposed framework, or PreparedStatement
+  exploit_scenario: Attacker provides malicious input like `' OR 1=1--` via string template to extract all records
+- rule_id: KOTLIN-INJ-003
+  title: Kotlin Command Injection
+  description: Detects OS command execution with user-controlled input in Kotlin
+  language: kotlin
+  category: injection
+  severity: Critical
+  confidence: 90
+  cwe: 78
+  owasp: A03:2021
+  tags:
+  - cmdi
+  - kotlin
+  - rce
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*"[^"]*\$\{?\w+
+  - type: regex
+    pattern: ProcessBuilder\s*\(\s*(?:listOf\s*\()?[^)]*\$\{?\w+
+  - type: regex
+    pattern: \"[^\"]*\$\{?\w+[^\"]*\"\s*\.\s*execute\s*\(
+  anti_patterns:
+  - pattern: ProcessBuilder\s*\(\s*listOf\s*\(\s*"[^$"]*"\s*\)
+    description: Hardcoded command arguments
+  impact: Remote code execution on the server
+  remediation: Use ProcessBuilder with explicit argument list, validate and sanitize all inputs
+  exploit_scenario: Attacker injects shell metacharacters via user input to execute arbitrary commands
+- rule_id: KOTLIN-INJ-004
+  title: Kotlin LDAP Injection
+  description: Detects LDAP queries built with user input in Kotlin
+  language: kotlin
+  category: injection
+  severity: High
+  confidence: 85
+  cwe: 90
+  owasp: A03:2021
+  tags:
+  - ldap
+  - kotlin
+  - injection
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: search\s*\(\s*"[^"]*\$\{?\w+[^"]*"\s*,
+  - type: regex
+    pattern: newSearchRequest\s*\(\s*"[^"]*\$\{?\w+
+  anti_patterns:
+  - pattern: Filter\.create
+    description: Using LDAP SDK filter builder
+  impact: LDAP injection can bypass authentication or leak directory information
+  remediation: Use LDAP SDK filter builders or escape special characters with LDAPFilter
+- rule_id: KOTLIN-INJ-005
+  title: Kotlin NoSQL Injection
+  description: Detects MongoDB/NoSQL queries with string interpolation
+  language: kotlin
+  category: injection
+  severity: High
+  confidence: 85
+  cwe: 943
+  owasp: A03:2021
+  tags:
+  - nosql
+  - kotlin
+  - mongodb
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: collection\.\w+\s*\(\s*"[^"]*\$\{?\w+
+  - type: regex
+    pattern: Document\.parse\s*\(\s*"[^"]*\$\{?\w+
+  - type: regex
+    pattern: BasicDBObject\s*\(\s*"[^"]*\$\{?\w+
+  anti_patterns:
+  - pattern: Filters\.\w+
+    description: Using MongoDB driver filter builders
+  impact: NoSQL injection can lead to data exfiltration or authentication bypass
+  remediation: Use MongoDB Kotlin driver filter builders like Filters.eq(), Filters.and()
+- rule_id: KOTLIN-INJ-006
+  title: Kotlin XSS via Template Response
+  description: Detects reflected user input in Kotlin web responses without encoding
+  language: kotlin
+  category: injection
+  severity: High
+  confidence: 80
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - xss
+  - kotlin
+  - ktor
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: call\.respondText\s*\(\s*"[^"]*\$\{?\w*[Pp]aram
+  - type: regex
+    pattern: call\.respondHtml\s*\{[^}]*\$\{?\w*[Ii]nput
+  - type: regex
+    pattern: respondText\s*\([^)]*\+\s*\w*(?:param|input|query)
+  anti_patterns:
+  - pattern: escapeHtml
+    description: HTML encoding applied
+  - pattern: ContentType\.Application\.Json
+    description: JSON response type
+  impact: Cross-site scripting can steal session tokens or deface the application
+  remediation: Use HTML encoding libraries or Ktor's templating engines with auto-escaping
+- rule_id: KOTLIN-INJ-007
+  title: Kotlin Exposed Framework Raw SQL
+  description: Detects raw SQL usage in Kotlin Exposed framework
+  language: kotlin
+  category: injection
+  severity: High
+  confidence: 85
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - sqli
+  - kotlin
+  - exposed
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: TransactionManager\.current\(\)\.exec\s*\(\s*"[^"]*\$\{?\w+
+  - type: regex
+    pattern: exec\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\$\{?\w+
+  anti_patterns:
+  - pattern: Table\.select
+    description: Using Exposed DSL
+  impact: SQL injection via raw queries in Exposed framework bypasses the ORM's safety
+  remediation: Use Exposed's type-safe DSL (Table.select, Table.insert) instead of raw SQL
+- rule_id: KOTLIN-INJ-008
+  title: Kotlin Ktor Path Parameter Injection
+  description: Detects unsafe use of Ktor route parameters in database queries or command execution
+  language: kotlin
+  category: injection
+  severity: High
+  confidence: 80
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - sqli
+  - kotlin
+  - ktor
+  - path-traversal
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: call\.parameters\["[^"]*"\]\s*(?:\?\.)?\s*(?:let|also|run)\s*\{[^}]*(?:exec|query|rawQuery)
+  - type: regex
+    pattern: val\s+\w+\s*=\s*call\.parameters\["[^"]*"\][^;\n]*\n[^;\n]*(?:query|exec)\s*\(
+  anti_patterns:
+  - pattern: toIntOrNull
+    description: Type-safe parameter parsing
+  - pattern: prepareStatement
+    description: Using parameterized queries
+  impact: Route parameters used directly in queries enable injection attacks
+  remediation: Validate and type-convert path parameters, use parameterized queries
+- rule_id: KOTLIN-AUTH-001
+  title: Kotlin Hardcoded Credentials
+  description: Detects hardcoded passwords, API keys, or tokens in Kotlin source code
+  language: kotlin
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 798
+  owasp: A07:2021
+  tags:
+  - hardcoded-creds
+  - kotlin
+  - secrets
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: val\s+\w*(?:password|passwd|secret|apiKey|api_key|token)\w*\s*=\s*"[^"]{8,}"
+  - type: regex
+    pattern: const\s+val\s+\w*(?:PASSWORD|SECRET|API_KEY|TOKEN)\w*\s*=\s*"[^"]{8,}"
+  anti_patterns:
+  - pattern: System\.getenv
+    description: Reading from environment
+  - pattern: BuildConfig\.
+    description: Using build configuration
+  - pattern: '""'
+    description: Empty string placeholder
+  impact: Hardcoded credentials in source code can be extracted from compiled applications
+  remediation: Use environment variables, Android Keystore, or secure vault systems
+- rule_id: KOTLIN-AUTH-002
+  title: Kotlin Insecure JWT Validation
+  description: Detects JWT validation without proper signature verification in Kotlin
+  language: kotlin
+  category: auth
+  severity: Critical
+  confidence: 85
+  cwe: 347
+  owasp: A02:2021
+  tags:
+  - jwt
+  - kotlin
+  - auth-bypass
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: JWT\.decode\s*\([^)]*\)\s*(?!\.verify)
+  - type: regex
+    pattern: Jwts\.parser\s*\(\s*\)\s*\.parse\s*\(
+  - type: regex
+    pattern: setSigningKey\s*\(\s*"[^"]{1,20}"\s*\)
+  anti_patterns:
+  - pattern: setSigningKey\s*\(\s*\w+Key
+    description: Using key object
+  impact: Insecure JWT validation allows attackers to forge authentication tokens
+  remediation: Always verify JWT signatures with strong keys, validate claims (exp, iss, aud)
+- rule_id: KOTLIN-CRYPTO-001
+  title: Kotlin Weak Cryptography
+  description: Detects use of weak or broken cryptographic algorithms in Kotlin
+  language: kotlin
+  category: crypto
+  severity: High
+  confidence: 90
+  cwe: 327
+  owasp: A02:2021
+  tags:
+  - crypto
+  - kotlin
+  - weak-algorithm
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: getInstance\s*\(\s*"(?:MD5|SHA-?1|DES|RC[24]|Blowfish)"\s*\)
+  - type: regex
+    pattern: MessageDigest\.getInstance\s*\(\s*"(?:MD5|SHA-?1)"\s*\)
+  - type: regex
+    pattern: SecretKeySpec\s*\([^,]*,\s*"(?:DES|RC[24]|Blowfish)"\s*\)
+  anti_patterns:
+  - pattern: SHA-256|SHA-384|SHA-512|AES
+    description: Using strong algorithms
+  impact: Weak cryptographic algorithms can be broken, compromising data confidentiality
+  remediation: Use AES-256-GCM for encryption, SHA-256+ for hashing, and Argon2 for passwords
+- rule_id: KOTLIN-DESER-001
+  title: Kotlin Unsafe Deserialization
+  description: Detects unsafe deserialization of untrusted data in Kotlin
+  language: kotlin
+  category: deserialization
+  severity: Critical
+  confidence: 85
+  cwe: 502
+  owasp: A08:2021
+  tags:
+  - deserialization
+  - kotlin
+  - rce
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: ObjectInputStream\s*\(\s*\w+\s*\)\s*\.\s*readObject\s*\(
+  - type: regex
+    pattern: Json\.decodeFromString\s*<\s*Any\s*>
+  - type: regex
+    pattern: Gson\s*\(\s*\)\s*\.fromJson\s*\([^,]*,\s*Object::class
+  anti_patterns:
+  - pattern: ObjectInputFilter
+    description: Using deserialization filter
+  - pattern: kotlinx\.serialization
+    description: Using safe Kotlin serialization
+  impact: Unsafe deserialization can lead to remote code execution
+  remediation: Use kotlinx.serialization with specific types, implement ObjectInputFilter
+- rule_id: KOTLIN-SSRF-001
+  title: Kotlin Server-Side Request Forgery
+  description: Detects SSRF vulnerabilities in Kotlin HTTP client calls
+  language: kotlin
+  category: ssrf
+  severity: High
+  confidence: 80
+  cwe: 918
+  owasp: A10:2021
+  tags:
+  - ssrf
+  - kotlin
+  - http-client
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: HttpClient\s*\([^)]*\)\s*\.\w+\s*\(\s*"[^"]*\$\{?\w+
+  - type: regex
+    pattern: URL\s*\(\s*"[^"]*\$\{?\w+[^"]*"\s*\)\s*\.\s*openConnection
+  - type: regex
+    pattern: Fuel\.get\s*\(\s*"[^"]*\$\{?\w+
+  - type: regex
+    pattern: OkHttpClient\s*\([^)]*\)[^.]*\.newCall\s*\(\s*Request\.Builder\s*\(\s*\)\s*\.url\s*\(\s*\w+\s*\)
+  anti_patterns:
+  - pattern: allowedHosts|whitelist|isAllowed
+    description: URL validation present
+  impact: SSRF allows attackers to make requests to internal services or cloud metadata endpoints
+  remediation: Validate and whitelist allowed URLs/hosts, block internal IP ranges
+- rule_id: KOTLIN-PT-001
+  title: Kotlin Path Traversal
+  description: Detects path traversal vulnerabilities in Kotlin file operations
+  language: kotlin
+  category: path_traversal
+  severity: High
+  confidence: 85
+  cwe: 22
+  owasp: A01:2021
+  tags:
+  - path-traversal
+  - kotlin
+  - lfi
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: File\s*\(\s*"[^"]*\$\{?\w*(?:path|file|name|dir)\w*
+  - type: regex
+    pattern: Paths\.get\s*\(\s*\w*(?:path|file|name|dir)\w*\s*\)
+  - type: regex
+    pattern: FileInputStream\s*\(\s*\w*(?:path|file|name)\w*\s*\)
+  anti_patterns:
+  - pattern: canonicalPath|normalize|resolve
+    description: Path normalization applied
+  - pattern: startsWith\s*\(
+    description: Path prefix validation
+  impact: Path traversal allows reading or writing arbitrary files on the server
+  remediation: Canonicalize paths and verify they start with the expected base directory

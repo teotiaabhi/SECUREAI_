@@ -1,0 +1,598 @@
+# ============================================================================
+# Remote Code Execution Detection Rules - Go
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: RCE (CWE-78, CWE-94, CWE-502)
+# Language: Go (net/http, Gin, Echo, Chi)
+# ============================================================================
+
+rules:
+
+  - rule_id: "RCE-GO-001"
+    title: "Command Injection via os/exec"
+    description: >
+      Detects remote code execution via os/exec.Command where user-controlled
+      input is passed to shell interpreters or as command arguments without
+      validation. Covers exec.Command, exec.CommandContext, and shell wrapping.
+    language: go
+    category: rce
+    severity: Critical
+    confidence: 0.93
+    cwe: "CWE-78"
+    owasp: "A03:2021-Injection"
+    tags: [rce, command-injection, os-exec, go, shell]
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - pattern: 'exec\.Command\s*\(\s*"(?:sh|bash|cmd|powershell|/bin/sh|/bin/bash)"[^)]*"-c"[^)]*(?:r\.|c\.|ctx\.|request|param|input|user|fmt\.Sprintf)'
+        description: "Shell command with user-controlled argument via -c flag"
+      - pattern: 'exec\.Command\s*\(\s*(?:r\.|c\.|ctx\.|request|param|input|user|cmd|command)\b'
+        description: "User-controlled command name"
+      - pattern: 'exec\.Command\s*\(\s*fmt\.Sprintf\s*\('
+        description: "Command constructed with fmt.Sprintf"
+      - pattern: 'exec\.CommandContext\s*\([^,]*,\s*"(?:sh|bash)"[^)]*(?:r\.|c\.|ctx\.|param|input)'
+        description: "CommandContext with shell and user input"
+      - pattern: 'syscall\.Exec\s*\(\s*(?:r\.|c\.|ctx\.|param|input|user|cmd|path)\b'
+        description: "syscall.Exec with user-controlled path"
+      - pattern: 'os\.StartProcess\s*\(\s*(?:r\.|c\.|ctx\.|param|input|user|path)\b'
+        description: "os.StartProcess with user-controlled path"
+    anti_patterns:
+      - "filepath.Clean("
+      - "filepath.Base("
+      - "regexp.MustCompile"
+      - "allowedCommands["
+      - "validCommands["
+      - "shellescape.Quote"
+    bypass_variants:
+      - description: "Command injection via backticks in bash"
+        pattern: '`[^`]*`'
+      - description: "Piped commands"
+        pattern: '\|.*\w+'
+    evasion_indicators: ["Shell metacharacters", "Command substitution", "Argument injection"]
+    encoding_variants:
+      - type: "shell_metachar"
+        pattern: ';|&&|\|\||`|\$\('
+    multi_function_chain_patterns:
+      - "r.FormValue('cmd') -> exec.Command('sh', '-c', cmd) -> .Output()"
+      - "c.Param('host') -> exec.Command('ping', host) -> .Run()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Full RCE on server"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.FormValue(), c.Param(), c.Query()"
+        sink: "exec.Command(), syscall.Exec()"
+        through: "Direct or Sprintf-constructed command"
+    impact: |
+      Remote code execution enabling complete server compromise, data
+      exfiltration, ransomware deployment, and lateral movement.
+    remediation: |
+      Avoid shell invocation. Pass arguments separately:
+        exec.Command("ping", "-c", "4", validatedHost) // SAFE
+        exec.Command("sh", "-c", userInput) // UNSAFE
+      Use Go stdlib functions instead of shell commands when possible.
+    references:
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://pkg.go.dev/os/exec"
+    context_awareness:
+      surrounding_context_patterns: ['import "os/exec"', 'exec.Command(', 'syscall.Exec(']
+      taint_source_indicators: ['r.FormValue(', 'c.Param(', 'c.Query(', 'r.URL.Query()']
+      taint_sink_indicators: ['exec.Command(', '.Run()', '.Output()', '.CombinedOutput()']
+      sanitization_patterns: ['filepath.Clean(', 'regexp.MustCompile(', 'allowedCommands[']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * exploitability"
+      exploitability_score: 9.8
+      base_risk: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Handler runs exec.Command("sh", "-c", "ping " + r.FormValue("host")).
+        Attacker sends host=8.8.8.8;cat /etc/passwd for arbitrary command execution.
+      example_payload: "8.8.8.8; cat /etc/shadow"
+      attacker_objective: "Achieve RCE to fully compromise the server"
+    confidence_factors:
+      pattern_strength: "critical"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "critical"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "simple"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["RCE-GO-002", "RCE-GO-004"]
+
+  - rule_id: "RCE-GO-002"
+    title: "Dynamic Plugin Loading from User Input"
+    description: >
+      Detects plugin.Open with user-controlled paths enabling loading of
+      arbitrary shared objects for code execution. Covers path traversal
+      to malicious plugins and user-controlled symbol lookup.
+    language: go
+    category: rce
+    severity: High
+    confidence: 0.88
+    cwe: "CWE-94"
+    owasp: "A03:2021-Injection"
+    tags: [rce, plugin-loading, code-injection, go]
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - pattern: 'plugin\.Open\s*\(\s*(?:r\.|c\.|ctx\.|request|param|input|user|path|file)\b'
+        description: "plugin.Open with user-controlled path"
+      - pattern: 'plugin\.Open\s*\(\s*fmt\.Sprintf'
+        description: "plugin.Open with Sprintf-constructed path"
+      - pattern: 'plugin\.Open\s*\(\s*(?:filepath\.Join|path\.Join)\s*\([^)]*(?:r\.|c\.|param|input|user)'
+        description: "Plugin path built from user input segments"
+      - pattern: '\.Lookup\s*\(\s*(?:r\.|c\.|ctx\.|param|input|user|name|funcName)\b'
+        description: "Plugin symbol lookup with user-controlled name"
+    anti_patterns:
+      - "filepath.Clean("
+      - "filepath.Base("
+      - "allowedPlugins["
+      - "pluginMap["
+      - "allowlist"
+    bypass_variants:
+      - description: "Path traversal to load malicious .so"
+        pattern: '\.\./.*\.so'
+    evasion_indicators: ["Path traversal in plugin path", "Symlink following"]
+    encoding_variants:
+      - type: "path_traversal"
+        pattern: '%2e%2e%2f'
+    multi_function_chain_patterns:
+      - "c.Param('plugin') -> filepath.Join(dir, name + '.so') -> plugin.Open()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: true
+      escalation_vector: "Arbitrary code execution via malicious shared object"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "c.Param(), r.FormValue()"
+        sink: "plugin.Open()"
+        through: "User-controlled path or path segment"
+    impact: |
+      Loading a malicious plugin achieves full arbitrary code execution
+      in the application process with all its privileges and access.
+    remediation: |
+      Use strict allowlist for plugin names:
+        allowed := map[string]string{"auth": "/opt/plugins/auth.so"}
+        path, ok := allowed[input]
+        if !ok { return errors.New("unknown plugin") }
+        p, _ := plugin.Open(path)
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://pkg.go.dev/plugin"
+    context_awareness:
+      surrounding_context_patterns: ['import "plugin"', 'plugin.Open(']
+      taint_source_indicators: ['r.FormValue(', 'c.Param(', 'os.Getenv(']
+      taint_sink_indicators: ['plugin.Open(', '.Lookup(']
+      sanitization_patterns: ['filepath.Clean(', 'filepath.Base(', 'allowedPlugins[']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * plugin_exposure"
+      exploitability_score: 8.0
+      base_risk: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Admin panel loads plugins via plugin.Open(filepath.Join(dir, input + ".so")).
+        Attacker sends input=../../../tmp/evil to load crafted .so with init() backdoor.
+      example_payload: "../../../tmp/malicious"
+      attacker_objective: "Load malicious shared object for persistent RCE"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["RCE-GO-001", "RCE-GO-003"]
+
+  - rule_id: "RCE-GO-003"
+    title: "Unsafe Deserialization via encoding/gob"
+    description: >
+      Detects unsafe deserialization of user-controlled data via encoding/gob,
+      encoding/json with interface{} targets, or custom unmarshalers that
+      may instantiate arbitrary types.
+    language: go
+    category: rce
+    severity: High
+    confidence: 0.82
+    cwe: "CWE-502"
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags: [rce, deserialization, gob, json, go]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: 'gob\.NewDecoder\s*\(\s*(?:r\.Body|req\.Body|body|reader|conn)\b'
+        description: "gob.NewDecoder from user-controlled reader"
+      - pattern: 'gob\.Register\s*\([^)]*\)[^;]*gob\.NewDecoder\s*\(\s*(?:r\.Body|conn)'
+        description: "gob with registered types decoding user input"
+      - pattern: 'json\.NewDecoder\s*\(\s*r\.Body\s*\)\s*\.Decode\s*\(\s*&?\s*(?:interface\{\}|map\[string\]interface\{\})'
+        description: "JSON decode into interface{} from request body"
+      - pattern: 'yaml\.NewDecoder\s*\(\s*(?:r\.Body|body|reader)\b'
+        description: "YAML decode from user-controlled source"
+    anti_patterns:
+      - "json.Unmarshal.*struct"
+      - "typed struct"
+      - "validate"
+      - "KnownFields(true)"
+    bypass_variants:
+      - description: "Polymorphic deserialization via interface"
+        pattern: 'interface\{\}'
+    evasion_indicators: ["Gob deserialization of network data", "Interface{} unmarshaling"]
+    encoding_variants:
+      - type: "gob_binary"
+        pattern: 'gob\.NewDecoder'
+    multi_function_chain_patterns:
+      - "r.Body -> gob.NewDecoder(r.Body) -> Decode(&obj)"
+      - "conn.Read() -> gob.NewDecoder(conn) -> Decode(&cmd)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Type confusion leading to code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.Body, net.Conn"
+        sink: "gob.Decoder.Decode(), json.Decoder.Decode()"
+        through: "Direct deserialization of untrusted data"
+    impact: |
+      Unsafe deserialization can lead to arbitrary type instantiation,
+      method invocation on deserialized objects, and potential RCE if
+      custom UnmarshalBinary/UnmarshalJSON implementations have side effects.
+    remediation: |
+      Decode into strongly-typed structs, not interface{}:
+        var user UserRequest // typed struct
+        json.NewDecoder(r.Body).Decode(&user)
+      Avoid gob for untrusted network data. Validate size limits.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://pkg.go.dev/encoding/gob"
+    context_awareness:
+      surrounding_context_patterns: ['import "encoding/gob"', 'gob.NewDecoder(', 'gob.Register(']
+      taint_source_indicators: ['r.Body', 'net.Conn', 'io.Reader']
+      taint_sink_indicators: ['gob.Decoder.Decode(', 'json.Decoder.Decode(']
+      sanitization_patterns: ['typed struct', 'validate', 'io.LimitReader']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * type_flexibility"
+      exploitability_score: 6.5
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        RPC service uses gob for message passing: gob.NewDecoder(conn).Decode(&msg).
+        Attacker sends crafted gob data with registered type that triggers
+        code execution in its Decode method.
+      example_payload: "Crafted gob payload with malicious type data"
+      attacker_objective: "Achieve code execution via deserialization"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "medium"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["RCE-GO-001", "RCE-GO-002"]
+
+  - rule_id: "RCE-GO-004"
+    title: "Template Engine RCE via text/template"
+    description: >
+      Detects code execution through Go's text/template engine when user
+      input is parsed as template source, enabling arbitrary method calls
+      on template context objects.
+    language: go
+    category: rce
+    severity: High
+    confidence: 0.87
+    cwe: "CWE-94"
+    owasp: "A03:2021-Injection"
+    tags: [rce, template-injection, ssti, text-template, go]
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - pattern: 'template\.New\s*\([^)]*\)\.Parse\s*\(\s*(?:r\.|c\.|request|param|input|user|body|data)\b'
+        description: "template.Parse with user-controlled string"
+      - pattern: 'template\.Must\s*\(\s*template\.New\s*\([^)]*\)\.Parse\s*\(\s*(?:r\.|c\.|param|input|user)\b'
+        description: "template.Must with user-controlled template"
+      - pattern: 'template\.New\s*\([^)]*\)\.Funcs\s*\([^)]*\)\.Parse\s*\(\s*(?:r\.|c\.|param|input|user|body)\b'
+        description: "Template with custom FuncMap parsing user input"
+      - pattern: '"text/template"'
+        description: "text/template import (lacks auto-escaping)"
+    anti_patterns:
+      - '"html/template"'
+      - "ParseFiles"
+      - "ParseGlob"
+      - "ParseFS"
+      - "embed.FS"
+    bypass_variants:
+      - description: "Method call via template action"
+        pattern: '\{\{.*\.Method\b'
+    evasion_indicators: ["User input as template source", "Custom FuncMap with os/exec"]
+    encoding_variants:
+      - type: "template_action"
+        pattern: '\{\{.*\}\}'
+    multi_function_chain_patterns:
+      - "r.FormValue('tpl') -> template.New('x').Parse(tpl) -> Execute(w, context)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary method invocation via template actions"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.FormValue(), c.Param()"
+        sink: "template.Parse(), template.Execute()"
+        through: "User input as template source string"
+    impact: |
+      Template injection in text/template enables calling any exported
+      method on objects in the template context, information disclosure
+      via field access, and XSS when used for web output.
+    remediation: |
+      Never parse user input as template source:
+        // UNSAFE: User input as template
+        template.New("x").Parse(userInput)
+        // SAFE: Pre-defined templates with user data
+        tmpl.Execute(w, map[string]string{"name": userInput})
+      Use html/template for web output.
+    references:
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://pkg.go.dev/text/template"
+    context_awareness:
+      surrounding_context_patterns: ['import "text/template"', 'template.New(', '.Parse(']
+      taint_source_indicators: ['r.FormValue(', 'c.Param(', 'io.ReadAll(']
+      taint_sink_indicators: ['.Parse(', '.Execute(']
+      sanitization_patterns: ['html/template', 'ParseFiles', 'ParseGlob']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * context_richness"
+      exploitability_score: 7.5
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        Email template allows customization: template.New("e").Parse(userInput).
+        Attacker injects {{.Config.DatabasePassword}} to extract secrets from context.
+      example_payload: '{{printf "%s" .SecretKey}}'
+      attacker_objective: "Extract secrets or call methods via template injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["RCE-GO-001", "RCE-GO-005"]
+
+  - rule_id: "RCE-GO-005"
+    title: "Cgo Unsafe Memory Operations"
+    description: >
+      Detects unsafe Cgo operations where user-controlled data is passed
+      to C functions without bounds checking, enabling buffer overflows,
+      format string attacks, and arbitrary code execution.
+    language: go
+    category: rce
+    severity: Critical
+    confidence: 0.80
+    cwe: "CWE-120"
+    owasp: "A03:2021-Injection"
+    tags: [rce, cgo, buffer-overflow, unsafe, go, memory-corruption]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: 'C\.(?:CString|GoString|GoBytes)\s*\([^)]*(?:r\.|c\.|param|input|user|data)\b'
+        description: "C.CString/GoString with user-controlled data"
+      - pattern: 'C\.\w+\s*\(\s*C\.CString\s*\(\s*(?:r\.|c\.|param|input|user)\b'
+        description: "C function call with CString of user input"
+      - pattern: 'unsafe\.Pointer\s*\(\s*(?:r\.|c\.|param|input|user|data)\b'
+        description: "unsafe.Pointer from user-controlled data"
+      - pattern: 'C\.(?:sprintf|printf|system|exec)\s*\([^)]*(?:r\.|c\.|param|input|user)'
+        description: "Dangerous C function with user input"
+    anti_patterns:
+      - "C.free("
+      - "defer C.free"
+      - "len(input) <"
+      - "bounds check"
+      - "MaxSize"
+    bypass_variants:
+      - description: "Format string via C.sprintf"
+        pattern: 'C\.sprintf.*%s'
+      - description: "Buffer overflow via unchecked length"
+        pattern: 'C\.memcpy.*len'
+    evasion_indicators: ["Cgo with unchecked user input", "Missing bounds validation"]
+    encoding_variants:
+      - type: "c_string"
+        pattern: 'C\.CString'
+    multi_function_chain_patterns:
+      - "r.FormValue('data') -> C.CString(data) -> C.process(cstr)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Buffer overflow leading to arbitrary code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "r.FormValue(), r.Body"
+        sink: "C.CString(), C function calls"
+        through: "Cgo bridge without bounds checking"
+    impact: |
+      Cgo vulnerabilities enable buffer overflows, format string attacks,
+      and memory corruption leading to arbitrary code execution with the
+      privileges of the Go process.
+    remediation: |
+      Validate input length before Cgo calls. Use defer C.free:
+        input := r.FormValue("data")
+        if len(input) > MaxSize { return errors.New("too large") }
+        cstr := C.CString(input)
+        defer C.free(unsafe.Pointer(cstr))
+      Avoid C.sprintf; use C.snprintf with bounds.
+    references:
+      - "https://cwe.mitre.org/data/definitions/120.html"
+      - "https://pkg.go.dev/cmd/cgo"
+    context_awareness:
+      surrounding_context_patterns: ['import "C"', 'C.CString(', 'unsafe.Pointer(']
+      taint_source_indicators: ['r.FormValue(', 'r.Body', 'c.Param(']
+      taint_sink_indicators: ['C.CString(', 'C.sprintf(', 'C.system(']
+      sanitization_patterns: ['len(input) <', 'bounds check', 'C.free(', 'defer C.free']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * cgo_exposure"
+      exploitability_score: 7.0
+      base_risk: "Critical"
+    exploit_scenario:
+      attack_example: |
+        Go HTTP handler passes user input to C library via C.CString without
+        length validation. Attacker sends oversized input causing buffer overflow
+        in the C function, overwriting return address for code execution.
+      example_payload: '"A" * 4096 + shellcode'
+      attacker_objective: "Exploit buffer overflow for arbitrary code execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "complex"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["RCE-GO-001", "RCE-GO-003"]
+
+  - rule_id: "RCE-GO-006"
+    title: "Reflect-based Dynamic Method Invocation"
+    description: >
+      Detects reflection-based method dispatch where user-controlled input
+      determines which method to invoke via reflect.ValueOf().MethodByName(),
+      enabling invocation of unintended internal methods.
+    language: go
+    category: rce
+    severity: High
+    confidence: 0.83
+    cwe: "CWE-470"
+    owasp: "A03:2021-Injection"
+    tags: [rce, reflection, dynamic-dispatch, method-invocation, go]
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - pattern: 'reflect\.ValueOf\s*\([^)]*\)\.MethodByName\s*\(\s*(?:r\.|c\.|param|input|user|action|method)\b'
+        description: "Reflect method dispatch with user-controlled method name"
+      - pattern: '\.MethodByName\s*\(\s*(?:c\.|ctx\.|chi\.|gin\.)'
+        description: "MethodByName with framework context value"
+      - pattern: 'reflect\.ValueOf\s*\([^)]*\)\.(?:Call|Method)\s*\([^)]*(?:r\.|c\.|param|input|user)'
+        description: "Reflect Call/Method with user-controlled index"
+      - pattern: 'reflect\.MakeFunc\s*\([^)]*(?:r\.|c\.|param|input|user)'
+        description: "reflect.MakeFunc with user-controlled type"
+    anti_patterns:
+      - "allowedMethods["
+      - "validMethods["
+      - "methodMap["
+      - 'switch method {'
+      - 'switch action {'
+    bypass_variants:
+      - description: "Invoking unexported-wrapper method"
+        pattern: '\.MethodByName\s*\(\s*"[A-Z]'
+    evasion_indicators: ["User-controlled method name in reflection", "Dynamic dispatch without allowlist"]
+    encoding_variants:
+      - type: "method_name"
+        pattern: 'MethodByName\s*\(\s*\w+'
+    multi_function_chain_patterns:
+      - "c.Query('action') -> reflect.ValueOf(svc).MethodByName(action).Call(nil)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Invoke admin-only methods via reflection bypass"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "c.Query(), c.Param()"
+        sink: "reflect.ValueOf().MethodByName().Call()"
+        through: "User-controlled method name string"
+    impact: |
+      Reflection-based dispatch allows invoking any exported method on the
+      target object, bypassing authorization checks, accessing admin
+      functions, and potentially executing destructive operations.
+    remediation: |
+      Use explicit dispatch maps instead of reflection:
+        handlers := map[string]func() error{
+            "list": svc.List, "create": svc.Create,
+        }
+        h, ok := handlers[input]
+        if !ok { return errors.New("unknown action") }
+        return h()
+    references:
+      - "https://cwe.mitre.org/data/definitions/470.html"
+      - "https://pkg.go.dev/reflect"
+    context_awareness:
+      surrounding_context_patterns: ['import "reflect"', 'reflect.ValueOf(', '.MethodByName(']
+      taint_source_indicators: ['c.Query(', 'c.Param(', 'r.FormValue(']
+      taint_sink_indicators: ['.MethodByName(', '.Call(', 'reflect.MakeFunc(']
+      sanitization_patterns: ['allowedMethods[', 'methodMap[', 'switch action {']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * method_exposure"
+      exploitability_score: 7.0
+      base_risk: "High"
+    exploit_scenario:
+      attack_example: |
+        API dispatcher uses reflect.ValueOf(svc).MethodByName(c.Query("action")).Call(nil).
+        Attacker sends action=DeleteAllUsers to invoke destructive method
+        bypassing intended API route authorization.
+      example_payload: "DeleteAllData"
+      attacker_objective: "Invoke privileged methods bypassing authorization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: ["RCE-GO-001", "RCE-GO-002"]

@@ -1,0 +1,129 @@
+# SecureAI Code Analyzer — Prometheus Alerting Rules
+# Deploy as a PrometheusRule CR or include in prometheus.rules files.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: secureai-alerts
+  labels:
+    app.kubernetes.io/name: secureai-analyzer
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: secureai.rules
+      interval: 30s
+      rules:
+        # ── High Error Rate ─────────────────────────────────────
+        - alert: SecureAIHighErrorRate
+          expr: |
+            (
+              rate(secureai_scans_completed_total{status="failed"}[5m])
+              / rate(secureai_scans_completed_total[5m])
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "High scan failure rate (> 5%)"
+            description: >-
+              More than 5% of scans have failed in the last 5 minutes.
+              Current error rate: {{ $value | humanizePercentage }}.
+
+        # ── High Memory Usage ───────────────────────────────────
+        - alert: SecureAIHighMemoryUsage
+          expr: secureai_memory_usage_percent > 90
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Memory usage above 90%"
+            description: >-
+              System memory usage has been above 90% for 5 minutes.
+              Current: {{ $value }}%.
+
+        # ── Queue Backlog ───────────────────────────────────────
+        - alert: SecureAIQueueBacklog
+          expr: secureai_queued_scans > 50
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Scan queue backlog exceeds 50"
+            description: >-
+              {{ $value }} scans have been queued for more than 10 minutes.
+              Consider scaling up workers.
+
+        # ── Worker Down ─────────────────────────────────────────
+        - alert: SecureAIWorkerDown
+          expr: secureai_worker_heartbeat_age_seconds > 120
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Worker heartbeat missing"
+            description: >-
+              Worker {{ $labels.worker_id }} has not sent a heartbeat
+              in {{ $value | humanizeDuration }}. It may be crashed or
+              stuck.
+
+        # ── Scan Duration High ──────────────────────────────────
+        - alert: SecureAIScanDurationHigh
+          expr: |
+            histogram_quantile(0.95,
+              rate(secureai_scan_duration_seconds_bucket[10m])
+            ) > 300
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "P95 scan duration exceeds 5 minutes"
+            description: >-
+              The 95th percentile scan duration has been above 300s
+              for 10 minutes. Current P95: {{ $value | humanizeDuration }}.
+
+        # ── Dead-Letter Queue Growing ───────────────────────────
+        - alert: SecureAIDLQGrowing
+          expr: secureai_dlq_size > 10
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Dead-letter queue has accumulated failed tasks"
+            description: >-
+              {{ $value }} tasks are in the dead-letter queue.
+              Investigate recurring scan failures.
+
+        # ── Critical Memory ─────────────────────────────────────
+        - alert: SecureAICriticalMemory
+          expr: secureai_memory_usage_percent > 95
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Memory usage critically high (> 95%)"
+            description: >-
+              System memory is at {{ $value }}%. OOM kill is imminent.
+              Restart or scale immediately.
+
+        # ── No Scans Processing ─────────────────────────────────
+        - alert: SecureAINoScansProcessing
+          expr: |
+            secureai_queued_scans > 0
+            and secureai_active_scans == 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Scans queued but none processing"
+            description: >-
+              There are {{ $value }} scans in the queue but no active
+              scans. Workers may be stuck or crashed.

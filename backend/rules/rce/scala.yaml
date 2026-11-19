@@ -1,0 +1,400 @@
+rules:
+- rule_id: SCALA-DESER-001
+  title: Unsafe Java Deserialization
+  description: 'Detects unsafe Java/Scala deserialization of untrusted data.
+
+    '
+  language: scala
+  category: deserialization
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - deserialization
+  - rce
+  patterns:
+  - type: regex
+    pattern: ObjectInputStream\s*\(\s*(?:request|input|socket|stream|new\s+ByteArrayInputStream)\b
+  - type: regex
+    pattern: \.readObject\s*\(\s*\)\s*\.asInstanceOf
+  - type: regex
+    pattern: (?:XMLDecoder|ObjectInput).*(?:request|param|input|user|body)\b
+  - type: regex
+    pattern: SerializationUtils\.deserialize\s*\(
+  anti_patterns:
+  - ObjectInputFilter
+  - ClassFilter
+  - AllowList
+  - lookAheadObjectInputStream
+  impact: 'Deserialization of untrusted data can lead to remote code execution
+
+    via gadget chains in the classpath.
+
+    '
+  remediation: "Use JSON or Protocol Buffers instead of Java serialization.\nIf Java serialization is required, use ObjectInputFilter:\n  val filter = ObjectInputFilter.Config.createFilter(\"com.myapp.*;!*\"\
+    )\n"
+- rule_id: SCALA-DESER-002
+  title: Unsafe Pickle/Kryo Deserialization
+  description: 'Detects unsafe deserialization using Kryo or other Scala serializers.
+
+    '
+  language: scala
+  category: deserialization
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - deserialization
+  - kryo
+  patterns:
+  - type: regex
+    pattern: kryo\.readObject\s*\(\s*(?:input|request|socket|stream)\b
+  - type: regex
+    pattern: kryo\.(?:readClassAndObject|readObjectOrNull)\s*\(
+  - type: regex
+    pattern: (?:setRegistrationRequired|setWarnUnregisteredClasses)\s*\(\s*false
+  anti_patterns:
+  - setRegistrationRequired(true)
+  - register(
+  impact: 'Unsafe Kryo deserialization can lead to remote code execution.
+
+    '
+  remediation: "Enable registration requirement in Kryo:\n  kryo.setRegistrationRequired(true)\n  kryo.register(classOf[MyClass])\n"
+- rule_id: SCALA-RCE-001
+  title: Scala Script Engine Code Execution
+  description: 'Detects dynamic code execution via ScriptEngine or code compilation.
+
+    '
+  language: scala
+  category: rce
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - code-execution
+  - script-engine
+  patterns:
+  - type: regex
+    pattern: ScriptEngineManager\s*\(\s*\)\.getEngineByName.*\.eval\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: (?:eval|evaluate)\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: ToolBox.*compile\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: reflect\.runtime\.universe.*eval\s*\(
+  anti_patterns:
+  - sandbox
+  - SecurityManager
+  - allowlist
+  impact: 'Dynamic code execution from user input leads to full RCE.
+
+    '
+  remediation: 'Never compile or evaluate user-supplied code. Use sandboxed execution if needed.
+
+    '
+- rule_id: SCALA-RCE-002
+  title: Unsafe Reflection
+  description: 'Detects unsafe reflection with user-controlled class names.
+
+    '
+  language: scala
+  category: rce
+  severity: High
+  confidence: 0.85
+  cwe: CWE-470
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - reflection
+  - class-loading
+  patterns:
+  - type: regex
+    pattern: Class\.forName\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: (?:classLoader|ClassLoader)\.loadClass\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: reflect\.runtime\.universe.*(?:typeOf|classSymbol)\s*\(\s*(?:request|param|input|user)\b
+  anti_patterns:
+  - allowlist
+  - whitelist
+  - ALLOWED_CLASSES
+  impact: 'Unsafe reflection can instantiate arbitrary classes leading to RCE.
+
+    '
+  remediation: 'Use an allowlist of permitted class names. Never pass user input to Class.forName.
+
+    '
+- rule_id: SCALA-SSRF-001
+  title: Server-Side Request Forgery
+  description: 'Detects HTTP requests made with user-controlled URLs.
+
+    '
+  language: scala
+  category: ssrf
+  severity: High
+  confidence: 0.85
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  detection_layer: 1
+  tags:
+  - ssrf
+  - http-request
+  patterns:
+  - type: regex
+    pattern: (?:ws|wsClient|Http|http)\.(?:url|get|post|put|delete)\s*\(\s*(?:request|param|input|user|s")\b
+  - type: regex
+    pattern: (?:Source\.fromURL|URL)\s*\(\s*(?:request|param|input|user|s")\b
+  - type: regex
+    pattern: sttp\.client.*\.(?:get|post|put|delete)\s*\(\s*uri"[^"]*\$\{?(?:request|param|input|user)\b
+  - type: regex
+    pattern: (?:Akka|akka).*Http.*\.(?:singleRequest|outgoingConnection)\s*\(
+  anti_patterns:
+  - allowedHosts
+  - whitelist
+  - isInternalUrl
+  - validateUrl
+  impact: 'SSRF can access internal services, cloud metadata endpoints (169.254.169.254),
+
+    and sensitive internal resources.
+
+    '
+  remediation: 'Validate URLs against an allowlist of permitted domains.
+
+    Block access to internal IP ranges and metadata endpoints.
+
+    '
+- rule_id: SCALA-SSRF-002
+  title: Unvalidated Redirect to Internal Service
+  description: 'Detects proxy or redirect patterns that could access internal services.
+
+    '
+  language: scala
+  category: ssrf
+  severity: High
+  confidence: 0.8
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  detection_layer: 2
+  tags:
+  - ssrf
+  - internal-redirect
+  patterns:
+  - type: regex
+    pattern: (?:proxy|forward|fetch|relay).*(?:url|uri|endpoint|target)\s*=\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: (?:ws|client)\.url\s*\(\s*s"\$\{?(?:host|server|endpoint|baseUrl)
+  anti_patterns:
+  - localhost
+  - 127.0.0.1
+  - allowedDomains
+  impact: Server-side request forgery enables access to internal resources and cloud metadata
+  remediation: Validate and allowlist URLs, block private IP ranges and cloud metadata endpoints
+- rule_id: SCALA-PATH-001
+  title: Path Traversal
+  description: 'Detects file access with user-controlled paths.
+
+    '
+  language: scala
+  category: path_traversal
+  severity: High
+  confidence: 0.88
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - path-traversal
+  - file-access
+  patterns:
+  - type: regex
+    pattern: (?:new\s+File|Paths\.get|Path\.of)\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: Source\.fromFile\s*\(\s*(?:request|param|input|user|s")\b
+  - type: regex
+    pattern: (?:FileInputStream|FileReader|FileOutputStream)\s*\(\s*(?:request|param|input|user|s")\b
+  - type: regex
+    pattern: (?:serveSingle|serveFile|sendFile|getFile)\s*\(\s*(?:request|param|input|user)\b
+  anti_patterns:
+  - normalize
+  - canonical
+  - startsWith
+  - resolve
+  - toRealPath
+  impact: 'Path traversal allows reading or writing arbitrary files including /etc/passwd.
+
+    '
+  remediation: "Canonicalize paths and verify they stay within the intended directory:\n  val basePath = Paths.get(\"/safe/dir\").toRealPath()\n  val target = basePath.resolve(userInput).normalize()\n \
+    \ require(target.startsWith(basePath))\n"
+- rule_id: SCALA-PATH-002
+  title: Zip Slip Vulnerability
+  description: 'Detects unsafe ZIP extraction that doesn''t validate entry paths.
+
+    '
+  language: scala
+  category: path_traversal
+  severity: High
+  confidence: 0.85
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - zip-slip
+  - archive-extraction
+  patterns:
+  - type: regex
+    pattern: ZipInputStream.*(?:getNextEntry|entries).*(?:getName|name).*(?:File|Path|write)
+  - type: regex
+    pattern: new\s+File\s*\(\s*(?:destDir|outputDir|extractDir)\s*,\s*(?:entry|zipEntry)\.getName
+  anti_patterns:
+  - startsWith
+  - canonical
+  - normalize
+  - validate
+  impact: Path traversal enables reading or writing arbitrary files on the server
+  remediation: Canonicalize paths and verify they remain within expected base directories
+- rule_id: SCALA-XSS-001
+  title: Cross-Site Scripting via Raw HTML
+  description: 'Detects XSS via unescaped HTML output in Play Framework.
+
+    '
+  language: scala
+  category: xss
+  severity: High
+  confidence: 0.88
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - html-injection
+  patterns:
+  - type: regex
+    pattern: Html\s*\(\s*(?:request|param|input|user)\b
+  - type: regex
+    pattern: '@Html\s*\(\s*(?:request|param|input|user)\b'
+  - type: regex
+    pattern: (?:Ok|BadRequest|InternalServerError)\s*\(\s*(?:request|param|input|user)\b.*\.as\s*\(\s*"text/html"
+  anti_patterns:
+  - HtmlFormat.escape
+  - Html(escaped
+  - sanitize
+  - StringEscapeUtils
+  impact: 'XSS allows attackers to execute JavaScript in users'' browsers.
+
+    '
+  remediation: "Use Play's built-in HTML escaping or sanitize user input:\n  @(content: String)\n  @Html(HtmlFormat.escape(content).body)\n"
+- rule_id: SCALA-XSS-002
+  title: Reflected XSS in Response
+  description: 'Detects direct inclusion of request parameters in HTML responses.
+
+    '
+  language: scala
+  category: xss
+  severity: High
+  confidence: 0.82
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - reflected
+  patterns:
+  - type: regex
+    pattern: Ok\s*\(\s*s"<[^>]*\$\{?(?:request|param|input)\b
+  - type: regex
+    pattern: Ok\s*\(\s*"<.*"\s*\+\s*(?:request|param|input)\b
+  anti_patterns:
+  - escape
+  - sanitize
+  - encode
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: SCALA-SEC-001
+  title: Hardcoded Secret in Application Config
+  description: 'Detects hardcoded secrets in Scala application configuration.
+
+    '
+  language: scala
+  category: secrets
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - secrets
+  - config
+  patterns:
+  - type: regex
+    pattern: play\.http\.secret\.key\s*=\s*"(?!changeme)[^"]{4,}"
+  - type: regex
+    pattern: application\.secret\s*=\s*"[^"]{4,}"
+  - type: regex
+    pattern: (?:db\.default\.password|slick\.dbs\.\w+\.db\.password)\s*=\s*"[^"]{2,}"
+  anti_patterns:
+  - ${?}
+  - ${ENV
+  - changeme
+  - placeholder
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: SCALA-FW-001
+  title: Play Framework Debug Mode in Production
+  description: 'Detects debug/development settings that should not be in production.
+
+    '
+  language: scala
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.9
+  cwe: CWE-489
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - debug-mode
+  - play-framework
+  patterns:
+  - type: regex
+    pattern: play\.http\.errorHandler\s*=\s*"play\.api\.http\.DevServerErrorHandler"
+  - type: regex
+    pattern: play\.logger\.includeConfigProperties\s*=\s*true
+  - type: regex
+    pattern: jvm\.debug\s*=\s*true
+  anti_patterns:
+  - application.dev.conf
+  - test.conf
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: SCALA-FW-002
+  title: Akka Remote Without Authentication
+  description: 'Detects Akka remoting configuration without authentication.
+
+    '
+  language: scala
+  category: framework_misuse
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-306
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 2
+  tags:
+  - akka
+  - remote
+  - authentication
+  patterns:
+  - type: regex
+    pattern: akka\.remote\.(?:artery|netty).*enabled\s*=\s*on
+  - type: regex
+    pattern: akka\.remote\.transport\s*=\s*"akka\.remote\.netty
+  anti_patterns:
+  - require-mutual-authentication
+  - tls
+  - ssl
+  - mutual-auth
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

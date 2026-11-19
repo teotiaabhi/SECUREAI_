@@ -1,0 +1,1669 @@
+rules:
+  - rule_id: "CRYPTO-PHP-001"
+    title: "md5/sha1 Used for Password Hashing"
+    description: >
+      Detects usage of PHP's md5() and sha1() functions for password hashing or security-sensitive
+      operations. PHP's built-in md5() and sha1() functions return fast, unsalted hashes that
+      are trivially crackable. PHP provides password_hash() with bcrypt/argon2 specifically
+      for password storage. Despite being deprecated for security use, md5() and sha1() remain
+      extremely common in legacy PHP applications and WordPress plugins.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-328
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-hash
+      - md5
+      - sha1
+      - password-hashing
+      - php
+    detection_layer: 1
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'md5\s*\(\s*\$(?:pass(?:word)?|passwd|secret|token|key|pin)'
+        description: "md5() applied to password/secret variable"
+      - type: regex
+        pattern: 'sha1\s*\(\s*\$(?:pass(?:word)?|passwd|secret|token|key|pin)'
+        description: "sha1() applied to password/secret variable"
+      - type: regex
+        pattern: 'md5\s*\(\s*\$_(?:POST|GET|REQUEST)\s*\[\s*[''"](?:pass(?:word)?|passwd|secret)[''"]'
+        description: "md5() on user-supplied password from superglobal"
+      - type: regex
+        pattern: 'sha1\s*\(\s*\$_(?:POST|GET|REQUEST)\s*\[\s*[''"](?:pass(?:word)?|passwd|secret)[''"]'
+        description: "sha1() on user-supplied password from superglobal"
+      - type: regex
+        pattern: 'hash\s*\(\s*[''"](?:md5|sha1)[''"]'
+        description: "hash() function with weak algorithm parameter"
+      - type: regex
+        pattern: 'hash_hmac\s*\(\s*[''"](?:md5|sha1)[''"]'
+        description: "hash_hmac() with weak hash algorithm"
+      - type: regex
+        pattern: 'crypt\s*\(\s*\$(?:pass(?:word)?|passwd)\s*,\s*[''"][^$]'
+        description: "crypt() with non-bcrypt salt (DES/MD5 crypt)"
+      - type: regex
+        pattern: '(?:WHERE|where)[\s\S]{0,80}(?:md5|sha1)\s*\(\s*\$'
+        description: "md5/sha1 hash comparison in SQL query"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'checksum'
+      - 'etag'
+      - 'cache_key'
+      - 'file.*integrity'
+      - 'legacy'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'password_hash'
+    bypass_variants:
+      - description: "Hash function name stored in variable"
+        pattern: '\$(?:algo|hash_func|method)\s*=\s*[''"](?:md5|sha1)[''"][\s\S]{0,100}\$\w+\s*\(\s*\$'
+      - description: "Double hashing to obscure weak algorithm"
+        pattern: 'md5\s*\(\s*md5\s*\(\s*\$'
+      - description: "Hash algorithm called via variable function"
+        pattern: '\$(?:hash_function|algo)\s*\(\s*\$(?:pass|password|secret)'
+    evasion_indicators:
+      - "Hash function name stored in variable"
+      - "Multiple iterations of weak hash (e.g., md5(md5()))"
+      - "Variable function call hiding hash algorithm"
+      - "Hash function wrapped in utility class method"
+    encoding_variants:
+      - type: "call_user_func"
+        pattern: 'call_user_func\s*\(\s*[''"](?:md5|sha1)[''"]'
+      - type: "variable_function"
+        pattern: '\$func\s*=\s*[''"](?:md5|sha1)[''"][\s\S]{0,50}\$func\s*\('
+      - type: "hash_function"
+        pattern: 'hash\s*\(\s*[''"]md5[''"][\s\S]{0,50}password'
+    multi_function_chain_patterns:
+      - "md5(password) -> SQL INSERT for user registration"
+      - "sha1(salt . password) -> database comparison for login"
+      - "hash_hmac('md5', token, secret) -> session validation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "MD5/SHA1 password hashes are crackable in seconds, enabling mass account takeover"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "$_POST['password']"
+        sink: "database_insert"
+        through: "md5(password)"
+      - source: "$_REQUEST['token']"
+        sink: "session_comparison"
+        through: "sha1(token)"
+      - source: "user_input"
+        sink: "cookie_value"
+        through: "md5(secret.input)"
+    impact: |
+      Using md5/sha1 for password hashing in PHP applications is critically dangerous:
+      - MD5 hashes crackable at 25+ billion/sec on modern GPUs
+      - SHA1 hashes crackable at 10+ billion/sec on modern GPUs
+      - Rainbow tables for common passwords are freely available
+      - No salt protection means identical passwords produce identical hashes
+      - WordPress and legacy PHP applications frequently contain this vulnerability
+      - Violates OWASP password storage guidelines, PCI-DSS, HIPAA
+    remediation: |
+      Use password_hash() with PASSWORD_ARGON2ID or PASSWORD_BCRYPT:
+
+      ```php
+      // VULNERABLE: MD5 password hashing
+      $hash = md5($password);
+      $sql = "INSERT INTO users (password) VALUES ('$hash')";
+
+      // SECURE: password_hash with Argon2id (PHP 7.3+)
+      $hash = password_hash($password, PASSWORD_ARGON2ID, [
+          'memory_cost' => 65536,
+          'time_cost' => 4,
+          'threads' => 3,
+      ]);
+
+      // SECURE: password_hash with bcrypt
+      $hash = password_hash($password, PASSWORD_BCRYPT, [
+          'cost' => 12,
+      ]);
+
+      // SECURE: Verify password
+      if (password_verify($password, $storedHash)) {
+          // Password is correct
+          // Check if rehash is needed
+          if (password_needs_rehash($storedHash, PASSWORD_ARGON2ID)) {
+              $newHash = password_hash($password, PASSWORD_ARGON2ID);
+              // Update hash in database
+          }
+      }
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/328.html"
+      - "https://www.php.net/manual/en/function.password-hash.php"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+      - "https://php.watch/articles/php-password-hashing"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'password'
+        - 'login'
+        - 'authenticate'
+        - 'register'
+        - 'token'
+        - 'session'
+        - 'verify'
+      taint_source_indicators:
+        - '$_POST'
+        - '$_GET'
+        - '$_REQUEST'
+        - '$_COOKIE'
+        - 'file_get_contents'
+      taint_sink_indicators:
+        - 'mysql_query'
+        - 'mysqli_query'
+        - '$pdo->prepare'
+        - '$stmt->execute'
+        - 'setcookie'
+      sanitization_patterns:
+        - 'password_hash'
+        - 'password_verify'
+        - 'PASSWORD_BCRYPT'
+        - 'PASSWORD_ARGON2'
+        - 'sodium_crypto_pwhash'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + password_volume_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits MD5 password hashing in a PHP e-commerce application:
+        1. Attacker exploits SQL injection to dump the users table
+        2. Password column contains unsalted MD5 hashes
+        3. Using hashcat with rockyou.txt, attacker cracks 85% of passwords in minutes
+        4. Attacker logs in as admin using recovered credentials
+        5. Attacker modifies payment processing to redirect funds
+        6. Credential stuffing against other services with recovered passwords
+      example_payload: "$hash = md5($_POST['password']); $db->query(\"SELECT * FROM users WHERE password='$hash'\");"
+      attacker_objective: "Crack MD5/SHA1 password hashes to recover plaintext credentials for mass account takeover"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-002"
+        - "CRYPTO-PHP-003"
+        - "CRYPTO-PHP-006"
+
+  - rule_id: "CRYPTO-PHP-002"
+    title: "mcrypt Weak Cipher Usage"
+    description: >
+      Detects usage of PHP's deprecated mcrypt extension with weak cipher algorithms. The
+      mcrypt extension was deprecated in PHP 7.1 and removed in PHP 7.2. It supports many
+      weak algorithms including DES, 3DES, RC2, RC4, and Blowfish. Even when used with AES
+      (Rijndael), mcrypt's API encourages insecure patterns such as ECB mode and zero-padding.
+      Applications still using mcrypt are running outdated PHP versions with unpatched
+      security vulnerabilities.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-cipher
+      - mcrypt
+      - deprecated
+      - des
+      - php
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'mcrypt_encrypt\s*\('
+        description: "mcrypt_encrypt function call (deprecated)"
+      - type: regex
+        pattern: 'mcrypt_decrypt\s*\('
+        description: "mcrypt_decrypt function call (deprecated)"
+      - type: regex
+        pattern: 'mcrypt_module_open\s*\('
+        description: "mcrypt_module_open function call (deprecated)"
+      - type: regex
+        pattern: 'MCRYPT_(?:DES|3DES|TRIPLEDES|RC2|RC4|BLOWFISH|CAST_128|CAST_256)'
+        description: "mcrypt weak algorithm constant"
+      - type: regex
+        pattern: 'MCRYPT_MODE_ECB'
+        description: "mcrypt ECB mode constant"
+      - type: regex
+        pattern: 'mcrypt_create_iv\s*\([^,]*,\s*MCRYPT_RAND\s*\)'
+        description: "mcrypt IV created with non-cryptographic MCRYPT_RAND"
+      - type: regex
+        pattern: 'MCRYPT_RIJNDAEL_(?:128|192|256)[\s\S]{0,100}MCRYPT_MODE_ECB'
+        description: "AES via mcrypt in ECB mode"
+      - type: regex
+        pattern: 'mcrypt_(?:generic|generic_init|cbc|cfb|ecb|ofb)\s*\('
+        description: "Other mcrypt function calls"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'migration'
+      - 'legacy.*wrapper'
+      - 'decrypt.*only'
+      - 'backward.*compat'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - '@deprecated'
+      - 'openssl_encrypt'
+    bypass_variants:
+      - description: "mcrypt function called via variable"
+        pattern: '\$func\s*=\s*[''"]mcrypt_encrypt[''"][\s\S]{0,50}\$func\s*\('
+      - description: "mcrypt wrapped in compatibility class"
+        pattern: 'class\s+\w*[Cc]rypt\w*[\s\S]{0,500}mcrypt_'
+      - description: "call_user_func for mcrypt functions"
+        pattern: 'call_user_func\s*\(\s*[''"]mcrypt_'
+    evasion_indicators:
+      - "mcrypt functions called via variable function names"
+      - "Wrapper class abstracting mcrypt API"
+      - "call_user_func or call_user_func_array for mcrypt"
+      - "mcrypt loaded conditionally via extension_loaded check"
+    encoding_variants:
+      - type: "constant_variable"
+        pattern: '\$algo\s*=\s*MCRYPT_(?:DES|BLOWFISH|RC4)'
+      - type: "string_algorithm"
+        pattern: 'mcrypt_encrypt\s*\(\s*[''"](?:des|blowfish|rc4|3des)[''"]'
+      - type: "mode_variable"
+        pattern: '\$mode\s*=\s*[''"]ecb[''"]'
+    multi_function_chain_patterns:
+      - "mcrypt_module_open -> mcrypt_generic_init -> mcrypt_generic"
+      - "mcrypt_create_iv(MCRYPT_RAND) -> mcrypt_encrypt(MCRYPT_DES)"
+      - "mcrypt_encrypt(MCRYPT_RIJNDAEL_128, key, data, MCRYPT_MODE_ECB)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "mcrypt with weak algorithms and ECB mode enables brute-force key recovery and pattern analysis of encrypted data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data"
+        sink: "encrypted_storage"
+        through: "mcrypt_encrypt(MCRYPT_DES)"
+      - source: "sensitive_field"
+        sink: "database_column"
+        through: "mcrypt_encrypt(ECB)"
+      - source: "api_payload"
+        sink: "encrypted_response"
+        through: "mcrypt_encrypt(MCRYPT_BLOWFISH)"
+    impact: |
+      mcrypt usage creates multiple security vulnerabilities:
+      - Deprecated since PHP 7.1, removed in 7.2 (running on unsupported PHP)
+      - DES brute-forceable in hours; 3DES vulnerable to Sweet32
+      - RC4 has known keystream biases enabling plaintext recovery
+      - ECB mode leaks patterns in plaintext
+      - MCRYPT_RAND uses non-cryptographic random for IVs
+      - mcrypt zero-pads data instead of using PKCS#7 padding
+      - Applications using mcrypt likely have other unpatched vulnerabilities
+    remediation: |
+      Migrate from mcrypt to openssl_encrypt or sodium:
+
+      ```php
+      // VULNERABLE: mcrypt with DES
+      $encrypted = mcrypt_encrypt(
+          MCRYPT_DES, $key, $data, MCRYPT_MODE_ECB
+      );
+
+      // SECURE: openssl_encrypt with AES-256-GCM
+      $key = random_bytes(32); // 256-bit key
+      $iv = random_bytes(openssl_cipher_iv_length('aes-256-gcm'));
+      $encrypted = openssl_encrypt(
+          $data, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag
+      );
+      // Store: $iv . $tag . $encrypted
+
+      // SECURE: Sodium (libsodium) authenticated encryption
+      $key = sodium_crypto_secretbox_keygen();
+      $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+      $encrypted = sodium_crypto_secretbox($data, $nonce, $key);
+      // Store: $nonce . $encrypted
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://www.php.net/manual/en/migration71.deprecated.php"
+      - "https://www.php.net/manual/en/function.openssl-encrypt.php"
+      - "https://paragonie.com/blog/2015/05/if-you-re-typing-word-mcrypt-into-your-code-you-re-doing-it-wrong"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'mcrypt'
+        - 'encrypt'
+        - 'decrypt'
+        - 'MCRYPT_'
+        - 'cipher'
+        - 'secret'
+      taint_source_indicators:
+        - '$_POST'
+        - '$_GET'
+        - '$_REQUEST'
+        - 'file_get_contents'
+      taint_sink_indicators:
+        - 'mysql_query'
+        - 'file_put_contents'
+        - 'echo'
+        - 'print'
+        - '$stmt'
+      sanitization_patterns:
+        - 'openssl_encrypt'
+        - 'sodium_crypto_secretbox'
+        - 'aes-256-gcm'
+        - 'sodium_crypto_aead'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + deprecation_risk_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a PHP application using mcrypt with DES:
+        1. Application uses mcrypt_encrypt(MCRYPT_DES, key, data, MCRYPT_MODE_ECB)
+        2. Attacker intercepts encrypted API tokens from network traffic
+        3. DES 56-bit key brute-forced using FPGA in under 24 hours
+        4. ECB mode allows pattern analysis even before full key recovery
+        5. Attacker decrypts all tokens and extracts user session data
+        6. Since PHP version supports mcrypt, it likely has other CVEs to exploit
+      example_payload: "mcrypt_encrypt(MCRYPT_DES, $key, $sensitive_data, MCRYPT_MODE_ECB)"
+      attacker_objective: "Exploit deprecated mcrypt with weak algorithms to decrypt protected data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-001"
+        - "CRYPTO-PHP-003"
+        - "CRYPTO-PHP-005"
+        - "CRYPTO-PHP-006"
+
+  - rule_id: "CRYPTO-PHP-003"
+    title: "Hardcoded Encryption Keys in PHP Code"
+    description: >
+      Detects hardcoded cryptographic keys, secrets, and passwords embedded in PHP source code.
+      PHP applications frequently contain hardcoded keys in configuration files, class constants,
+      and define() statements. These are extractable through source code access, version
+      control leaks, LFI vulnerabilities, and PHP source disclosure bugs. PHP's interpreted
+      nature means keys exist as plaintext strings in source files, and misconfigured servers
+      may serve .php files as plaintext.
+    language: php
+    category: crypto
+    severity: Critical
+    confidence: 0.88
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - hardcoded-key
+      - secret-management
+      - credential-exposure
+      - php
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'define\s*\(\s*[''"](?:ENCRYPTION_KEY|SECRET_KEY|AES_KEY|CIPHER_KEY|HMAC_KEY|APP_KEY)[''"][\s]*,[\s]*[''"][^''"]{16,}[''"]'
+        description: "define() with crypto-related constant name and hardcoded value"
+      - type: regex
+        pattern: '(?:encryption_key|secret_key|aes_key|cipher_key)\s*[''"]?\s*(?:=>|=)\s*[''"][A-Za-z0-9+/=]{16,}[''"]'
+        description: "Array key or variable with crypto name and hardcoded value"
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[^,]+,\s*[''"][^''"]{16,}[''"]'
+        description: "Hardcoded key in openssl_encrypt third parameter"
+      - type: regex
+        pattern: 'openssl_decrypt\s*\([^,]+,\s*[^,]+,\s*[''"][^''"]{16,}[''"]'
+        description: "Hardcoded key in openssl_decrypt third parameter"
+      - type: regex
+        pattern: 'const\s+(?:ENCRYPTION_KEY|SECRET_KEY|AES_KEY|CIPHER_KEY)\s*=\s*[''"][^''"]{16,}[''"]'
+        description: "Class constant with crypto name and hardcoded value"
+      - type: regex
+        pattern: 'private\s+(?:static\s+)?\$\w*(?:key|secret|password)\w*\s*=\s*[''"][^''"]{16,}[''"]'
+        description: "Private property with crypto-related name and hardcoded value"
+      - type: regex
+        pattern: 'hash_hmac\s*\(\s*[^,]+,\s*[^,]+,\s*[''"][^''"]{16,}[''"]'
+        description: "Hardcoded HMAC key in hash_hmac"
+      - type: regex
+        pattern: 'sodium_crypto_secretbox\s*\([^,]+,\s*[^,]+,\s*[''"][^''"]{16,}[''"]'
+        description: "Hardcoded key in sodium_crypto_secretbox"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'getenv\s*\('
+      - '\$_ENV'
+      - '\$_SERVER'
+      - 'vault'
+      - 'aws.*kms'
+      - 'CHANGEME'
+      - 'placeholder'
+      - 'TODO.*replace'
+      - 'example'
+      - 'env\s*\('
+    bypass_variants:
+      - description: "Key loaded from config with hardcoded fallback"
+        pattern: '(?:getenv|env)\s*\(\s*[^)]+\)\s*(?:\?\?|:\s*)\s*[''"][^''"]{16,}[''"]'
+      - description: "Key split across concatenated strings"
+        pattern: '(?:key|secret)\s*=\s*[''"][^''"]+[''"][\s]*\.[\s]*[''"][^''"]+[''"]'
+      - description: "Key base64-decoded from hardcoded string"
+        pattern: 'base64_decode\s*\(\s*[''"][A-Za-z0-9+/=]{16,}[''"]'
+    evasion_indicators:
+      - "Key embedded in config.php included at runtime"
+      - "Key split across string concatenations"
+      - "Key base64-encoded in source and decoded before use"
+      - "Key stored in separate constants file"
+    encoding_variants:
+      - type: "base64_encoded"
+        pattern: 'base64_decode\s*\(\s*[''"][A-Za-z0-9+/=]{20,}[''"]'
+      - type: "hex_encoded"
+        pattern: 'hex2bin\s*\(\s*[''"][0-9a-fA-F]{32,}[''"]'
+      - type: "packed_binary"
+        pattern: 'pack\s*\(\s*[''"]H\*[''"][\s]*,[\s]*[''"][0-9a-fA-F]{32,}[''"]'
+    multi_function_chain_patterns:
+      - "define(KEY, 'hardcoded') -> openssl_encrypt(data, algo, KEY)"
+      - "const SECRET = 'literal' -> hash_hmac('sha256', data, self::SECRET)"
+      - "private $key = 'hardcoded' -> $this->encrypt($data)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Hardcoded PHP keys are exposed through source code leaks, LFI vulnerabilities, and server misconfigurations serving PHP as text"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "define_constant"
+        sink: "openssl_encrypt_key"
+        through: "constant_reference"
+      - source: "class_constant"
+        sink: "hash_hmac_key"
+        through: "self_reference"
+      - source: "property_literal"
+        sink: "encryption_operation"
+        through: "this_reference"
+    impact: |
+      Hardcoded keys in PHP are exceptionally dangerous due to PHP's characteristics:
+      - PHP source is plaintext on the server, accessible via LFI or server misconfiguration
+      - .php.bak, .php~, .php.swp files may contain keys and be served as plaintext
+      - Version control (.git) directories exposed on web servers leak source code
+      - Shared hosting environments may expose source to other tenants
+      - Key rotation requires code changes across all deployment targets
+      - Violates PCI-DSS 3.5, NIST SP 800-57, SOC2 CC6.1
+    remediation: |
+      Use environment variables or secrets management:
+
+      ```php
+      // VULNERABLE: Hardcoded key
+      define('ENCRYPTION_KEY', 'my-secret-key-1234567890abcdef');
+      $encrypted = openssl_encrypt($data, 'aes-256-gcm', ENCRYPTION_KEY);
+
+      // SECURE: Load from environment variable
+      $key = getenv('ENCRYPTION_KEY');
+      if ($key === false || strlen($key) !== 64) {
+          throw new RuntimeException('Invalid encryption key');
+      }
+      $key = hex2bin($key);
+
+      // SECURE: Use .env file (not committed to VCS)
+      $key = $_ENV['ENCRYPTION_KEY'] ?? null;
+
+      // SECURE: Use AWS KMS
+      $kmsClient = new KmsClient([...]);
+      $result = $kmsClient->decrypt([
+          'CiphertextBlob' => $encryptedKey,
+      ]);
+      $key = $result['Plaintext'];
+
+      // SECURE: Use HashiCorp Vault
+      $vault = new VaultClient($vaultAddr, $vaultToken);
+      $secret = $vault->read('secret/data/encryption');
+      $key = hex2bin($secret['data']['data']['key']);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/798.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+      - "https://www.php.net/manual/en/function.getenv.php"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'encrypt'
+        - 'decrypt'
+        - 'openssl_'
+        - 'sodium_'
+        - 'hash_hmac'
+        - 'cipher'
+        - 'token'
+      taint_source_indicators:
+        - 'define\('
+        - 'const\s+'
+        - 'private.*\$'
+        - 'protected.*\$'
+      taint_sink_indicators:
+        - 'openssl_encrypt'
+        - 'openssl_decrypt'
+        - 'hash_hmac'
+        - 'sodium_crypto'
+        - 'mcrypt_encrypt'
+      sanitization_patterns:
+        - 'getenv'
+        - '$_ENV'
+        - 'env\('
+        - 'vault'
+        - 'kms'
+        - 'random_bytes'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + exposure_surface_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits hardcoded keys in a PHP Laravel application:
+        1. Attacker discovers exposed .env file or .git directory on the web server
+        2. APP_KEY contains a hardcoded base64 key used for encryption and session signing
+        3. Attacker crafts malicious serialized objects encrypted with the extracted key
+        4. Deserialization of the crafted payload achieves remote code execution
+        5. This is the classic Laravel APP_KEY exploitation (CVE-2018-15133)
+      example_payload: "define('APP_KEY', 'base64:dGhpc2lzYXNlY3JldGtleWZvcmVuY3J5cHRpb24=');"
+      attacker_objective: "Extract hardcoded encryption keys to decrypt data, forge tokens, or achieve RCE via deserialization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-002"
+        - "CRYPTO-PHP-004"
+        - "CRYPTO-PHP-005"
+
+  - rule_id: "CRYPTO-PHP-004"
+    title: "rand()/mt_rand() Used for Security Token Generation"
+    description: >
+      Detects usage of PHP's rand(), mt_rand(), array_rand(), or shuffle() for generating
+      security-sensitive values. mt_rand() uses the Mersenne Twister PRNG which is not
+      cryptographically secure and its state can be recovered from 624 consecutive outputs.
+      rand() may use an even weaker LCG on some platforms. PHP 7+ provides random_bytes()
+      and random_int() which use the OS CSPRNG, and PHP 8.3 adds the Random\Randomizer class.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.90
+    cwe: CWE-338
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-random
+      - mersenne-twister
+      - prng
+      - token-generation
+      - php
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '(?:rand|mt_rand)\s*\([^)]*\)[\s\S]{0,80}(?:token|secret|key|password|nonce|salt|session|csrf|otp|pin)'
+        description: "rand/mt_rand near security-sensitive variable names"
+      - type: regex
+        pattern: '(?:token|secret|key|password|nonce|salt|session|csrf|otp|pin)[\s\S]{0,80}(?:rand|mt_rand)\s*\('
+        description: "Security-sensitive variable assigned using rand/mt_rand"
+      - type: regex
+        pattern: 'mt_rand\s*\(\s*\)[\s\S]{0,50}(?:base_convert|dechex|bin2hex|sprintf.*x)'
+        description: "mt_rand converted to hex string for token generation"
+      - type: regex
+        pattern: 'for\s*\([^)]*\)\s*\{[\s\S]{0,100}(?:rand|mt_rand)\s*\([^)]*\)[\s\S]{0,100}(?:token|key|password|secret)'
+        description: "Loop building security token from rand/mt_rand"
+      - type: regex
+        pattern: 'str_shuffle\s*\([^)]*\)[\s\S]{0,80}(?:password|token|key|secret)'
+        description: "str_shuffle for password/token generation (not crypto-safe)"
+      - type: regex
+        pattern: 'array_rand\s*\([^)]*\)[\s\S]{0,80}(?:password|token|key|secret)'
+        description: "array_rand for security-sensitive random selection"
+      - type: regex
+        pattern: 'uniqid\s*\([^)]*\)[\s\S]{0,80}(?:token|session|csrf|secret)'
+        description: "uniqid() for security tokens (time-based, predictable)"
+      - type: regex
+        pattern: 'substr\s*\(\s*md5\s*\(\s*(?:rand|mt_rand|uniqid)\s*\('
+        description: "MD5 of random/uniqid for token generation"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'display'
+      - 'color'
+      - 'position'
+      - 'delay'
+      - 'jitter'
+      - 'game'
+      - 'shuffle.*display'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'random_bytes'
+    bypass_variants:
+      - description: "mt_rand aliased or wrapped in function"
+        pattern: 'function\s+\w*rand\w*\s*\([^)]*\)\s*\{[\s\S]{0,100}mt_rand'
+      - description: "Multiple mt_rand calls combined for 'more randomness'"
+        pattern: 'mt_rand\s*\([^)]*\)\s*\.\s*mt_rand\s*\('
+      - description: "Seed set from time and used for tokens"
+        pattern: 'mt_srand\s*\(\s*(?:time|microtime|hrtime)\s*\([^)]*\)\s*\)'
+    evasion_indicators:
+      - "mt_rand wrapped in utility function"
+      - "Multiple weak random sources combined"
+      - "Seed set from predictable time value"
+      - "uniqid combined with mt_rand for 'uniqueness'"
+    encoding_variants:
+      - type: "combined_sources"
+        pattern: 'md5\s*\(\s*uniqid\s*\(\s*mt_rand\s*\('
+      - type: "string_building"
+        pattern: 'chr\s*\(\s*(?:rand|mt_rand)\s*\('
+      - type: "base_convert"
+        pattern: 'base_convert\s*\(\s*(?:rand|mt_rand)\s*\('
+    multi_function_chain_patterns:
+      - "mt_rand in loop -> chr() -> concatenated token string"
+      - "md5(uniqid(mt_rand(), true)) -> session token"
+      - "substr(str_shuffle(chars), 0, length) -> password"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Predictable mt_rand output enables token prediction for session hijacking and CSRF bypass"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "mt_rand()"
+        sink: "session_token"
+        through: "hex_conversion"
+      - source: "rand()"
+        sink: "password_reset_link"
+        through: "md5_hash"
+      - source: "uniqid()"
+        sink: "csrf_token"
+        through: "concatenation"
+    impact: |
+      Using rand/mt_rand for security tokens in PHP is exploitable:
+      - mt_rand Mersenne Twister state recoverable from 624 outputs
+      - After state recovery, all future outputs are predictable
+      - rand() on some platforms uses a 32-bit LCG (even weaker)
+      - uniqid() is time-based and trivially predictable
+      - Password reset tokens become guessable (account takeover)
+      - CSRF tokens become predictable (protection bypass)
+      - Session tokens can be predicted (session hijacking)
+    remediation: |
+      Use random_bytes() and random_int() for secure randomness:
+
+      ```php
+      // VULNERABLE: mt_rand for token generation
+      $token = md5(uniqid(mt_rand(), true));
+
+      // SECURE: random_bytes for tokens (PHP 7+)
+      $token = bin2hex(random_bytes(32));
+
+      // SECURE: random_int for OTP (PHP 7+)
+      $otp = random_int(100000, 999999);
+
+      // SECURE: Secure random string generation
+      function generateSecureToken(int $length = 32): string {
+          return bin2hex(random_bytes($length));
+      }
+
+      // SECURE: Secure random from character set
+      function secureRandomString(int $length, string $chars): string {
+          $result = '';
+          $maxIndex = strlen($chars) - 1;
+          for ($i = 0; $i < $length; $i++) {
+              $result .= $chars[random_int(0, $maxIndex)];
+          }
+          return $result;
+      }
+
+      // SECURE: PHP 8.3+ Random\Randomizer
+      $randomizer = new Random\Randomizer(new Random\Engine\Secure());
+      $token = $randomizer->getBytesFromString(
+          'abcdefghijklmnopqrstuvwxyz0123456789', 32
+      );
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/338.html"
+      - "https://www.php.net/manual/en/function.random-bytes.php"
+      - "https://www.php.net/manual/en/function.random-int.php"
+      - "https://www.openwall.com/php_mt_seed/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'token'
+        - 'session'
+        - 'password'
+        - 'key'
+        - 'csrf'
+        - 'nonce'
+        - 'otp'
+        - 'secret'
+      taint_source_indicators:
+        - 'mt_rand'
+        - 'rand\('
+        - 'array_rand'
+        - 'uniqid'
+        - 'str_shuffle'
+      taint_sink_indicators:
+        - 'setcookie'
+        - 'session_id'
+        - '$_SESSION'
+        - 'header\('
+        - 'mail\('
+      sanitization_patterns:
+        - 'random_bytes'
+        - 'random_int'
+        - 'openssl_random_pseudo_bytes'
+        - 'sodium_randombytes'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + token_criticality_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits predictable password reset tokens:
+        1. PHP application uses md5(uniqid(mt_rand(), true)) for reset tokens
+        2. Attacker requests multiple reset tokens for their own account
+        3. Using php_mt_seed tool, attacker recovers the mt_rand seed
+        4. Attacker predicts the exact uniqid() value from server clock estimation
+        5. Attacker triggers password reset for admin account
+        6. Attacker submits the predicted token URL and resets admin password
+      example_payload: "$token = md5(uniqid(mt_rand(), true));"
+      attacker_objective: "Predict security tokens generated with mt_rand to hijack sessions or bypass authentication"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-001"
+        - "CRYPTO-PHP-003"
+
+  - rule_id: "CRYPTO-PHP-005"
+    title: "Weak openssl_encrypt Parameters"
+    description: >
+      Detects insecure parameter usage in PHP's openssl_encrypt() and openssl_decrypt()
+      functions. Common issues include using weak cipher algorithms, missing or static IVs,
+      using zero-padding instead of PKCS#7, disabled authentication tags in GCM mode, and
+      short key lengths. openssl_encrypt() is PHP's primary encryption API and improper
+      parameter selection can completely undermine the security of the encryption.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.89
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - openssl
+      - weak-parameters
+      - iv-reuse
+      - cipher-mode
+      - php
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[''"](?:des|des-ede|des-ede3|rc4|rc2|bf|cast5)[^''"]'
+        description: "openssl_encrypt with weak cipher algorithm"
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[''"](?:aes-\d+-ecb)[''"]'
+        description: "openssl_encrypt with ECB mode"
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*[''"][''"]'
+        description: "openssl_encrypt with empty IV string"
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*str_repeat\s*\(\s*[''"]\\0[''"]'
+        description: "openssl_encrypt with null-byte IV"
+      - type: regex
+        pattern: '\$iv\s*=\s*[''"][^''"]{16,}[''"][\s\S]{0,100}openssl_encrypt'
+        description: "Static IV variable used in openssl_encrypt"
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[''"]aes-128-'
+        description: "openssl_encrypt with AES-128 (prefer AES-256)"
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^)]*\)[\s\S]{0,20}(?:;|$)[\s\S]{0,20}(?!.*\$tag)'
+        description: "openssl_encrypt in GCM mode without capturing auth tag"
+      - type: regex
+        pattern: 'OPENSSL_ZERO_PADDING'
+        description: "Zero padding flag (insecure padding scheme)"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'aes-256-gcm'
+      - 'random_bytes'
+      - 'openssl_random_pseudo_bytes'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - '$tag'
+      - 'legacy'
+      - '$iv\s*=\s*(?:random_bytes|openssl_random)'
+    bypass_variants:
+      - description: "Cipher method stored in variable from config"
+        pattern: '\$method\s*=\s*[^;]*[\s\S]{0,100}openssl_encrypt\s*\([^,]+,\s*\$method'
+      - description: "IV derived from predictable source"
+        pattern: '\$iv\s*=\s*(?:md5|sha1|substr)\s*\([^)]+\)[\s\S]{0,100}openssl_encrypt'
+      - description: "Parameters loaded from config array"
+        pattern: '\$config\s*\[\s*[''"]cipher[''"]'
+    evasion_indicators:
+      - "Cipher method loaded from configuration"
+      - "IV derived from hash of known values"
+      - "Parameters passed through options array"
+      - "Wrapper class hiding openssl_encrypt parameters"
+    encoding_variants:
+      - type: "variable_method"
+        pattern: '\$cipher\s*=\s*[''"](?:des|rc4|aes-128-ecb)[''"]'
+      - type: "config_method"
+        pattern: 'config\s*\[\s*[''"]method[''"]'
+      - type: "strtolower_method"
+        pattern: 'strtolower\s*\([^)]+\)[\s\S]{0,50}openssl_encrypt'
+    multi_function_chain_patterns:
+      - "openssl_encrypt('aes-128-ecb') without IV -> base64_encode -> store"
+      - "Static IV -> openssl_encrypt('aes-256-cbc') -> repeated encryption"
+      - "openssl_encrypt('des-ecb') -> database storage"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak openssl_encrypt parameters enable pattern analysis, brute-force, and ciphertext manipulation attacks"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data"
+        sink: "openssl_encrypt"
+        through: "weak_cipher_method"
+      - source: "static_iv"
+        sink: "cbc_encryption"
+        through: "iv_parameter"
+      - source: "plaintext"
+        sink: "ecb_encryption"
+        through: "openssl_encrypt_ecb"
+    impact: |
+      Weak openssl_encrypt parameters compromise encryption security:
+      - ECB mode leaks plaintext patterns across blocks
+      - DES/3DES/RC4/Blowfish are brute-forceable or have known attacks
+      - Static/missing IVs enable chosen-plaintext attacks in CBC mode
+      - Missing auth tags in GCM mode lose authentication guarantees
+      - AES-128 provides less security margin than AES-256
+      - Zero padding can leak padding information
+    remediation: |
+      Use openssl_encrypt with aes-256-gcm and proper parameters:
+
+      ```php
+      // VULNERABLE: ECB mode with DES
+      $encrypted = openssl_encrypt($data, 'des-ecb', $key);
+
+      // VULNERABLE: CBC with static IV
+      $iv = '0000000000000000';
+      $encrypted = openssl_encrypt($data, 'aes-256-cbc', $key, 0, $iv);
+
+      // SECURE: AES-256-GCM with random IV and auth tag
+      $key = random_bytes(32);
+      $iv = random_bytes(openssl_cipher_iv_length('aes-256-gcm'));
+      $tag = '';
+      $encrypted = openssl_encrypt(
+          $data,
+          'aes-256-gcm',
+          $key,
+          OPENSSL_RAW_DATA,
+          $iv,
+          $tag,
+          '', // AAD (additional authenticated data)
+          16  // tag length
+      );
+      // Store: base64_encode($iv . $tag . $encrypted)
+
+      // SECURE: Decryption with tag verification
+      $decrypted = openssl_decrypt(
+          $ciphertext,
+          'aes-256-gcm',
+          $key,
+          OPENSSL_RAW_DATA,
+          $iv,
+          $tag
+      );
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://www.php.net/manual/en/function.openssl-encrypt.php"
+      - "https://paragonie.com/blog/2015/05/using-encryption-and-authentication-correctly"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38d/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'openssl_encrypt'
+        - 'openssl_decrypt'
+        - 'cipher'
+        - 'encrypt'
+        - 'iv'
+        - 'tag'
+        - 'aes'
+      taint_source_indicators:
+        - '$_POST'
+        - '$_GET'
+        - 'file_get_contents'
+        - '$data'
+      taint_sink_indicators:
+        - 'openssl_encrypt'
+        - 'base64_encode'
+        - 'file_put_contents'
+        - '$stmt'
+      sanitization_patterns:
+        - 'aes-256-gcm'
+        - 'random_bytes'
+        - 'openssl_random_pseudo_bytes'
+        - '$tag'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + parameter_weakness_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits AES-ECB encryption in a PHP e-commerce site:
+        1. Application encrypts credit card numbers with openssl_encrypt('aes-128-ecb')
+        2. Attacker obtains encrypted card numbers from a database breach
+        3. ECB mode means identical card number prefixes produce identical ciphertext blocks
+        4. Attacker performs frequency analysis to identify common card BINs
+        5. Attacker uses known-plaintext partial cards to build encryption codebook
+        6. Attacker recovers partial or full card numbers without breaking the key
+      example_payload: "openssl_encrypt($card_number, 'aes-128-ecb', $key, OPENSSL_RAW_DATA)"
+      attacker_objective: "Exploit weak openssl_encrypt parameters to analyze patterns or decrypt sensitive data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-002"
+        - "CRYPTO-PHP-003"
+        - "CRYPTO-PHP-006"
+
+  - rule_id: "CRYPTO-PHP-006"
+    title: "ECB Mode Usage in PHP Encryption"
+    description: >
+      Detects usage of Electronic Codebook (ECB) mode for symmetric encryption in PHP
+      applications through openssl_encrypt(), mcrypt, or other encryption functions. ECB
+      mode encrypts each block independently, producing identical ciphertext for identical
+      plaintext blocks. This leaks data patterns and violates IND-CPA security. PHP makes
+      ECB mode easily accessible through cipher method strings like 'aes-256-ecb' and
+      mcrypt's MCRYPT_MODE_ECB constant.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.94
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - ecb-mode
+      - block-cipher
+      - pattern-leakage
+      - aes
+      - php
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'openssl_encrypt\s*\([^,]+,\s*[''"](?:aes-(?:128|192|256)-ecb|des-ecb|des-ede3-ecb|bf-ecb|cast5-ecb)[''"]'
+        description: "openssl_encrypt with ECB mode cipher"
+      - type: regex
+        pattern: 'openssl_decrypt\s*\([^,]+,\s*[''"](?:aes-(?:128|192|256)-ecb|des-ecb|des-ede3-ecb|bf-ecb|cast5-ecb)[''"]'
+        description: "openssl_decrypt with ECB mode cipher"
+      - type: regex
+        pattern: 'MCRYPT_MODE_ECB'
+        description: "mcrypt ECB mode constant"
+      - type: regex
+        pattern: '[''"]ecb[''"][\s\S]{0,50}(?:encrypt|decrypt|cipher|openssl)'
+        description: "ECB mode string near encryption context"
+      - type: regex
+        pattern: '(?:encrypt|decrypt|cipher)[\s\S]{0,50}[''"]ecb[''"]'
+        description: "Encryption context near ECB mode string"
+      - type: regex
+        pattern: '\$(?:method|cipher|mode|algorithm)\s*=\s*[''"][^''"]*ecb[^''"]*[''"]'
+        description: "ECB mode stored in cipher method variable"
+      - type: regex
+        pattern: 'mcrypt_encrypt\s*\([^,]+,\s*[^,]+,\s*[^,]+,\s*[''"]ecb[''"]'
+        description: "mcrypt_encrypt with ECB mode string"
+      - type: regex
+        pattern: 'sodium_crypto_(?:stream_xor|aead)[\s\S]{0,50}ecb'
+        description: "ECB mode reference near sodium functions (unusual but possible)"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'key.*wrap'
+      - 'single.*block'
+      - 'legacy'
+      - '@deprecated'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'migration'
+      - 'backward.*compat'
+    bypass_variants:
+      - description: "Cipher method built from concatenated strings"
+        pattern: '[''"]aes-256-[''"][\s]*\.[\s]*[''"]ecb[''"]'
+      - description: "Cipher method from configuration"
+        pattern: '\$config\[\s*[''"]cipher_method[''"]'
+      - description: "Mode appended to algorithm dynamically"
+        pattern: '\$algo\s*\.\s*[''"-]ecb[''"]'
+    evasion_indicators:
+      - "ECB mode selected through configuration variable"
+      - "Cipher method string built from concatenation"
+      - "Mode parameter passed as function argument"
+      - "Encryption wrapper class hiding mode selection"
+    encoding_variants:
+      - type: "uppercase"
+        pattern: '[''"]AES-256-ECB[''"]'
+      - type: "mixed_case"
+        pattern: '[''"]aes-256-Ecb[''"]'
+      - type: "constant"
+        pattern: 'const\s+CIPHER_METHOD\s*=\s*[''"][^''"]*ecb[^''"]*[''"]'
+    multi_function_chain_patterns:
+      - "openssl_encrypt('aes-256-ecb') -> base64_encode -> database"
+      - "mcrypt_encrypt(RIJNDAEL_128, key, data, MCRYPT_MODE_ECB)"
+      - "ECB cipher -> loop over data blocks -> concatenated output"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ECB mode leaks plaintext patterns enabling data analysis and block manipulation attacks"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "plaintext_data"
+        sink: "encrypted_column"
+        through: "openssl_encrypt_ecb"
+      - source: "user_data"
+        sink: "file_storage"
+        through: "mcrypt_ecb"
+      - source: "sensitive_field"
+        sink: "api_response"
+        through: "ecb_encrypt"
+    impact: |
+      ECB mode in PHP encryption creates severe pattern leakage:
+      - Identical plaintext blocks produce identical ciphertext blocks
+      - Encrypted images retain visual structure (ECB penguin)
+      - Block rearrangement attacks can modify data without decryption
+      - Frequency analysis reveals encrypted data patterns
+      - No IND-CPA security (minimum standard for modern encryption)
+      - Violates PCI-DSS, HIPAA, NIST SP 800-38A recommendations
+    remediation: |
+      Replace ECB with GCM or CBC mode:
+
+      ```php
+      // VULNERABLE: ECB mode
+      $encrypted = openssl_encrypt($data, 'aes-256-ecb', $key);
+
+      // SECURE: AES-256-GCM (authenticated encryption)
+      $iv = random_bytes(openssl_cipher_iv_length('aes-256-gcm'));
+      $tag = '';
+      $encrypted = openssl_encrypt(
+          $data, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag
+      );
+      $stored = base64_encode($iv . $tag . $encrypted);
+
+      // SECURE: sodium secretbox (XSalsa20-Poly1305)
+      $key = sodium_crypto_secretbox_keygen();
+      $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+      $encrypted = sodium_crypto_secretbox($data, $nonce, $key);
+      $stored = base64_encode($nonce . $encrypted);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://blog.filippo.io/the-ecb-penguin/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38a/final"
+      - "https://www.php.net/manual/en/function.openssl-encrypt.php"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'openssl_encrypt'
+        - 'mcrypt_encrypt'
+        - 'ecb'
+        - 'ECB'
+        - 'cipher'
+        - 'encrypt'
+        - 'mode'
+      taint_source_indicators:
+        - '$_POST'
+        - '$data'
+        - 'file_get_contents'
+        - '$plaintext'
+      taint_sink_indicators:
+        - 'openssl_encrypt'
+        - 'mcrypt_encrypt'
+        - 'file_put_contents'
+        - '$stmt'
+      sanitization_patterns:
+        - 'aes-256-gcm'
+        - 'aes-256-cbc'
+        - 'sodium_crypto_secretbox'
+        - 'sodium_crypto_aead'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_volume_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker analyzes ECB-encrypted user profiles in a PHP CMS:
+        1. CMS encrypts user profile fields with openssl_encrypt('aes-256-ecb')
+        2. Attacker gains read access to encrypted profiles (SQL injection or backup leak)
+        3. Identical role strings ('admin', 'user') produce identical ciphertext blocks
+        4. Attacker identifies admin accounts by matching their role ciphertext block
+        5. Attacker performs block substitution: replaces their role block with admin role block
+        6. Attacker escalates privileges without needing the encryption key
+      example_payload: "openssl_encrypt($role, 'aes-256-ecb', $key, OPENSSL_RAW_DATA)"
+      attacker_objective: "Exploit ECB pattern leakage to analyze encrypted data and perform block manipulation attacks"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-002"
+        - "CRYPTO-PHP-005"
+
+  - rule_id: "CRYPTO-PHP-007"
+    title: "Permissive SSL verify_peer=false Configuration"
+    description: >
+      Detects disabled SSL/TLS certificate verification in PHP HTTP clients and stream
+      contexts. PHP's stream_context_create() with verify_peer=false, cURL's
+      CURLOPT_SSL_VERIFYPEER=false, and Guzzle's verify=false all disable certificate
+      validation. This makes HTTPS connections vulnerable to man-in-the-middle attacks.
+      PHP applications frequently disable verification when connecting to APIs with
+      self-signed certificates, and this insecure setting often persists to production.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-295
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - ssl
+      - tls
+      - certificate-validation
+      - mitm
+      - curl
+      - guzzle
+      - php
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '[''"]verify_peer[''"][\s]*=>[\s]*false'
+        description: "SSL stream context verify_peer disabled"
+      - type: regex
+        pattern: '[''"]verify_peer_name[''"][\s]*=>[\s]*false'
+        description: "SSL stream context verify_peer_name disabled"
+      - type: regex
+        pattern: 'CURLOPT_SSL_VERIFYPEER[\s]*,[\s]*(?:false|0|FALSE)'
+        description: "cURL SSL peer verification disabled"
+      - type: regex
+        pattern: 'CURLOPT_SSL_VERIFYHOST[\s]*,[\s]*(?:false|0|FALSE)'
+        description: "cURL SSL host verification disabled"
+      - type: regex
+        pattern: '[''"]verify[''"][\s]*=>[\s]*false'
+        description: "Guzzle HTTP client verify disabled"
+      - type: regex
+        pattern: 'GuzzleHttp[\s\S]{0,200}[''"]verify[''"][\s]*=>[\s]*false'
+        description: "Guzzle client configuration with disabled SSL"
+      - type: regex
+        pattern: '[''"]allow_self_signed[''"][\s]*=>[\s]*true'
+        description: "SSL context allowing self-signed certificates"
+      - type: regex
+        pattern: 'stream_context_create\s*\(\s*\[\s*[''"]ssl[''"][\s]*=>[\s\S]{0,200}verify_peer[''"][\s]*=>[\s]*false'
+        description: "Stream context creation with disabled SSL verification"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'development.*only'
+      - 'localhost'
+      - 'self.*signed'
+      - '// TODO.*remove'
+      - '// TEMPORARY'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'if.*APP_DEBUG'
+      - 'if.*env.*local'
+    bypass_variants:
+      - description: "SSL options set via variable from configuration"
+        pattern: '\$(?:ssl_options|sslOpts|verifyPeer)\s*=\s*false[\s\S]{0,100}(?:verify_peer|CURLOPT_SSL)'
+      - description: "SSL verification disabled in class constructor"
+        pattern: 'function\s+__construct[\s\S]{0,300}(?:verify_peer|CURLOPT_SSL_VERIFYPEER)[\s\S]{0,50}false'
+      - description: "Middleware or handler disabling SSL globally"
+        pattern: '(?:middleware|handler|interceptor)[\s\S]{0,200}verify[\s\S]{0,50}false'
+    evasion_indicators:
+      - "SSL settings loaded from configuration file"
+      - "Verification disabled via environment-conditional code"
+      - "Global cURL default overrides"
+      - "HTTP client factory hiding verify=false"
+    encoding_variants:
+      - type: "constant_false"
+        pattern: 'const\s+VERIFY_SSL\s*=\s*false'
+      - type: "env_fallback"
+        pattern: 'getenv\s*\(\s*[''"]VERIFY_SSL[''"].*false'
+      - type: "config_array"
+        pattern: '\$config\[\s*[''"](?:verify|ssl_verify)[''"]'
+    multi_function_chain_patterns:
+      - "stream_context_create(ssl=>verify_peer:false) -> file_get_contents(https)"
+      - "curl_setopt(CURLOPT_SSL_VERIFYPEER, false) -> curl_exec"
+      - "new GuzzleHttp\\Client(['verify' => false]) -> $client->get()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Disabled SSL verification enables MITM interception of credentials, API keys, and sensitive data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "ssl_config"
+        sink: "https_request"
+        through: "verify_peer_false"
+      - source: "curl_options"
+        sink: "api_call"
+        through: "CURLOPT_SSL_VERIFYPEER"
+      - source: "guzzle_config"
+        sink: "external_api"
+        through: "verify_false"
+    impact: |
+      Disabled SSL verification enables devastating MITM attacks:
+      - All HTTPS traffic can be intercepted and read by network-positioned attackers
+      - API keys, OAuth tokens, and credentials captured in transit
+      - Payment gateway communications compromised (PCI-DSS violation)
+      - Self-signed certificate allowance removes all trust chain protection
+      - PHP web applications often process sensitive user data over HTTPS
+      - Violates PCI-DSS 4.0, HIPAA, GDPR encryption-in-transit requirements
+    remediation: |
+      Always enforce SSL certificate verification:
+
+      ```php
+      // VULNERABLE: Disabled SSL verification (cURL)
+      curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+      // SECURE: Enable SSL verification with CA bundle
+      curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+      curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+      curl_setopt($ch, CURLOPT_CAINFO, '/etc/ssl/certs/ca-certificates.crt');
+
+      // SECURE: Guzzle with verification
+      $client = new GuzzleHttp\Client([
+          'verify' => true,  // default, use system CA bundle
+          // Or specify custom CA:
+          // 'verify' => '/path/to/ca-bundle.crt',
+      ]);
+
+      // SECURE: Stream context with verification
+      $context = stream_context_create([
+          'ssl' => [
+              'verify_peer' => true,
+              'verify_peer_name' => true,
+              'allow_self_signed' => false,
+              'cafile' => '/etc/ssl/certs/ca-certificates.crt',
+          ],
+      ]);
+      $data = file_get_contents('https://api.example.com', false, $context);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/295.html"
+      - "https://www.php.net/manual/en/context.ssl.php"
+      - "https://curl.se/libcurl/c/CURLOPT_SSL_VERIFYPEER.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'curl'
+        - 'ssl'
+        - 'https'
+        - 'verify'
+        - 'Guzzle'
+        - 'stream_context'
+        - 'file_get_contents'
+      taint_source_indicators:
+        - 'config\.'
+        - 'getenv'
+        - '$_ENV'
+        - 'APP_DEBUG'
+      taint_sink_indicators:
+        - 'curl_exec'
+        - 'file_get_contents'
+        - '$client->get'
+        - '$client->post'
+        - 'fopen.*https'
+      sanitization_patterns:
+        - 'verify_peer.*true'
+        - 'CURLOPT_SSL_VERIFYPEER.*true'
+        - 'verify.*true'
+        - 'cafile'
+        - 'CURLOPT_CAINFO'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + network_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits disabled SSL in a PHP payment integration:
+        1. PHP application sends payment data to gateway with CURLOPT_SSL_VERIFYPEER=false
+        2. Attacker performs ARP spoofing on the server's network segment
+        3. Attacker intercepts HTTPS connection with a self-generated certificate
+        4. Application accepts the fake certificate due to disabled verification
+        5. Attacker captures credit card numbers, merchant IDs, and API keys
+        6. Attacker uses stolen credentials to make fraudulent transactions
+      example_payload: "curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);"
+      attacker_objective: "Intercept HTTPS traffic by exploiting disabled certificate verification for credential and payment data theft"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-003"
+        - "CRYPTO-PHP-005"
+
+  - rule_id: "CRYPTO-PHP-008"
+    title: "Custom Cryptographic Implementation"
+    description: >
+      Detects attempts to implement custom cryptographic algorithms or primitives in PHP
+      instead of using established libraries. Custom crypto implementations are almost
+      universally flawed and vulnerable to side-channel attacks, timing attacks, and
+      mathematical weaknesses. This includes custom XOR-based encryption, substitution
+      ciphers, home-grown hash functions, and reimplementations of standard algorithms.
+      The first rule of cryptography is: don't roll your own crypto.
+    language: php
+    category: crypto
+    severity: High
+    confidence: 0.85
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - custom-crypto
+      - xor-cipher
+      - home-rolled
+      - substitution-cipher
+      - php
+    detection_layer: 4
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'function\s+(?:encrypt|decrypt|cipher|encipher|decipher)\s*\([^)]*\)\s*\{[\s\S]{0,500}(?:ord|chr|\^)'
+        description: "Custom encrypt/decrypt function using character manipulation"
+      - type: regex
+        pattern: 'for\s*\([^)]*\)\s*\{[\s\S]{0,200}\$\w+\s*\[\s*\$\w+\s*\]\s*\^\s*\$\w+\s*\['
+        description: "XOR loop encryption pattern"
+      - type: regex
+        pattern: 'chr\s*\(\s*ord\s*\(\s*\$\w+\s*\[\s*\$\w+\s*\]\s*\)\s*\^\s*ord'
+        description: "Character-by-character XOR encryption"
+      - type: regex
+        pattern: 'function\s+\w*(?:hash|digest|checksum)\w*\s*\([^)]*\)\s*\{[\s\S]{0,500}(?:ord|&|>>|<<|\^)'
+        description: "Custom hash function using bitwise operations"
+      - type: regex
+        pattern: 'str_rot13\s*\([^)]*\)[\s\S]{0,80}(?:encrypt|secure|protect|password|secret)'
+        description: "ROT13 used for 'encryption' (it's not encryption)"
+      - type: regex
+        pattern: 'strrev\s*\([^)]*\)[\s\S]{0,80}(?:encrypt|secure|protect|password|secret)'
+        description: "String reversal used for 'encryption'"
+      - type: regex
+        pattern: 'base64_encode\s*\([^)]*\)[\s\S]{0,80}(?:encrypt|secure|protect|password|secret)'
+        description: "base64 encoding used as 'encryption' (encoding is not encryption)"
+      - type: regex
+        pattern: 'function\s+\w*[Ee]ncrypt\w*\s*\([^)]*\)\s*\{[\s\S]{0,300}(?:strtr|str_replace|preg_replace)[\s\S]{0,300}return'
+        description: "Substitution-based custom encryption function"
+    anti_patterns:
+      - 'Test\.php$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#\s*nosec'
+      - 'openssl_'
+      - 'sodium_'
+      - 'password_hash'
+      - 'mcrypt_'
+      - 'hash_hmac'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'CTF'
+      - 'educational'
+    bypass_variants:
+      - description: "Custom crypto in a separate class file"
+        pattern: 'class\s+\w*[Cc]rypt(?:o|ography|er)?\w*\s*\{[\s\S]{0,500}(?:\^|ord|chr)'
+      - description: "XOR encryption wrapped as a utility function"
+        pattern: 'function\s+xor_(?:encrypt|decrypt|cipher)\s*\('
+      - description: "Custom cipher using array_map for transformation"
+        pattern: 'array_map\s*\(\s*function[\s\S]{0,200}(?:ord|chr|\^)[\s\S]{0,200}(?:encrypt|cipher)'
+    evasion_indicators:
+      - "Custom crypto in separate utility class"
+      - "XOR operation obscured by helper functions"
+      - "Encoding operations labeled as encryption"
+      - "Multiple transformations combined as 'encryption'"
+    encoding_variants:
+      - type: "closure_xor"
+        pattern: '\$\w+\s*=\s*function\s*\([^)]*\)\s*(?:use\s*\([^)]*\))?\s*\{[\s\S]{0,200}\^'
+      - type: "array_processing"
+        pattern: 'array_map\s*\(\s*[''"]chr[''"][\s\S]{0,100}\^'
+      - type: "string_transform"
+        pattern: 'strtr\s*\(\s*\$\w+\s*,\s*[''"][A-Za-z]+[''"][\s]*,[\s]*[''"][A-Za-z]+[''"]'
+    multi_function_chain_patterns:
+      - "Custom XOR loop -> base64_encode -> store as 'encrypted'"
+      - "ROT13 -> base64 -> strrev -> claimed 'strong encryption'"
+      - "Custom substitution table -> character mapping -> 'cipher'"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Custom crypto is trivially breakable, exposing all 'encrypted' data to simple cryptanalysis"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "sensitive_data"
+        sink: "custom_encrypt_function"
+        through: "function_call"
+      - source: "password"
+        sink: "xor_cipher"
+        through: "custom_encryption"
+      - source: "user_data"
+        sink: "base64_encoding_as_encryption"
+        through: "encoding_function"
+    impact: |
+      Custom cryptographic implementations are fundamentally insecure:
+      - XOR encryption with key shorter than plaintext is trivially broken via known-plaintext
+      - Repeating-key XOR is breakable via Kasiski examination and frequency analysis
+      - ROT13/Caesar ciphers provide zero actual security
+      - Base64 encoding is not encryption (trivially reversible)
+      - Substitution ciphers are breakable via frequency analysis
+      - Custom hash functions lack collision resistance guarantees
+      - Side-channel attacks (timing) are virtually guaranteed in custom implementations
+      - Gives false sense of security, may cause compliance teams to skip proper encryption
+    remediation: |
+      Use established cryptographic libraries:
+
+      ```php
+      // VULNERABLE: Custom XOR encryption
+      function xorEncrypt($data, $key) {
+          $result = '';
+          for ($i = 0; $i < strlen($data); $i++) {
+              $result .= chr(ord($data[$i]) ^ ord($key[$i % strlen($key)]));
+          }
+          return base64_encode($result);
+      }
+
+      // SECURE: Use sodium_crypto_secretbox
+      $key = sodium_crypto_secretbox_keygen();
+      $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+      $encrypted = sodium_crypto_secretbox($data, $nonce, $key);
+
+      // SECURE: Use openssl_encrypt with AES-256-GCM
+      $key = random_bytes(32);
+      $iv = random_bytes(12);
+      $tag = '';
+      $encrypted = openssl_encrypt(
+          $data, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag
+      );
+
+      // SECURE: Use defuse/php-encryption library
+      use Defuse\Crypto\Crypto;
+      use Defuse\Crypto\Key;
+      $key = Key::createNewRandomKey();
+      $encrypted = Crypto::encrypt($data, $key);
+      $decrypted = Crypto::decrypt($encrypted, $key);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://www.schneier.com/blog/archives/2011/04/schneiers_law.html"
+      - "https://paragonie.com/blog/2015/05/if-you-re-typing-word-mcrypt-into-your-code-you-re-doing-it-wrong"
+      - "https://github.com/defuse/php-encryption"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'encrypt'
+        - 'decrypt'
+        - 'cipher'
+        - 'xor'
+        - 'ord'
+        - 'chr'
+        - 'secret'
+        - 'protect'
+      taint_source_indicators:
+        - '$_POST'
+        - '$_GET'
+        - '$data'
+        - '$plaintext'
+        - '$password'
+      taint_sink_indicators:
+        - 'file_put_contents'
+        - '$stmt'
+        - 'echo'
+        - 'setcookie'
+        - 'header'
+      sanitization_patterns:
+        - 'openssl_encrypt'
+        - 'sodium_crypto_secretbox'
+        - 'password_hash'
+        - 'Crypto::encrypt'
+        - 'hash_hmac'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + algorithm_weakness_severity)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker breaks custom XOR encryption in a PHP CRM:
+        1. PHP CRM uses repeating-key XOR to 'encrypt' customer records
+        2. Attacker obtains encrypted records from a database breach
+        3. Attacker uses Kasiski examination to determine XOR key length
+        4. Using frequency analysis on each key-length segment, attacker recovers the key
+        5. Attacker decrypts all 'encrypted' customer records (names, addresses, SSNs)
+        6. Total time to break: under 1 hour with basic Python script
+      example_payload: "for ($i=0; $i<strlen($data); $i++) { $enc .= chr(ord($data[$i]) ^ ord($key[$i % strlen($key)])); }"
+      attacker_objective: "Break trivially weak custom encryption to access all 'protected' data"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PHP-001"
+        - "CRYPTO-PHP-002"
+        - "CRYPTO-PHP-005"

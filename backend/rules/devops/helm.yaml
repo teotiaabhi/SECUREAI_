@@ -1,0 +1,301 @@
+rules:
+- rule_id: HELM-SEC-001
+  title: Unsafe tpl Function Usage
+  description: 'Detects use of tpl function with user-controlled values, enabling template injection.
+
+    '
+  language: helm
+  category: devops
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - helm
+  - tpl
+  - template-injection
+  patterns:
+  - type: regex
+    pattern: \{\{\s*tpl\s+\.Values\.\w+
+  - type: regex
+    pattern: \{\{\s*tpl\s+\(\s*\.Values\.
+  anti_patterns:
+  - '# safe'
+  - toYaml
+  impact: 'The tpl function renders strings as templates. If user-supplied values
+
+    contain template directives, attackers can execute arbitrary template code.
+
+    '
+  remediation: "Avoid tpl with user-controlled values. If needed, sanitize input:\n  {{ .Values.name | quote }}\n"
+- rule_id: HELM-SEC-002
+  title: Hardcoded Secrets in Values
+  description: 'Detects hardcoded passwords and secrets in Helm values or templates.
+
+    '
+  language: helm
+  category: secrets
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - helm
+  - secrets
+  - hardcoded
+  patterns:
+  - type: regex
+    pattern: (?:password|secret|token|apiKey|api_key):\s*["\x27][A-Za-z0-9+/=]{8,}
+  - type: regex
+    pattern: (?:PASSWORD|SECRET|TOKEN):\s*["\x27][^{][^"\x27]{6,}
+  anti_patterns:
+  - '{{ .Values'
+  - secretKeyRef
+  - b64enc
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: HELM-SEC-003
+  title: Container Without Security Context
+  description: 'Detects Helm templates deploying containers without securityContext.
+
+    '
+  language: helm
+  category: devops
+  severity: High
+  confidence: 0.82
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - helm
+  - security-context
+  - container
+  patterns:
+  - type: regex
+    pattern: containers:\s*\n(?:(?!\s+securityContext:).*\n)+
+  anti_patterns:
+  - 'securityContext:'
+  - podSecurityContext
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-004
+  title: Missing Network Policy Template
+  description: 'Detects Helm charts without NetworkPolicy templates.
+
+    '
+  language: helm
+  category: devops
+  severity: Medium
+  confidence: 0.72
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 3
+  tags:
+  - helm
+  - network-policy
+  - chart
+  patterns:
+  - type: regex
+    pattern: kind:\s*Deployment\b
+  anti_patterns:
+  - NetworkPolicy
+  - networkPolicy
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-005
+  title: Privileged Container in Helm Template
+  description: 'Detects Helm templates that enable privileged mode.
+
+    '
+  language: helm
+  category: devops
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - helm
+  - privileged
+  - container
+  patterns:
+  - type: regex
+    pattern: privileged:\s*(?:true|\{\{\s*\.Values\.\w*[Pp]rivileged)
+  anti_patterns:
+  - 'privileged: false'
+  - '{{- if not'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-006
+  title: Helm Hook Without Delete Policy
+  description: 'Detects Helm hooks that don''t clean up after execution.
+
+    '
+  language: helm
+  category: devops
+  severity: Low
+  confidence: 0.75
+  cwe: CWE-459
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - helm
+  - hooks
+  - cleanup
+  patterns:
+  - type: regex
+    pattern: helm\.sh/hook:\s*(?:pre-install|post-install|pre-upgrade|post-upgrade)
+  anti_patterns:
+  - hook-delete-policy
+  - before-hook-creation
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-007
+  title: Values Injection in Annotations
+  description: 'Detects unquoted values in annotations enabling YAML injection.
+
+    '
+  language: helm
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - helm
+  - injection
+  - annotations
+  patterns:
+  - type: regex
+    pattern: annotations:\s*\n\s+.*:\s*\{\{\s*\.Values\.\w+\s*\}\}\s*$
+  anti_patterns:
+  - '| quote'
+  - '| toYaml'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-008
+  title: Service Account with Cluster-Admin
+  description: 'Detects Helm charts creating service accounts with cluster-admin role.
+
+    '
+  language: helm
+  category: devops
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - helm
+  - rbac
+  - service-account
+  patterns:
+  - type: regex
+    pattern: name:\s*cluster-admin
+  - type: regex
+    pattern: ClusterRoleBinding.*\n(?:.*\n){0,20}.*cluster-admin
+  anti_patterns:
+  - '# admin'
+  - '{{- if .Values.rbac'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-009
+  title: Image Pull Policy Not Set
+  description: 'Detects containers without explicit imagePullPolicy.
+
+    '
+  language: helm
+  category: devops
+  severity: Low
+  confidence: 0.7
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 2
+  tags:
+  - helm
+  - image
+  - pull-policy
+  patterns:
+  - type: regex
+    pattern: 'image:\s*.*\n(?:(?!\s+imagePullPolicy:).*\n){1,3}\s+ports:'
+  anti_patterns:
+  - 'imagePullPolicy:'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-010
+  title: Ingress Without TLS Configuration
+  description: 'Detects Ingress resources without TLS termination.
+
+    '
+  language: helm
+  category: devops
+  severity: High
+  confidence: 0.82
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - helm
+  - ingress
+  - tls
+  patterns:
+  - type: regex
+    pattern: kind:\s*Ingress\b
+  anti_patterns:
+  - 'tls:'
+  - 'secretName:'
+  - cert-manager
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-011
+  title: Host Path Volume in Chart
+  description: 'Detects hostPath volumes configured in Helm chart templates.
+
+    '
+  language: helm
+  category: devops
+  severity: High
+  confidence: 0.88
+  cwe: CWE-552
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - helm
+  - hostpath
+  - volume
+  patterns:
+  - type: regex
+    pattern: hostPath:\s*\n\s+path:\s*/
+  anti_patterns:
+  - /var/log
+  - '{{- if .Values'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: HELM-SEC-012
+  title: Unquoted toYaml Output
+  description: 'Detects toYaml output not properly indented or piped.
+
+    '
+  language: helm
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - helm
+  - toYaml
+  - formatting
+  patterns:
+  - type: regex
+    pattern: \{\{\s*toYaml\s+\.Values\.\w+\s*\}\}
+  anti_patterns:
+  - '| nindent'
+  - '| indent'
+  - '| trim'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging

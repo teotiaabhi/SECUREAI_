@@ -1,0 +1,655 @@
+# ============================================================================
+# Enterprise Injection Rules — NoSQL, LDAP, XPath, GraphQL, Template, CRLF
+# Ruleset Version: 4.0.0
+# Generated: 2026-03-05
+# Phases: 3 (Detection Layers), 4 (Enterprise Coverage), 5 (Precision),
+#         6 (Performance), 7 (Metadata), 9 (Cross-Rule Correlation)
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # NOSQL INJECTION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "INJ-NOSQL-PY-001"
+    title: "MongoDB NoSQL Injection via Unsanitized Input (Python)"
+    description: >
+      Detects MongoDB queries constructed with unsanitized user input in Python,
+      including PyMongo find/aggregate with operator injection ($gt, $ne, $regex)
+      and raw query string construction.
+    language: python
+    category: injection
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-943
+    owasp: "A03:2021-Injection"
+    tags: [nosql-injection, mongodb, pymongo, python]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "nosql-injection"
+    patterns:
+      - type: regex
+        pattern: '\.(?:find|find_one|find_one_and_update|find_one_and_delete|aggregate|update_one|update_many|delete_one|delete_many)\s*\(\s*\{[^}]{0,100}(?:request\.|req\.|params\.|form\.|json\[|args\[)'
+        description: "PyMongo query with direct request input in filter dict"
+      - type: regex
+        pattern: '\.(?:find|find_one|aggregate)\s*\(\s*(?:request\s*\.\s*(?:json|get_json|data|form)|json\.loads\s*\()'
+        description: "PyMongo query with entire request body as filter"
+      - type: regex
+        pattern: '\.(?:find|find_one)\s*\(\s*\{[^}]{0,200}\$(?:gt|gte|lt|lte|ne|in|nin|regex|where|expr)\b'
+        description: "MongoDB operator pattern in query construction"
+      - type: regex
+        pattern: 'json\.loads\s*\([^)]{0,100}(?:request|body|payload)[^)]{0,50}\)[^;]{0,100}\.(?:find|aggregate)\s*\('
+        description: "JSON-parsed user input passed to MongoDB query"
+    anti_patterns:
+      - "validate("
+      - "Schema("
+      - "jsonschema.validate"
+      - "pydantic"
+      - "marshmallow"
+      - "ObjectId("
+      - "# nosec"
+      - "def test_"
+    remediation: >
+      Use input validation and type coercion before passing to MongoDB queries.
+      Never pass raw request.json as a MongoDB filter.
+      Use schema validation (pydantic, marshmallow) to whitelist allowed fields.
+      Convert expected ObjectId fields: bson.ObjectId(user_input).
+      Reject any input containing MongoDB operators ($gt, $ne, etc.).
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["PY-INJ-001", "INJ-NOSQL-JS-001"]
+    context_awareness:
+      taint_source_indicators:
+        - "request.json"
+        - "request.get_json()"
+        - "request.data"
+        - "request.form"
+      taint_sink_indicators:
+        - ".find("
+        - ".find_one("
+        - ".aggregate("
+        - ".update_one("
+        - ".delete_one("
+      sanitization_patterns:
+        - "ObjectId("
+        - "int("
+        - "float("
+        - "Schema.validate("
+
+  - rule_id: "INJ-NOSQL-JS-001"
+    title: "MongoDB NoSQL Injection (JavaScript/Node.js)"
+    description: >
+      Detects MongoDB/Mongoose queries with unsanitized user input in
+      Node.js applications. Attackers can inject MongoDB operators through
+      JSON body parameters to bypass authentication or exfiltrate data.
+    language: javascript
+    category: injection
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-943
+    owasp: "A03:2021-Injection"
+    tags: [nosql-injection, mongodb, mongoose, nodejs, express]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "nosql-injection"
+    patterns:
+      - type: regex
+        pattern: '\.(?:find|findOne|findById|findOneAndUpdate|findOneAndDelete|aggregate|updateOne|updateMany|deleteOne|deleteMany)\s*\(\s*(?:req\.body|req\.query|req\.params)\b'
+        description: "Mongoose/MongoDB query with raw request input"
+      - type: regex
+        pattern: '\.(?:find|findOne)\s*\(\s*\{[^}]{0,200}:\s*(?:req\.body|req\.query|req\.params)\b'
+        description: "MongoDB filter field set to request input"
+      - type: regex
+        pattern: 'collection\.(?:find|findOne|aggregate)\s*\([^)]{0,200}(?:req\.|request\.)'
+        description: "Native MongoDB driver with request input"
+      - type: regex
+        pattern: '\{\s*(?:username|email|password|user|name)\s*:\s*req\.body\.'
+        description: "Common auth-pattern with direct request body field"
+    anti_patterns:
+      - "sanitize("
+      - "mongo-sanitize"
+      - "express-mongo-sanitize"
+      - "parseInt("
+      - "ObjectId("
+      - "mongoose.Types.ObjectId"
+      - "Joi.validate"
+      - "yup.validate"
+      - "zod.parse"
+      - "typeof.*!=="
+    remediation: >
+      Install express-mongo-sanitize middleware to strip MongoDB operators.
+      Use Joi/Zod/Yup schema validation on all request inputs.
+      Type-check inputs: use parseInt(), ObjectId(), etc. before queries.
+      Never pass raw req.body as a MongoDB query filter.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["INJ-NOSQL-PY-001", "JS-INJ-001"]
+
+  - rule_id: "INJ-NOSQL-JAVA-001"
+    title: "MongoDB NoSQL Injection (Java)"
+    description: >
+      Detects MongoDB queries in Java applications using Spring Data MongoDB
+      or the native MongoDB Java driver with unsanitized user input.
+    language: java
+    category: injection
+    severity: critical
+    confidence: 0.90
+    cwe: CWE-943
+    owasp: "A03:2021-Injection"
+    tags: [nosql-injection, mongodb, spring-data, java]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "nosql-injection"
+    patterns:
+      - type: regex
+        pattern: 'BasicDBObject\s*\([^)]{0,200}(?:request\.|getParameter|@RequestParam|@PathVariable)'
+        description: "BasicDBObject with request parameter"
+      - type: regex
+        pattern: 'Criteria\.where\s*\([^)]{0,100}\)\.(?:is|gt|lt|ne|regex)\s*\([^)]{0,100}(?:request\.|getParameter)'
+        description: "Spring Data MongoDB Criteria with request input"
+      - type: regex
+        pattern: 'Document\.parse\s*\([^)]{0,100}(?:request\.|getParameter|@RequestBody)'
+        description: "MongoDB Document.parse with user-provided JSON"
+      - type: regex
+        pattern: '\.find\s*\(\s*(?:query|filter)\s*\)[^;]{0,200}(?:request\.|getParameter)'
+        description: "MongoDB find with variable from request"
+    anti_patterns:
+      - "@Validated"
+      - "@Valid"
+      - "Sanitizer"
+      - "ObjectId("
+      - "Integer.parseInt"
+      - "Long.parseLong"
+    remediation: >
+      Use Spring Data MongoDB repositories with derived query methods.
+      Apply @Valid/@Validated annotations on request DTOs.
+      Use MongoTemplate with type-safe Criteria builders.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # LDAP INJECTION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "INJ-LDAP-JAVA-001"
+    title: "LDAP Injection via Unsanitized Search Filter (Java)"
+    description: >
+      Detects LDAP search filters constructed with string concatenation in Java.
+      Attackers can inject LDAP filter metacharacters (* ( ) \\ / NUL) to
+      modify query logic, bypass authentication, or enumerate directory entries.
+    language: java
+    category: injection
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-90
+    owasp: "A03:2021-Injection"
+    tags: [ldap-injection, directory, java, jndi]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "ldap-injection"
+    patterns:
+      - type: regex
+        pattern: '\.search\s*\([^)]{0,200}"\s*\(\s*(?:uid|cn|sAMAccountName|mail|memberOf)\s*=\s*"\s*\+\s*(?:user|name|input|param|request)'
+        description: "LDAP search filter with string concatenation"
+      - type: regex
+        pattern: '(?:SearchControls|NamingEnumeration)[\s\S]{0,300}"\s*\(\s*&\s*\([^)]*=\s*"\s*\+\s*'
+        description: "LDAP AND filter with concatenated input"
+      - type: regex
+        pattern: 'new\s+InitialDirContext[^;]{0,300}"\s*\+\s*(?:password|user|dn|input)'
+        description: "InitialDirContext with concatenated credentials"
+      - type: regex
+        pattern: 'LdapTemplate[^;]{0,200}\.search\s*\([^)]{0,200}"\s*\+\s*(?:user|input|param|name)'
+        description: "Spring LdapTemplate search with concatenation"
+    anti_patterns:
+      - "LdapEncoder.filterEncode"
+      - "encodeForLDAP"
+      - "LdapUtils.escape"
+      - "FilterBasedLdapUserSearch"
+      - "LdapQueryBuilder"
+      - "PreparedStatement"
+      - "LdapFilter.encode"
+    remediation: >
+      Use OWASP ESAPI LdapEncoder.filterEncode() for filter values.
+      Use Spring Security's LdapQueryBuilder for parameterized filters.
+      Never concatenate user input into LDAP filter strings.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["INJ-LDAP-PY-001"]
+
+  - rule_id: "INJ-LDAP-PY-001"
+    title: "LDAP Injection (Python)"
+    description: >
+      Detects LDAP filter construction with unsanitized user input in Python
+      using python-ldap or ldap3 libraries.
+    language: python
+    category: injection
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-90
+    owasp: "A03:2021-Injection"
+    tags: [ldap-injection, directory, python, ldap3]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "ldap-injection"
+    patterns:
+      - type: regex
+        pattern: '\.search(?:_s|_ext|_ext_s)?\s*\([^)]{0,200}f[''"].*?\((?:uid|cn|mail|sAMAccountName)=\{'
+        description: "python-ldap search with f-string filter"
+      - type: regex
+        pattern: '\.search(?:_s)?\s*\([^)]{0,200}["''].*?%s.*?["'']\s*%\s*(?:user|name|input|request)'
+        description: "python-ldap search with %-format filter"
+      - type: regex
+        pattern: 'ldap3\.(?:Connection|Server)[^;]{0,300}\.search\s*\([^)]{0,200}f[''"]'
+        description: "ldap3 search with f-string filter"
+    anti_patterns:
+      - "ldap.filter.escape_filter_chars"
+      - "escape_filter_chars("
+      - "ldap3.utils.dn.escape_rdn"
+      - "sanitize"
+      - "re.sub"
+    remediation: >
+      Use ldap.filter.escape_filter_chars() to escape user input.
+      For ldap3, use ldap3.utils.dn.escape_rdn() for DN components.
+      Validate input against expected patterns (alphanumeric only).
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # XPATH INJECTION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "INJ-XPATH-JAVA-001"
+    title: "XPath Injection (Java)"
+    description: >
+      Detects XPath query construction with unsanitized user input in Java.
+      XPath injection enables data extraction from XML documents including
+      bypassing authentication in XML-based user stores.
+    language: java
+    category: injection
+    severity: high
+    confidence: 0.90
+    cwe: CWE-643
+    owasp: "A03:2021-Injection"
+    tags: [xpath-injection, xml, java]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "xpath-injection"
+    patterns:
+      - type: regex
+        pattern: 'xpath\.(?:compile|evaluate|selectNodes|selectSingleNode)\s*\([^)]{0,200}"\s*\+\s*(?:user|input|param|request|name)'
+        description: "XPath expression with string concatenation"
+      - type: regex
+        pattern: 'XPathExpression[^;]{0,200}"\s*\+\s*(?:user|input|param|getParameter)'
+        description: "XPathExpression with concatenated input"
+      - type: regex
+        pattern: '\.evaluate\s*\(\s*(?:String\.format|MessageFormat\.format)\s*\([^)]{0,200}(?:user|input|param)'
+        description: "XPath evaluate with String.format user input"
+    anti_patterns:
+      - "XPathVariableResolver"
+      - "setXPathVariableResolver"
+      - "prepareXPath"
+      - "escapeXPath"
+    remediation: >
+      Use XPathVariableResolver for parameterized XPath queries.
+      Never concatenate user input into XPath expressions.
+      Validate XML input against a schema before processing.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  - rule_id: "INJ-XPATH-PY-001"
+    title: "XPath Injection (Python)"
+    language: python
+    category: injection
+    severity: high
+    confidence: 0.90
+    cwe: CWE-643
+    owasp: "A03:2021-Injection"
+    tags: [xpath-injection, xml, python, lxml]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "xpath-injection"
+    patterns:
+      - type: regex
+        pattern: '\.xpath\s*\(\s*f[''"][^)]{0,200}(?:request|user|input|param|data)\b'
+        description: "lxml xpath with f-string user input"
+      - type: regex
+        pattern: '\.xpath\s*\(\s*[''"].*?%s.*?[''"].*?%\s*(?:request|user|input|param)\b'
+        description: "lxml xpath with %-format user input"
+      - type: regex
+        pattern: 'etree\.XPath\s*\(\s*f[''"]'
+        description: "lxml XPath class with f-string expression"
+    anti_patterns:
+      - ".xpath(.*,.*namespaces="
+      - "defusedxml"
+      - "re.sub("
+    remediation: >
+      Use lxml XPath variables: tree.xpath('//user[@name=$n]', n=user_input).
+      Never use f-strings or .format() in XPath expressions.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # GRAPHQL INJECTION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "INJ-GQL-JS-001"
+    title: "GraphQL Query Injection (JavaScript)"
+    description: >
+      Detects GraphQL queries constructed from unsanitized user input.
+      Allows attackers to modify query structure, access unauthorized fields,
+      perform introspection, or cause resource exhaustion via deeply nested queries.
+    language: javascript
+    category: injection
+    severity: high
+    confidence: 0.88
+    cwe: CWE-943
+    owasp: "A03:2021-Injection"
+    tags: [graphql-injection, api, javascript, nodejs]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "graphql-injection"
+    patterns:
+      - type: regex
+        pattern: 'graphql\s*\(\s*`[^`]{0,300}\$\{(?:req\.|request\.|user|input|params)\b'
+        description: "GraphQL query with template literal injection"
+      - type: regex
+        pattern: '(?:query|mutation)\s*\{[^}]{0,200}\$\{(?:req\.|user|input)\b'
+        description: "GraphQL operation with interpolated user input"
+      - type: regex
+        pattern: '\.(?:graphql|execute)\s*\(\s*(?:req\.body\.query|userQuery|rawQuery)\s*[,)]'
+        description: "GraphQL execute with raw user-provided query string"
+      - type: regex
+        pattern: 'introspection(?:Query)?\s*[:=]\s*true\b'
+        description: "GraphQL introspection enabled (information disclosure)"
+    anti_patterns:
+      - "graphql-depth-limit"
+      - "graphql-query-complexity"
+      - "graphql-validation-complexity"
+      - "depthLimit("
+      - "costAnalysis("
+      - "persistedQueries"
+      - "allowedQueries"
+      - "graphql-rate-limit"
+    remediation: >
+      Use GraphQL variables for all user input — never interpolate into query strings.
+      Implement query depth limiting with graphql-depth-limit.
+      Use query complexity analysis to prevent resource exhaustion.
+      Disable introspection in production.
+      Consider persisted/allowlisted queries.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+    cross_rule_intelligence:
+      related_rules: ["INJ-GQL-PY-001"]
+
+  - rule_id: "INJ-GQL-PY-001"
+    title: "GraphQL Query Injection (Python)"
+    language: python
+    category: injection
+    severity: high
+    confidence: 0.88
+    cwe: CWE-943
+    owasp: "A03:2021-Injection"
+    tags: [graphql-injection, api, python, graphene, strawberry]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "graphql-injection"
+    patterns:
+      - type: regex
+        pattern: 'graphql_sync\s*\(\s*schema\s*,\s*(?:request\.(?:body|data|json)|raw_query)'
+        description: "graphql-core execute with raw request body"
+      - type: regex
+        pattern: '\.execute\s*\(\s*f[''"](?:\s*query|\s*mutation)\s*\{'
+        description: "GraphQL execute with f-string query"
+      - type: regex
+        pattern: 'execute_graphql\s*\([^)]{0,200}(?:request|user_input|raw_query)'
+        description: "Custom GraphQL executor with user input"
+    anti_patterns:
+      - "graphql.validation"
+      - "max_depth"
+      - "query_complexity"
+      - "graphql_view"
+    remediation: >
+      Use graphql-core's built-in validation. Pass user input as variables,
+      not interpolated into query strings. Set max_depth and cost limits.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # TEMPLATE INJECTION (SSTI)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "INJ-SSTI-PY-001"
+    title: "Server-Side Template Injection — Jinja2/Mako (Python)"
+    description: >
+      Detects server-side template injection (SSTI) in Python applications
+      using Jinja2 or Mako. SSTI enables arbitrary code execution on the
+      server by injecting template directives ({{ }}, <% %>) into
+      user-controlled template content.
+    language: python
+    category: injection
+    severity: critical
+    confidence: 0.94
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags: [ssti, template-injection, jinja2, mako, python, rce]
+    detection_layer: 2
+    attack_surface_type: "web"
+    vulnerability_family: "template-injection"
+    patterns:
+      - type: regex
+        pattern: 'Template\s*\(\s*(?:request\.|user_input|f[''"]|[''"].*?\+\s*(?:request|user|input))'
+        description: "Jinja2/Mako Template() with user-controlled content"
+      - type: regex
+        pattern: '(?:from_string|template_string)\s*\(\s*(?:request\.|user|input|data|body)'
+        description: "Template.from_string with user input"
+      - type: regex
+        pattern: 'render_template_string\s*\(\s*(?:request\.|user|input|data|f[''"])'
+        description: "Flask render_template_string with user input"
+      - type: regex
+        pattern: 'Environment\s*\([^)]*\)\.(?:from_string|get_template)\s*\([^)]{0,100}(?:request|user|input)'
+        description: "Jinja2 Environment rendering user-controlled template"
+      - type: regex
+        pattern: 'MakoTemplate\s*\(\s*(?:text|source)\s*=\s*(?:request|user|input)'
+        description: "Mako template with user-controlled source"
+    anti_patterns:
+      - "render_template("
+      - "autoescape=True"
+      - "SandboxedEnvironment"
+      - "jinja2.sandbox"
+      - "select_autoescape"
+      - "Markup("
+    remediation: >
+      Never pass user input as template content. Use render_template() with
+      file-based templates and pass user data as context variables only.
+      If dynamic templates are required, use jinja2.sandbox.SandboxedEnvironment.
+      Enable autoescape: Environment(autoescape=select_autoescape()).
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["INJ-SSTI-JAVA-001", "RCE-PY-001"]
+      high_impact_flag: true
+    exploit_scenario:
+      attack_example: >
+        Developer uses render_template_string(request.form['template']).
+        Attacker submits: {{config.__class__.__init__.__globals__['os'].popen('id').read()}}
+        This executes arbitrary OS commands through Jinja2's template engine.
+      example_payload: "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}"
+      attacker_objective: "Remote code execution via template engine sandbox escape"
+
+  - rule_id: "INJ-SSTI-JAVA-001"
+    title: "Server-Side Template Injection — Freemarker/Thymeleaf/Pebble (Java)"
+    language: java
+    category: injection
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags: [ssti, template-injection, freemarker, thymeleaf, pebble, java]
+    detection_layer: 2
+    attack_surface_type: "web"
+    vulnerability_family: "template-injection"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Template\s*\([^)]{0,100}(?:request\.|getParameter|@RequestParam|userInput)'
+        description: "Freemarker Template with user-controlled content"
+      - type: regex
+        pattern: '(?:Freemarker|FreeMarker)[^;]{0,200}\.process\s*\([^)]{0,200}(?:request|user|input)'
+        description: "Freemarker process with user input"
+      - type: regex
+        pattern: 'templateEngine\.process\s*\([^)]{0,200}(?:request|getParameter|@RequestParam)'
+        description: "Thymeleaf process with user-controlled template"
+      - type: regex
+        pattern: 'PebbleEngine[^;]{0,200}\.getTemplate\s*\([^)]{0,100}(?:request|user|input)'
+        description: "Pebble template with user-controlled path"
+      - type: regex
+        pattern: '__\$\{[^}]{0,100}(?:T\(|new\s+|Runtime|ProcessBuilder)\b'
+        description: "Thymeleaf OGNL/SpEL expression injection payload"
+    anti_patterns:
+      - "templateResolver"
+      - "ClassLoaderTemplateResolver"
+      - "SpringTemplateEngine"
+      - "setSandbox"
+    remediation: >
+      Use file-based template resolution, never user-provided template names/content.
+      For Thymeleaf, use th:text (escaped) instead of th:utext (unescaped).
+      Disable dangerous built-ins in Freemarker: cfg.setNewBuiltinClassResolver(SAFER_RESOLVER).
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["INJ-SSTI-PY-001"]
+      high_impact_flag: true
+
+  - rule_id: "INJ-SSTI-JS-001"
+    title: "Server-Side Template Injection (JavaScript/Node.js)"
+    language: javascript
+    category: injection
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-94
+    owasp: "A03:2021-Injection"
+    tags: [ssti, template-injection, ejs, pug, handlebars, nodejs]
+    detection_layer: 2
+    attack_surface_type: "web"
+    vulnerability_family: "template-injection"
+    patterns:
+      - type: regex
+        pattern: 'ejs\.render\s*\(\s*(?:req\.body|req\.query|req\.params|userInput|template)\b'
+        description: "EJS render with user-controlled template string"
+      - type: regex
+        pattern: 'pug\.render\s*\(\s*(?:req\.body|req\.query|userInput|template)\b'
+        description: "Pug render with user template"
+      - type: regex
+        pattern: 'Handlebars\.compile\s*\(\s*(?:req\.body|req\.query|userTemplate)\b'
+        description: "Handlebars compile with user template"
+      - type: regex
+        pattern: 'nunjucks\.renderString\s*\(\s*(?:req\.body|req\.query|userInput)\b'
+        description: "Nunjucks renderString with user input"
+    anti_patterns:
+      - "res.render("
+      - "path.join"
+      - "template_dir"
+      - "views/"
+    remediation: >
+      Never pass user input as template content. Use res.render() with
+      file-based templates. Pass user data as template context variables only.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # CRLF INJECTION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "INJ-CRLF-PY-001"
+    title: "CRLF Injection / HTTP Response Splitting (Python)"
+    description: >
+      Detects CRLF injection in Python web applications where user input
+      flows into HTTP headers without sanitization. Enables HTTP response
+      splitting, session fixation, and XSS via header injection.
+    language: python
+    category: injection
+    severity: high
+    confidence: 0.90
+    cwe: CWE-113
+    owasp: "A03:2021-Injection"
+    tags: [crlf-injection, http-header-injection, response-splitting, python]
+    detection_layer: 2
+    attack_surface_type: "web"
+    vulnerability_family: "crlf-injection"
+    patterns:
+      - type: regex
+        pattern: '(?:response|headers)\[.{0,50}\]\s*=\s*(?:request\.|user|input|f[''"].*?\{(?:request|user|input))'
+        description: "Response header set with user input"
+      - type: regex
+        pattern: '(?:redirect|make_response|Response)\s*\([^)]{0,200}(?:request\.(?:args|form|GET|POST)|user_input)'
+        description: "Redirect/Response with user-controlled value"
+      - type: regex
+        pattern: 'add_header\s*\([^)]{0,100}(?:request\.|user|input)'
+        description: "add_header with user input"
+      - type: regex
+        pattern: 'set_cookie\s*\([^)]{0,200}(?:request\.|user_input|f[''"].*?\{)'
+        description: "set_cookie with user-controlled value"
+    anti_patterns:
+      - "url_for("
+      - "quote("
+      - "urllib.parse.quote"
+      - "replace('\\r', '').replace('\\n', '')"
+      - "re.sub.*\\\\[rn]"
+    remediation: >
+      Strip CR/LF characters from user input before header injection:
+      value = user_input.replace('\r', '').replace('\n', '').
+      Use urllib.parse.quote() for URL-encoded header values.
+      Modern frameworks (Django 3+, Flask 2+) auto-reject CRLF in headers.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  - rule_id: "INJ-CRLF-JAVA-001"
+    title: "CRLF Injection / HTTP Response Splitting (Java)"
+    language: java
+    category: injection
+    severity: high
+    confidence: 0.90
+    cwe: CWE-113
+    owasp: "A03:2021-Injection"
+    tags: [crlf-injection, http-header-injection, java]
+    detection_layer: 2
+    attack_surface_type: "web"
+    vulnerability_family: "crlf-injection"
+    patterns:
+      - type: regex
+        pattern: '\.(?:setHeader|addHeader|setDateHeader)\s*\([^)]{0,100}(?:request\.getParameter|@RequestParam|userInput)'
+        description: "HttpServletResponse set/addHeader with user input"
+      - type: regex
+        pattern: '\.sendRedirect\s*\(\s*(?:request\.getParameter|@RequestParam|url|redirectUrl)\b'
+        description: "sendRedirect with user-controlled URL"
+      - type: regex
+        pattern: '\.addCookie\s*\(\s*new\s+Cookie\s*\([^)]{0,200}(?:request\.getParameter|userInput)'
+        description: "Cookie with user-controlled value"
+    anti_patterns:
+      - "URLEncoder.encode"
+      - "StringEscapeUtils"
+      - "ESAPI.encoder"
+      - ".replaceAll.*\\\\r|\\\\n"
+    remediation: >
+      Use URLEncoder.encode() for URL parameters in redirects.
+      Strip CR/LF: value.replaceAll("[\\r\\n]", "").
+      Use Spring's UriComponentsBuilder for safe URL construction.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"

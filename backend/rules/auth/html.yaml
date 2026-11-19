@@ -1,0 +1,245 @@
+rules:
+- rule_id: HTML-AUTH-001
+  title: Autocomplete Enabled on Sensitive Fields
+  description: 'Detects sensitive form fields without autocomplete="off".
+
+    '
+  language: html
+  category: auth
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-524
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - html
+  - autocomplete
+  - form
+  patterns:
+  - type: regex
+    pattern: <input\s+[^>]*type=["\x27]password["\x27][^>]*(?!autocomplete=["\x27]off)
+  - type: regex
+    pattern: <input\s+[^>]*name=["\x27](?:card|cc|cvv|ssn|social)[^"]*["\x27][^>]*(?!autocomplete=["\x27]off)
+  anti_patterns:
+  - autocomplete="off"
+  - autocomplete='off'
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-AUTH-002
+  title: Missing CSRF Token in Form
+  description: 'Detects forms with POST method without CSRF token input.
+
+    '
+  language: html
+  category: auth
+  severity: High
+  confidence: 0.78
+  cwe: CWE-352
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - html
+  - csrf
+  - form
+  patterns:
+  - type: regex
+    pattern: <form\s+[^>]*method=["\x27]post["\x27]
+  anti_patterns:
+  - csrf
+  - _token
+  - csrfmiddlewaretoken
+  - antiforgery
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-AUTH-003
+  title: Missing Subresource Integrity
+  description: 'Detects external scripts loaded without SRI hashes.
+
+    '
+  language: html
+  category: auth
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - html
+  - sri
+  - integrity
+  patterns:
+  - type: regex
+    pattern: <script\s+[^>]*src=["\x27]https?://(?!localhost)[^"]+["\x27][^>]*(?!integrity=)
+  anti_patterns:
+  - integrity=
+  - nonce=
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-AUTH-004
+  title: Missing Content Security Policy Meta
+  description: 'Detects HTML pages without CSP meta tag.
+
+    '
+  language: html
+  category: auth
+  severity: Medium
+  confidence: 0.7
+  cwe: CWE-1021
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 3
+  tags:
+  - html
+  - csp
+  - headers
+  patterns:
+  - type: regex
+    pattern: <head>
+  anti_patterns:
+  - Content-Security-Policy
+  - content-security-policy
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-AUTH-005
+  title: Target _blank Without noopener
+  description: 'Detects links with target="_blank" without rel="noopener".
+
+    '
+  language: html
+  category: auth
+  severity: Low
+  confidence: 0.85
+  cwe: CWE-1022
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - html
+  - noopener
+  - tabnapping
+  patterns:
+  - type: regex
+    pattern: <a\s+[^>]*target=["\x27]_blank["\x27][^>]*(?!rel=["\x27][^"]*noopener)
+  anti_patterns:
+  - noopener
+  - noreferrer
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: HTML-SEC-001
+  title: Missing X-Frame-Options Meta
+  description: 'Detects pages without clickjacking protection.
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.72
+  cwe: CWE-1021
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 3
+  tags:
+  - html
+  - clickjacking
+  - x-frame-options
+  patterns:
+  - type: regex
+    pattern: <head>
+  anti_patterns:
+  - X-Frame-Options
+  - frame-ancestors
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: HTML-SEC-002
+  title: Sensitive Data in HTML Comments
+  description: 'Detects sensitive information in HTML comments.
+
+    '
+  language: html
+  category: secrets
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-615
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - html
+  - comments
+  - data-exposure
+  patterns:
+  - type: regex
+    pattern: <!--.*(?:password|secret|token|api[_-]?key|credentials|TODO|FIXME|HACK|internal).*-->
+  anti_patterns:
+  - <!--[if
+  - <!-- end
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: HTML-SEC-003
+  title: Hidden Form Field with Sensitive Data
+  description: 'Detects hidden inputs containing sensitive values.
+
+    '
+  language: html
+  category: secrets
+  severity: High
+  confidence: 0.82
+  cwe: CWE-472
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - html
+  - hidden-field
+  - sensitive-data
+  patterns:
+  - type: regex
+    pattern: <input\s+[^>]*type=["\x27]hidden["\x27][^>]*(?:password|secret|token|key|role|admin|price)[^>]*value=["\x27][^"\x27]+["\x27]
+  anti_patterns:
+  - csrf
+  - _token
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: HTML-SEC-004
+  title: Insecure Mixed Content
+  description: 'Detects HTTP resources loaded on HTTPS pages.
+
+    '
+  language: html
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - html
+  - mixed-content
+  - https
+  patterns:
+  - type: regex
+    pattern: <(?:script|link|img|iframe)\s+[^>]*(?:src|href)=["\x27]http://(?!localhost)
+  anti_patterns:
+  - https://
+  - //
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: HTML-SEC-005
+  title: Form Action to External Domain
+  description: 'Detects forms submitting to external domains.
+
+    '
+  language: html
+  category: framework_misuse
+  severity: High
+  confidence: 0.8
+  cwe: CWE-352
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - html
+  - form
+  - external
+  patterns:
+  - type: regex
+    pattern: <form\s+[^>]*action=["\x27]https?://[^"\x27]*["\x27]
+  anti_patterns:
+  - action="/
+  - action='./
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

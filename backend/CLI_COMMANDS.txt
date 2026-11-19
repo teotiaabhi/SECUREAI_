@@ -1,0 +1,65 @@
+SecureAI Code Analyzer — CLI Install & Command Reference
+==========================================================
+
+INSTALL
+-------
+cd backend
+pip install -e .
+
+This registers the `secureai` command globally (console script) and
+attempts to auto-install the OpenAI Codex CLI (needs Node.js 22+) for
+AI-powered scanning. If that step fails/skips, install it manually:
+npm install -g @openai/codex
+
+Verify install:
+secureai version
+
+
+BASIC SCAN
+----------
+secureai scan .                                Scan current directory
+secureai scan ./src                            Scan a specific folder
+secureai scan ./app/file.py                    Scan a single file
+
+
+SCAN OPTIONS
+------------
+secureai scan . -o report.json                 Custom output report path (default: secureai-report.json)
+secureai scan . --severity high                Only show high+ severity findings (info|low|medium|high|critical)
+secureai scan . --lang python,javascript       Only scan specific languages (comma-separated)
+secureai scan . --json                         Print raw JSON to stdout (no terminal formatting)
+secureai scan . --no-progress                  Disable live progress output
+secureai scan . --workers 8                    Set number of parallel worker processes (default: auto)
+secureai scan . --confidence-threshold high    Minimum confidence to report (low|medium|high, default: medium)
+secureai scan . --show-low-confidence          Include low-confidence findings too
+secureai scan . --debug-rule SEC-007           Show detailed match analysis for one rule ID
+secureai scan . --debug-rule SEC-007 --debug-file src/auth.py   Limit debug output to one file
+
+
+AI-POWERED SCAN (Codex false-positive removal)
+-----------------------------------------------
+secureai scan . --ai                           Run normal scan + send findings to OpenAI Codex CLI for FP removal
+secureai scan . --ai --ai-timeout 300          Increase Codex timeout (seconds, default: 180)
+secureai scan ai .                             Shorthand alias for "scan . --ai"
+
+Note: Codex CLI uses its own auth — run `codex auth` once and sign in
+with your ChatGPT account (free tier works). No API key needed.
+
+
+RULES
+-----
+secureai rules                                 List all loaded rules
+secureai rules --lang python                   Rules for one language only
+secureai rules --severity critical             Filter by severity
+secureai rules --category "Config & Infra"     Filter by rule category
+
+
+VERSION / INFO
+--------------
+secureai version                               Show version, rule count, languages, categories
+
+
+HELP
+----
+secureai --help                                Show all commands
+secureai scan --help                           Show all scan options

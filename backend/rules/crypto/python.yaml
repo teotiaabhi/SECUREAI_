@@ -1,0 +1,1665 @@
+rules:
+  - rule_id: "CRYPTO-PY-001"
+    title: "Weak Hash Algorithm via hashlib (MD5/SHA1)"
+    description: >
+      Detects usage of cryptographically broken hash algorithms MD5 and SHA1 through Python's
+      hashlib module or direct imports. MD5 is vulnerable to collision attacks demonstrated by
+      Wang et al. (2004), and SHA1 was practically broken by Google's SHAttered attack (2017).
+      Python's hashlib makes these algorithms easily accessible, but they must not be used for
+      password hashing, digital signatures, certificate validation, or integrity verification
+      of security-sensitive data. NIST SP 800-131A Rev.2 disallows SHA-1 for digital signatures.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-328
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-hash
+      - md5
+      - sha1
+      - hashlib
+      - python
+      - integrity
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'hashlib\.md5\s*\('
+        description: "hashlib.md5() constructor call"
+      - type: regex
+        pattern: 'hashlib\.sha1\s*\('
+        description: "hashlib.sha1() constructor call"
+      - type: regex
+        pattern: 'hashlib\.new\s*\(\s*[''"](?:md5|sha1?)[''"]'
+        description: "hashlib.new() with weak algorithm name"
+      - type: regex
+        pattern: 'from\s+hashlib\s+import\s+(?:.*\b)?(?:md5|sha1)\b'
+        description: "Direct import of md5 or sha1 from hashlib"
+      - type: regex
+        pattern: 'import\s+md5\b'
+        description: "Import of deprecated md5 module (Python 2 style)"
+      - type: regex
+        pattern: 'hmac\.new\s*\([^,]+,\s*[^,]*,\s*hashlib\.(?:md5|sha1)'
+        description: "HMAC using weak hash as digestmod"
+      - type: regex
+        pattern: 'hmac\.new\s*\([^,]+,\s*[^,]*,\s*[''"](?:md5|sha1)[''"]'
+        description: "HMAC with weak hash algorithm string"
+      - type: regex
+        pattern: 'hashlib\.(?:md5|sha1)\s*\(\s*(?:password|passwd|secret|token|key)'
+        description: "Weak hash applied directly to security-sensitive variable"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - 'conftest\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'checksum'
+      - 'etag'
+      - 'cache_key'
+      - 'fingerprint.*dedup'
+      - '#\s*legacy'
+      - 'mock'
+      - 'fixture'
+      - 'usedforsecurity\s*=\s*False'
+      - 'file.*integrity.*non.?security'
+    bypass_variants:
+      - description: "Algorithm name stored in variable and passed dynamically"
+        pattern: '(?:algo|hash_name|method)\s*=\s*[''"](?:md5|sha1)[''"][\s\S]{0,100}hashlib\.new\s*\(\s*(?:algo|hash_name|method)'
+      - description: "getattr used to dynamically access hash function"
+        pattern: 'getattr\s*\(\s*hashlib\s*,\s*(?:algo|hash_name|method)\s*\)'
+      - description: "Hash algorithm passed as function parameter"
+        pattern: 'def\s+\w+\s*\([^)]*hash_algo[^)]*\)[\s\S]{0,200}hashlib\.new\s*\(\s*hash_algo'
+    evasion_indicators:
+      - "Algorithm name loaded from configuration file"
+      - "Hash function selected at runtime via getattr"
+      - "Wrapper function hiding direct hashlib usage"
+      - "Third-party library wrapping hashlib internally"
+    encoding_variants:
+      - type: "bytes_literal"
+        pattern: 'hashlib\.new\s*\(\s*b[''"](?:md5|sha1)[''"]'
+      - type: "format_string"
+        pattern: 'hashlib\.new\s*\(\s*f[''"]'
+      - type: "variable_concat"
+        pattern: 'hashlib\.new\s*\(\s*[''"]m[''"][\s]*\+[\s]*[''"]d5[''"]'
+    multi_function_chain_patterns:
+      - "hashlib.md5(data).hexdigest() for password storage"
+      - "hmac.new with md5 digestmod for API token generation"
+      - "hashlib.sha1 feeding into signature verification"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Collision attacks on MD5/SHA1 enable signature forgery, password cracking via rainbow tables, and integrity check bypasses"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_input"
+        sink: "hash_comparison"
+        through: "hashlib.md5(input).hexdigest()"
+      - source: "password_field"
+        sink: "database_column"
+        through: "hashlib.sha1(password).hexdigest()"
+      - source: "request_body"
+        sink: "token_generation"
+        through: "hmac.new(key, data, hashlib.md5)"
+    impact: |
+      Using MD5 or SHA1 for security-sensitive operations in Python applications leads to:
+      - Password hashes crackable via rainbow tables or GPU-accelerated brute force
+      - MD5 collision generation in seconds enabling document/certificate forgery
+      - SHA1 chosen-prefix collisions demonstrated (SHAttered, Shambles attacks)
+      - Non-compliance with NIST SP 800-131A, PCI-DSS 4.0, FIPS 140-3, and HIPAA
+      - Integrity verification bypass through crafted collisions
+      - HMAC with MD5 digestmod weakens authentication token security
+    remediation: |
+      Replace weak hashes with secure alternatives:
+
+      ```python
+      # VULNERABLE: MD5 for password hashing
+      password_hash = hashlib.md5(password.encode()).hexdigest()
+
+      # SECURE: Use bcrypt for password hashing
+      import bcrypt
+      password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12))
+
+      # SECURE: Use argon2 for password hashing (recommended)
+      from argon2 import PasswordHasher
+      ph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
+      password_hash = ph.hash(password)
+
+      # SECURE: Use SHA-256 for integrity verification
+      integrity_hash = hashlib.sha256(data).hexdigest()
+
+      # SECURE: Use SHA-256 HMAC for message authentication
+      import hmac
+      mac = hmac.new(key, data, hashlib.sha256).hexdigest()
+
+      # Python 3.9+: hashlib.md5(usedforsecurity=False) for non-security uses
+      checksum = hashlib.md5(data, usedforsecurity=False).hexdigest()
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/328.html"
+      - "https://docs.python.org/3/library/hashlib.html"
+      - "https://shattered.io/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'password'
+        - 'token'
+        - 'signature'
+        - 'verify'
+        - 'authenticate'
+        - 'session'
+        - 'secret'
+      taint_source_indicators:
+        - 'request\.'
+        - 'flask\.request'
+        - 'django\.http'
+        - 'sys\.argv'
+        - 'input\('
+      taint_sink_indicators:
+        - '\.hexdigest\('
+        - '\.digest\('
+        - 'cursor\.execute'
+        - 'session\['
+        - 'response\.set_cookie'
+      sanitization_patterns:
+        - 'bcrypt'
+        - 'argon2'
+        - 'scrypt'
+        - 'hashlib\.sha256'
+        - 'hashlib\.sha512'
+        - 'hashlib\.sha3'
+        - 'hashlib\.blake2'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + business_impact_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits MD5 password hashing in a Django application:
+        1. Attacker obtains a database dump through SQL injection or cloud misconfiguration
+        2. Password hashes are stored as MD5 hexdigests without salting
+        3. Attacker uses hashcat with rockyou.txt wordlist to crack MD5 hashes at 25 billion/sec
+        4. Over 80% of passwords are recovered within minutes
+        5. Attacker uses recovered passwords for credential stuffing across other services
+        6. Accounts with admin privileges are compromised first due to targeted cracking
+      example_payload: "hashlib.md5(password.encode('utf-8')).hexdigest()"
+      attacker_objective: "Crack weak MD5/SHA1 password hashes to recover plaintext credentials for account takeover"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-002"
+        - "CRYPTO-PY-003"
+        - "CRYPTO-PY-006"
+
+  - rule_id: "CRYPTO-PY-002"
+    title: "Weak Cipher Algorithm via PyCryptodome (DES/RC4/Blowfish)"
+    description: >
+      Detects usage of weak or deprecated symmetric cipher algorithms through PyCryptodome
+      (Crypto/Cryptodome) or the legacy PyCrypto library. DES with its 56-bit key is trivially
+      brute-forceable. Triple DES (3DES) is vulnerable to Sweet32 birthday attacks on its
+      64-bit blocks. RC4 has known keystream biases. Blowfish's 64-bit block size limits its
+      secure usage. These algorithms are prohibited by modern security standards and must be
+      replaced with AES-256 or ChaCha20-Poly1305.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-cipher
+      - des
+      - rc4
+      - blowfish
+      - pycryptodome
+      - symmetric-encryption
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'from\s+Crypto(?:dome)?\.Cipher\s+import\s+(?:.*\b)?(?:DES|DES3|ARC4|Blowfish)\b'
+        description: "Import of weak cipher from PyCryptodome"
+      - type: regex
+        pattern: '(?:Crypto|Cryptodome)\.Cipher\.(?:DES|DES3|ARC4|Blowfish)\.new\s*\('
+        description: "Instantiation of weak cipher via PyCryptodome"
+      - type: regex
+        pattern: 'DES\.new\s*\('
+        description: "DES cipher instantiation after import"
+      - type: regex
+        pattern: 'DES3\.new\s*\('
+        description: "Triple DES cipher instantiation after import"
+      - type: regex
+        pattern: 'ARC4\.new\s*\('
+        description: "RC4 (ARC4) cipher instantiation after import"
+      - type: regex
+        pattern: 'Blowfish\.new\s*\('
+        description: "Blowfish cipher instantiation after import"
+      - type: regex
+        pattern: 'from\s+Crypto\.Cipher\s+import\s+XOR'
+        description: "XOR cipher import (completely insecure)"
+      - type: regex
+        pattern: 'algorithms\s*=\s*[^]]*[''"](?:DES|3DES|RC4|Blowfish)[''"]'
+        description: "Weak algorithm specified in configuration list"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - '#\s*legacy.*required'
+      - 'migration'
+      - 'backward.*compat'
+      - 'decrypt_only'
+      - 'read_only_legacy'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'deprecated_wrapper'
+    bypass_variants:
+      - description: "Dynamic import of cipher module using importlib"
+        pattern: 'importlib\.import_module\s*\(\s*[''"]Crypto\.Cipher\.(?:DES|ARC4|Blowfish)[''"]'
+      - description: "Cipher class accessed via getattr on Cipher module"
+        pattern: 'getattr\s*\(\s*(?:Crypto|Cryptodome)\.Cipher\s*,\s*[''"](?:DES|ARC4)[''"]'
+      - description: "Cipher selected from dictionary mapping"
+        pattern: 'cipher_map\s*\[\s*[''"](?:des|rc4|blowfish)[''"]'
+    evasion_indicators:
+      - "Cipher module imported dynamically via importlib"
+      - "Algorithm selection via dictionary lookup"
+      - "Factory pattern returning cipher instances"
+      - "Cipher class accessed through reflection"
+    encoding_variants:
+      - type: "variable_import"
+        pattern: 'cipher_mod\s*=\s*[''"](?:DES|ARC4|Blowfish)[''"][\s\S]{0,100}import_module'
+      - type: "bytes_algorithm"
+        pattern: 'b[''"](?:DES|RC4|Blowfish)[''"]'
+      - type: "lowercase_reference"
+        pattern: 'cipher_name\s*=\s*[''"](?:des|rc4|blowfish)[''"]'
+    multi_function_chain_patterns:
+      - "DES.new(key, DES.MODE_ECB) -> encrypt chain"
+      - "ARC4.new(key) -> encrypt(plaintext) pipeline"
+      - "Key derivation -> DES3.new -> encrypt -> base64 encode"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak ciphers enable brute-force key recovery and ciphertext decryption, exposing sensitive data including credentials and PII"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data"
+        sink: "encrypted_storage"
+        through: "DES.new(key).encrypt(data)"
+      - source: "api_request"
+        sink: "encrypted_response"
+        through: "ARC4.new(key).encrypt(payload)"
+      - source: "database_field"
+        sink: "encrypted_column"
+        through: "DES3.new(key).encrypt(value)"
+    impact: |
+      Using weak cipher algorithms in Python applications creates severe security risks:
+      - DES 56-bit key exhaustion achievable in hours with modern hardware
+      - 3DES vulnerable to Sweet32 attack after 2^32 blocks (32GB of data)
+      - RC4 statistical biases enable plaintext recovery in TLS and WPA protocols
+      - Blowfish 64-bit block size enables birthday attacks
+      - XOR cipher provides zero security (simple frequency analysis breaks it)
+      - Regulatory violations: PCI-DSS, HIPAA, GDPR, SOC2 all mandate strong encryption
+    remediation: |
+      Replace weak ciphers with AES-256-GCM or ChaCha20-Poly1305:
+
+      ```python
+      # VULNERABLE: Using DES
+      from Crypto.Cipher import DES
+      cipher = DES.new(key_8bytes, DES.MODE_ECB)
+      encrypted = cipher.encrypt(pad(data, 8))
+
+      # SECURE: Use AES-256-GCM (authenticated encryption)
+      from Crypto.Cipher import AES
+      from Crypto.Random import get_random_bytes
+
+      key = get_random_bytes(32)  # 256-bit key
+      nonce = get_random_bytes(12)
+      cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+      ciphertext, tag = cipher.encrypt_and_digest(data)
+      # Store: nonce + tag + ciphertext
+
+      # SECURE: Use ChaCha20-Poly1305
+      from Crypto.Cipher import ChaCha20_Poly1305
+      key = get_random_bytes(32)
+      cipher = ChaCha20_Poly1305.new(key=key)
+      ciphertext, tag = cipher.encrypt_and_digest(data)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://pycryptodome.readthedocs.io/en/latest/"
+      - "https://sweet32.info/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'encrypt'
+        - 'decrypt'
+        - 'cipher'
+        - 'Crypto'
+        - 'Cryptodome'
+        - 'secret'
+        - 'sensitive'
+      taint_source_indicators:
+        - 'request\.'
+        - 'form\.'
+        - 'json\.'
+        - 'input\('
+        - 'os\.environ'
+      taint_sink_indicators:
+        - '\.encrypt\('
+        - '\.decrypt\('
+        - 'cursor\.execute'
+        - 'json\.dump'
+        - 'open\(.*, .w'
+      sanitization_patterns:
+        - 'AES\.new.*MODE_GCM'
+        - 'AES\.new.*MODE_CCM'
+        - 'ChaCha20_Poly1305'
+        - 'AES\.new.*MODE_SIV'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_sensitivity_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits DES encryption in a Python microservice:
+        1. Attacker captures encrypted API payloads via network interception
+        2. Attacker identifies DES encryption from 8-byte block patterns in ciphertext
+        3. Using FPGA-based DES cracker, attacker brute-forces the 56-bit key in hours
+        4. Attacker decrypts historical and future traffic with recovered key
+        5. Extracted data includes user credentials, payment information, and API secrets
+      example_payload: "DES.new(b'8byteky', DES.MODE_ECB).encrypt(pad(sensitive_data, 8))"
+      attacker_objective: "Brute-force weak cipher keys to decrypt sensitive application data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-001"
+        - "CRYPTO-PY-003"
+        - "CRYPTO-PY-005"
+        - "CRYPTO-PY-006"
+
+  - rule_id: "CRYPTO-PY-003"
+    title: "Hardcoded Cryptographic Keys in Python Code"
+    description: >
+      Detects hardcoded cryptographic keys, secrets, and passwords embedded directly in Python
+      source code. Hardcoded keys are a critical vulnerability because they are extractable
+      through source code review, version control history, compiled bytecode (.pyc files),
+      and decompilation. Key rotation requires code changes and redeployment. This pattern
+      is especially dangerous in Python due to the ease of decompiling .pyc files and the
+      common practice of publishing packages to PyPI.
+    language: python
+    category: crypto
+    severity: Critical
+    confidence: 0.88
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - hardcoded-key
+      - secret-management
+      - credential-exposure
+      - key-management
+      - python
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: '(?:encryption_key|secret_key|crypto_key|aes_key|private_key)\s*=\s*[''"][A-Za-z0-9+/=]{16,}[''"]'
+        description: "Named encryption key variable with hardcoded string value"
+      - type: regex
+        pattern: 'AES\.new\s*\(\s*b?[''"][^''"]{16,}[''"]'
+        description: "Hardcoded key passed directly to AES.new()"
+      - type: regex
+        pattern: '(?:SECRET_KEY|ENCRYPTION_KEY|AES_KEY|CIPHER_KEY)\s*=\s*b?[''"][^''"]{16,}[''"]'
+        description: "Constant with crypto-related name assigned hardcoded value"
+      - type: regex
+        pattern: 'key\s*=\s*b[''"]\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){7,}[''"]'
+        description: "Key as hardcoded bytes literal with hex escapes"
+      - type: regex
+        pattern: 'Fernet\s*\(\s*b?[''"][A-Za-z0-9_-]{43}=[''"]'
+        description: "Hardcoded Fernet key (base64url-encoded 32 bytes)"
+      - type: regex
+        pattern: '(?:HMAC|hmac\.new)\s*\(\s*b?[''"][^''"]{16,}[''"]'
+        description: "Hardcoded HMAC secret key"
+      - type: regex
+        pattern: 'jwt\.encode\s*\([^,]+,\s*[''"][^''"]{8,}[''"]'
+        description: "Hardcoded JWT signing secret"
+      - type: regex
+        pattern: 'key\s*=\s*bytes\.fromhex\s*\(\s*[''"][0-9a-fA-F]{32,}[''"]'
+        description: "Key from hardcoded hex string via bytes.fromhex()"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - 'conftest\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'os\.environ'
+      - 'os\.getenv'
+      - 'vault_client'
+      - 'boto3.*kms'
+      - 'secretsmanager'
+      - 'CHANGEME'
+      - 'placeholder'
+      - 'TODO.*replace'
+      - 'example_key'
+    bypass_variants:
+      - description: "Key split across multiple string concatenations"
+        pattern: '(?:key|secret)\s*=\s*[''"][^''"]+[''"][\s]*\+[\s]*[''"][^''"]+[''"]'
+      - description: "Key built from list of integers"
+        pattern: '(?:key|secret)\s*=\s*bytes\s*\(\s*\[\s*(?:\d+\s*,\s*){7,}'
+      - description: "Key decoded from base64 literal"
+        pattern: 'base64\.(?:b64decode|urlsafe_b64decode)\s*\(\s*b?[''"][A-Za-z0-9+/=_-]{16,}[''"]'
+    evasion_indicators:
+      - "Key split across multiple variables and concatenated"
+      - "Key stored as list of integers converted to bytes"
+      - "Key base64-encoded in source and decoded at runtime"
+      - "Key embedded in docstring or comment and extracted programmatically"
+    encoding_variants:
+      - type: "base64_encoded_key"
+        pattern: 'base64\.b64decode\s*\(\s*b?[''"][A-Za-z0-9+/=]{20,}[''"]'
+      - type: "hex_encoded_key"
+        pattern: '(?:key|secret)\s*=\s*[''"][0-9a-fA-F]{32,}[''"]'
+      - type: "bytes_array_key"
+        pattern: '(?:key|secret)\s*=\s*bytearray\s*\(\s*\[\s*(?:0x[0-9a-fA-F]+\s*,\s*){7,}'
+    multi_function_chain_patterns:
+      - "Hardcoded key -> AES.new() -> encrypt -> base64 encode"
+      - "Constant key -> Fernet() -> encrypt_at_rest -> database store"
+      - "Literal secret -> hmac.new -> token generation -> cookie set"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Hardcoded keys extracted from source or .pyc files allow decryption of all data encrypted with that key across all deployments"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "string_literal"
+        sink: "AES.new_key_parameter"
+        through: "variable_assignment"
+      - source: "constant_definition"
+        sink: "Fernet_constructor"
+        through: "module_level_constant"
+      - source: "hardcoded_bytes"
+        sink: "jwt_encode_secret"
+        through: "import_from_config_module"
+    impact: |
+      Hardcoded cryptographic keys in Python code create catastrophic security risks:
+      - Python .pyc bytecode is trivially decompilable, exposing embedded keys
+      - Keys in version control (git) persist forever in commit history
+      - Shared keys across environments mean dev/staging breaches compromise production
+      - Key rotation requires code changes, testing, and deployment across all instances
+      - Published Python packages on PyPI expose keys to the entire ecosystem
+      - Violates PCI-DSS Requirement 3.5, NIST SP 800-57, SOC2 CC6.1
+    remediation: |
+      Use secrets management and environment-based key injection:
+
+      ```python
+      # VULNERABLE: Hardcoded key
+      SECRET_KEY = 'my-secret-encryption-key-12345678'
+      cipher = AES.new(SECRET_KEY.encode(), AES.MODE_GCM)
+
+      # SECURE: Load from environment variable
+      import os
+      SECRET_KEY = os.environ['ENCRYPTION_KEY']
+      key = bytes.fromhex(SECRET_KEY)
+      cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+
+      # SECURE: Use AWS KMS
+      import boto3
+      kms = boto3.client('kms')
+      response = kms.decrypt(CiphertextBlob=encrypted_key)
+      key = response['Plaintext']
+
+      # SECURE: Use HashiCorp Vault
+      import hvac
+      client = hvac.Client(url=os.environ['VAULT_ADDR'])
+      secret = client.secrets.kv.v2.read_secret_version(path='encryption')
+      key = bytes.fromhex(secret['data']['data']['key'])
+
+      # SECURE: Generate keys securely
+      from Crypto.Random import get_random_bytes
+      key = get_random_bytes(32)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/798.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'encrypt'
+        - 'decrypt'
+        - 'cipher'
+        - 'AES'
+        - 'Fernet'
+        - 'hmac'
+        - 'jwt'
+      taint_source_indicators:
+        - 'const.*='
+        - 'KEY.*='
+        - 'SECRET.*='
+        - 'module_level_assignment'
+      taint_sink_indicators:
+        - 'AES\.new'
+        - 'Fernet\('
+        - 'hmac\.new'
+        - 'jwt\.encode'
+        - 'pbkdf2_hmac'
+      sanitization_patterns:
+        - 'os\.environ'
+        - 'os\.getenv'
+        - 'vault'
+        - 'kms'
+        - 'secrets_manager'
+        - 'get_random_bytes'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + exposure_surface_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a Flask application with hardcoded encryption keys:
+        1. Attacker finds exposed .git directory (or repository is public on GitHub)
+        2. Attacker clones the repository and searches for crypto-related constants
+        3. SECRET_KEY = 'hardcoded-flask-secret-key-123' found in config.py
+        4. Attacker forges Flask session cookies using the extracted secret key
+        5. Attacker sets is_admin=True in the forged session cookie
+        6. Attacker gains administrative access to the application
+      example_payload: "SECRET_KEY = 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'"
+      attacker_objective: "Extract hardcoded keys from source code to decrypt data and forge authentication tokens"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-002"
+        - "CRYPTO-PY-004"
+        - "CRYPTO-PY-008"
+
+  - rule_id: "CRYPTO-PY-004"
+    title: "Python random Module Used for Security-Sensitive Operations"
+    description: >
+      Detects usage of Python's random module (which uses the Mersenne Twister PRNG) for
+      generating security-sensitive values such as tokens, passwords, session identifiers,
+      CSRF tokens, or cryptographic keys. The Mersenne Twister is not cryptographically
+      secure; its internal state can be fully recovered from 624 consecutive 32-bit outputs.
+      Python 3.6+ provides the secrets module specifically designed for cryptographic
+      randomness, and os.urandom() has always been available for secure random bytes.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.91
+    cwe: CWE-338
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-random
+      - mersenne-twister
+      - prng
+      - token-generation
+      - python
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'random\.(?:random|randint|randrange|choice|choices|sample|uniform)\s*\([^)]*\)[\s\S]{0,80}(?:token|secret|key|password|nonce|salt|session|csrf|otp|pin)'
+        description: "random module function near security-sensitive variable names"
+      - type: regex
+        pattern: '(?:token|secret|key|password|nonce|salt|session|csrf|otp|pin)[\s\S]{0,80}random\.(?:random|randint|randrange|choice|choices|sample)\s*\('
+        description: "Security-sensitive variable assigned using random module"
+      - type: regex
+        pattern: 'random\.getrandbits\s*\(\s*\d+\s*\)[\s\S]{0,80}(?:token|key|secret|nonce)'
+        description: "random.getrandbits used for security-sensitive value"
+      - type: regex
+        pattern: 'def\s+generate_(?:token|key|secret|password|otp|nonce|salt)\s*\([^)]*\)[\s\S]{0,300}random\.'
+        description: "Security generator function using random module internally"
+      - type: regex
+        pattern: '[''"]\.join\s*\(\s*random\.(?:choice|choices|sample)\s*\('
+        description: "String built from random.choice for token/password generation"
+      - type: regex
+        pattern: 'random\.SystemRandom\s*\(\s*\)[\s\S]{0,80}(?:token|key|secret)'
+        description: "SystemRandom usage (secure but should use secrets module)"
+      - type: regex
+        pattern: 'import\s+random[\s\S]{0,500}(?:token|key|password|secret|csrf|session)[\s\S]{0,100}random\.'
+        description: "random module imported and used in security context"
+      - type: regex
+        pattern: 'random\.seed\s*\(\s*(?:\d+|[''"][^''"]+[''"])\s*\)[\s\S]{0,200}(?:encrypt|key|token)'
+        description: "random module seeded with static value for crypto operations"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'shuffle.*display'
+      - 'sample.*visualization'
+      - 'random.*color'
+      - 'random.*delay'
+      - 'random.*jitter'
+      - 'mock'
+      - 'fixture'
+      - 'simulation'
+      - 'game'
+      - 'numpy\.random'
+    bypass_variants:
+      - description: "random module aliased on import"
+        pattern: 'import\s+random\s+as\s+\w+[\s\S]{0,100}\w+\.(?:choice|randint)\s*\('
+      - description: "random function bound to local variable"
+        pattern: '(?:randint|choice|randrange)\s*=\s*random\.(?:randint|choice|randrange)'
+      - description: "Random class instantiated and used"
+        pattern: 'rng\s*=\s*random\.Random\s*\(\s*\)[\s\S]{0,100}rng\.(?:randint|choice|random)\s*\('
+    evasion_indicators:
+      - "random module aliased to disguise usage"
+      - "random function assigned to local variable"
+      - "Custom Random subclass wrapping Mersenne Twister"
+      - "Third-party library internally using random module"
+    encoding_variants:
+      - type: "from_import"
+        pattern: 'from\s+random\s+import\s+(?:choice|randint|randrange|random)'
+      - type: "getattr_access"
+        pattern: 'getattr\s*\(\s*random\s*,\s*[''"](?:choice|randint|random)[''"]'
+      - type: "class_method"
+        pattern: 'self\._rng\.(?:choice|randint|random)\s*\('
+    multi_function_chain_patterns:
+      - "random.choice(charset) in loop -> join -> token string"
+      - "random.randint -> hex conversion -> session ID"
+      - "random.seed(time) -> random.random() -> key derivation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Predictable Mersenne Twister outputs enable token prediction, session hijacking, and CSRF bypass"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "random.choice()"
+        sink: "session_token"
+        through: "join_loop"
+      - source: "random.randint()"
+        sink: "otp_value"
+        through: "string_format"
+      - source: "random.getrandbits()"
+        sink: "csrf_token"
+        through: "hex_conversion"
+    impact: |
+      Using Python's random module for security-sensitive operations is exploitable:
+      - Mersenne Twister state recoverable from 624 consecutive 32-bit outputs
+      - After state recovery, all future outputs are perfectly predictable
+      - Password reset tokens become guessable, enabling account takeover
+      - CSRF tokens become predictable, bypassing CSRF protection mechanisms
+      - Session identifiers can be predicted for session hijacking
+      - OTP/PIN values can be predicted after observing sufficient outputs
+      - random.seed() with predictable values (time, PID) further reduces entropy
+    remediation: |
+      Use Python's secrets module or os.urandom() for security-sensitive randomness:
+
+      ```python
+      # VULNERABLE: Using random module for tokens
+      import random
+      import string
+      token = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+
+      # SECURE: Use secrets module (Python 3.6+)
+      import secrets
+      token = secrets.token_hex(32)        # 64-char hex string
+      token = secrets.token_urlsafe(32)    # URL-safe base64 string
+      token = secrets.token_bytes(32)      # 32 random bytes
+
+      # SECURE: Cryptographically random integer
+      otp = secrets.randbelow(900000) + 100000  # 6-digit OTP
+
+      # SECURE: Cryptographically random choice
+      password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+
+      # SECURE: Use os.urandom for raw bytes
+      import os
+      key = os.urandom(32)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/338.html"
+      - "https://docs.python.org/3/library/secrets.html"
+      - "https://docs.python.org/3/library/random.html#random.SystemRandom"
+      - "https://jazzy.id.au/2010/09/22/cracking_random_number_generators_part_3.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'token'
+        - 'secret'
+        - 'session'
+        - 'password'
+        - 'nonce'
+        - 'csrf'
+        - 'otp'
+        - 'pin'
+      taint_source_indicators:
+        - 'random\.choice'
+        - 'random\.randint'
+        - 'random\.random'
+        - 'random\.getrandbits'
+      taint_sink_indicators:
+        - 'session\['
+        - 'cookie'
+        - 'token'
+        - 'response\.set_cookie'
+        - 'header'
+      sanitization_patterns:
+        - 'secrets\.'
+        - 'os\.urandom'
+        - 'SystemRandom'
+        - 'get_random_bytes'
+        - 'Crypto\.Random'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + token_criticality_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits predictable password reset tokens in a Django application:
+        1. Attacker observes Python random module used for token generation
+        2. Attacker requests 624+ password reset tokens for their own account
+        3. Using Mersenne Twister untwisting tools, attacker recovers full PRNG state
+        4. Attacker predicts the next tokens that will be generated
+        5. Attacker triggers password reset for target admin account
+        6. Attacker submits the predicted reset token and gains admin access
+      example_payload: "token = ''.join(random.choices(string.hexdigits, k=32))"
+      attacker_objective: "Predict security tokens by recovering the Mersenne Twister PRNG state from observed outputs"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-003"
+        - "CRYPTO-PY-005"
+
+  - rule_id: "CRYPTO-PY-005"
+    title: "Insufficient Cryptographic Key Length in Python"
+    description: >
+      Detects usage of cryptographic keys that do not meet minimum length requirements for
+      their respective algorithms in Python applications. RSA keys below 2048 bits can be
+      factored by well-resourced attackers. AES keys below 256 bits provide reduced security
+      margins. DSA keys below 2048 bits are considered weak. Elliptic curve keys on curves
+      smaller than P-256 offer insufficient security. NIST SP 800-131A Rev.2 and PCI-DSS 4.0
+      mandate minimum key lengths for all cryptographic operations.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.87
+    cwe: CWE-326
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - key-length
+      - rsa
+      - aes
+      - insufficient-key-size
+      - python
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'RSA\.generate\s*\(\s*(?:512|768|1024)\b'
+        description: "PyCryptodome RSA key generation with insufficient bits"
+      - type: regex
+        pattern: 'rsa\.generate_private_key\s*\([^)]*key_size\s*=\s*(?:512|768|1024)\b'
+        description: "cryptography library RSA key with insufficient key_size"
+      - type: regex
+        pattern: 'generate_private_key\s*\(\s*(?:public_exponent\s*=\s*\d+\s*,\s*)?key_size\s*=\s*(?:512|768|1024)\b'
+        description: "RSA generate_private_key with small key_size parameter"
+      - type: regex
+        pattern: 'dsa\.generate_private_key\s*\(\s*key_size\s*=\s*1024\b'
+        description: "DSA key generation with 1024-bit modulus"
+      - type: regex
+        pattern: 'AES\.new\s*\(\s*[^,]{0,40},[\s\S]{0,30}\)[\s\S]{0,50}len\s*\(\s*key\s*\)\s*==\s*16\b'
+        description: "AES with 128-bit (16-byte) key verification"
+      - type: regex
+        pattern: 'get_random_bytes\s*\(\s*16\s*\)[\s\S]{0,80}(?:key|encrypt|cipher|AES)'
+        description: "16-byte (128-bit) random key generation for AES"
+      - type: regex
+        pattern: 'ec\.(?:SECP192R1|SECP224R1)\s*\(\s*\)'
+        description: "Weak elliptic curve (P-192 or P-224)"
+      - type: regex
+        pattern: 'key_size\s*=\s*(?:512|768|1024)\b[\s\S]{0,50}(?:RSA|DSA|rsa|dsa)'
+        description: "Small key_size parameter near RSA/DSA operations"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - '#\s*legacy'
+      - 'benchmark'
+      - 'performance_test'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'non.?sensitive'
+      - 'cache.*encrypt'
+      - 'temporary'
+    bypass_variants:
+      - description: "Key size stored in variable from configuration"
+        pattern: 'key_size\s*=\s*(?:config|settings|options)\.'
+      - description: "Key size passed as function argument"
+        pattern: 'def\s+\w+\s*\([^)]*key_size[^)]*\)[\s\S]{0,200}generate_private_key'
+      - description: "Key size computed from other parameters"
+        pattern: 'key_size\s*=\s*\w+\s*\*\s*\d+'
+    evasion_indicators:
+      - "Key size loaded from configuration file"
+      - "Key size determined at runtime from parameters"
+      - "Key generation wrapped in factory function"
+      - "Key size constants defined in separate module"
+    encoding_variants:
+      - type: "variable_key_size"
+        pattern: 'RSA\.generate\s*\(\s*bits\s*\)[\s\S]{0,100}bits\s*=\s*(?:512|1024)'
+      - type: "config_reference"
+        pattern: 'key_size\s*=\s*int\s*\(\s*(?:os\.environ|config)\.'
+      - type: "computed_size"
+        pattern: 'key_(?:size|length|bits)\s*=\s*2\s*\*\*\s*10\b'
+    multi_function_chain_patterns:
+      - "RSA.generate(1024) -> exportKey -> sign operation"
+      - "generate_private_key(key_size=1024) -> certificate signing"
+      - "get_random_bytes(16) -> AES.new -> encrypt pipeline"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Short RSA keys can be factored to recover private keys, enabling signature forgery and decryption of intercepted communications"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "key_generation"
+        sink: "encryption_operation"
+        through: "short_key_parameter"
+      - source: "RSA.generate(1024)"
+        sink: "jwt_signing"
+        through: "private_key_export"
+      - source: "get_random_bytes(16)"
+        sink: "AES.new"
+        through: "key_variable"
+    impact: |
+      Insufficient key lengths in Python crypto operations create exploitable weaknesses:
+      - RSA-512 publicly factored; RSA-768 factored by academic researchers
+      - RSA-1024 factorable by nation-state actors (estimated cost declining rapidly)
+      - AES-128 lacks safety margin against future quantum computing threats
+      - DSA-1024 deprecated by NIST since 2013
+      - Weak EC curves (P-192, P-224) fall below minimum security level requirements
+      - Non-compliance with PCI-DSS 4.0, FIPS 140-3, NIST SP 800-131A Rev.2
+    remediation: |
+      Use recommended minimum key lengths:
+
+      ```python
+      # VULNERABLE: RSA with 1024-bit key
+      from Crypto.PublicKey import RSA
+      key = RSA.generate(1024)
+
+      # SECURE: RSA with 4096-bit key
+      key = RSA.generate(4096)
+
+      # SECURE: Using cryptography library with proper key size
+      from cryptography.hazmat.primitives.asymmetric import rsa
+      private_key = rsa.generate_private_key(
+          public_exponent=65537,
+          key_size=4096
+      )
+
+      # SECURE: AES-256 (32-byte key)
+      from Crypto.Cipher import AES
+      from Crypto.Random import get_random_bytes
+      key = get_random_bytes(32)  # 256 bits
+      cipher = AES.new(key, AES.MODE_GCM)
+
+      # SECURE: P-384 elliptic curve
+      from cryptography.hazmat.primitives.asymmetric import ec
+      private_key = ec.generate_private_key(ec.SECP384R1())
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/326.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://www.keylength.com/en/4/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'generate'
+        - 'RSA'
+        - 'DSA'
+        - 'key_size'
+        - 'AES'
+        - 'encrypt'
+        - 'sign'
+      taint_source_indicators:
+        - 'config\.'
+        - 'settings\.'
+        - 'options\.'
+        - 'params\.'
+      taint_sink_indicators:
+        - 'AES\.new'
+        - 'sign'
+        - 'encrypt'
+        - 'exportKey'
+        - 'private_bytes'
+      sanitization_patterns:
+        - 'key_size\s*=\s*(?:2048|3072|4096)'
+        - 'RSA\.generate\s*\(\s*(?:2048|3072|4096)'
+        - 'get_random_bytes\s*\(\s*32\s*\)'
+        - 'SECP384R1'
+        - 'SECP521R1'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + algorithm_strength_deficit)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a Python service using 1024-bit RSA for API token signing:
+        1. Attacker obtains the public key from the API's JWKS endpoint
+        2. Using cloud GPU instances for number field sieve factoring
+        3. Attacker factors the 1024-bit RSA modulus and recovers the private key
+        4. Attacker forges API tokens with elevated permissions
+        5. Attacker accesses admin-only endpoints and exfiltrates sensitive data
+      example_payload: "key = RSA.generate(1024)"
+      attacker_objective: "Factor weak RSA keys to forge digital signatures and decrypt protected communications"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-001"
+        - "CRYPTO-PY-002"
+        - "CRYPTO-PY-006"
+
+  - rule_id: "CRYPTO-PY-006"
+    title: "ECB Mode Usage in Symmetric Encryption"
+    description: >
+      Detects usage of Electronic Codebook (ECB) mode for symmetric encryption in Python
+      applications. ECB mode encrypts each block independently with the same key, producing
+      identical ciphertext blocks for identical plaintext blocks. This leaks patterns in the
+      plaintext and is famously demonstrated by the ECB penguin image. ECB mode provides no
+      semantic security (IND-CPA) and must never be used for encrypting data longer than one
+      block. PyCryptodome and the cryptography library both support ECB, making it easy to
+      misuse when developers select it for simplicity.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.94
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - ecb-mode
+      - block-cipher
+      - pattern-leakage
+      - aes
+      - des
+      - semantic-security
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'AES\.new\s*\([^,]+,\s*AES\.MODE_ECB'
+        description: "AES cipher instantiated with ECB mode via PyCryptodome"
+      - type: regex
+        pattern: 'DES\.new\s*\([^,]+,\s*DES\.MODE_ECB'
+        description: "DES cipher instantiated with ECB mode"
+      - type: regex
+        pattern: 'DES3\.new\s*\([^,]+,\s*DES3\.MODE_ECB'
+        description: "Triple DES cipher instantiated with ECB mode"
+      - type: regex
+        pattern: 'algorithms\.AES\s*\([^)]*\)\s*,\s*modes\.ECB\s*\(\s*\)'
+        description: "cryptography library AES with ECB mode"
+      - type: regex
+        pattern: 'Cipher\s*\(\s*algorithms\.(?:AES|TripleDES|Camellia)\s*\([^)]*\)\s*,\s*modes\.ECB'
+        description: "cryptography library Cipher with ECB mode"
+      - type: regex
+        pattern: 'MODE_ECB'
+        description: "Any reference to ECB mode constant"
+      - type: regex
+        pattern: 'mode\s*=\s*[''"](?:ecb|ECB)[''"]'
+        description: "ECB mode specified as string parameter"
+      - type: regex
+        pattern: 'Blowfish\.new\s*\([^,]+,\s*Blowfish\.MODE_ECB'
+        description: "Blowfish cipher with ECB mode"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - '#\s*key.?wrap'
+      - 'ECB.*single.*block'
+      - 'AES.*key.*wrapping'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - '#\s*legacy'
+      - 'unwrap.*key'
+      - 'RFC\s*3394'
+    bypass_variants:
+      - description: "Mode constant stored in variable"
+        pattern: 'mode\s*=\s*(?:AES|DES)\.MODE_ECB[\s\S]{0,100}\.new\s*\([^,]+,\s*mode'
+      - description: "Mode selected from dictionary or config"
+        pattern: 'modes?\s*\[\s*[''"](?:ecb|ECB|0)[''"]'
+      - description: "Mode parameter from function argument"
+        pattern: 'def\s+\w+\s*\([^)]*mode[^)]*\)[\s\S]{0,200}AES\.new\s*\([^,]+,\s*mode'
+    evasion_indicators:
+      - "Mode stored in variable to avoid literal detection"
+      - "Mode selected from configuration dictionary"
+      - "Mode passed as function parameter"
+      - "Cipher factory function hiding mode selection"
+    encoding_variants:
+      - type: "numeric_mode"
+        pattern: 'AES\.new\s*\([^,]+,\s*1\s*[,)]'
+      - type: "variable_mode"
+        pattern: 'cipher_mode\s*=\s*(?:1|AES\.MODE_ECB)'
+      - type: "config_mode"
+        pattern: 'config\[\s*[''"]cipher_mode[''"]'
+    multi_function_chain_patterns:
+      - "AES.new(key, AES.MODE_ECB) -> encrypt -> base64 encode"
+      - "ECB cipher -> pad -> encrypt loop over data blocks"
+      - "DES.new(key, DES.MODE_ECB) -> encrypt -> store in database"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ECB mode leaks plaintext patterns enabling data analysis, block manipulation, and chosen-plaintext attacks"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "plaintext_data"
+        sink: "encrypted_storage"
+        through: "AES.new(key, MODE_ECB).encrypt()"
+      - source: "sensitive_field"
+        sink: "database_column"
+        through: "ECB_encryption"
+      - source: "user_data"
+        sink: "file_storage"
+        through: "DES.new(key, MODE_ECB).encrypt()"
+    impact: |
+      ECB mode creates severe security vulnerabilities in encryption:
+      - Identical plaintext blocks produce identical ciphertext blocks (pattern leakage)
+      - The "ECB penguin" demonstration visually shows how patterns survive encryption
+      - Attackers can detect repeated data, identify patterns, and perform block manipulation
+      - ECB provides no IND-CPA security (the minimum standard for modern encryption)
+      - Block rearrangement attacks allow modifying encrypted data without decrypting
+      - Violates PCI-DSS, HIPAA, NIST SP 800-38A recommendations against ECB for multi-block data
+    remediation: |
+      Replace ECB mode with authenticated encryption (GCM, CCM, or SIV):
+
+      ```python
+      # VULNERABLE: ECB mode
+      from Crypto.Cipher import AES
+      cipher = AES.new(key, AES.MODE_ECB)
+      ciphertext = cipher.encrypt(pad(data, AES.block_size))
+
+      # SECURE: GCM mode (authenticated encryption)
+      from Crypto.Cipher import AES
+      from Crypto.Random import get_random_bytes
+      nonce = get_random_bytes(12)
+      cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+      ciphertext, tag = cipher.encrypt_and_digest(data)
+
+      # SECURE: Using cryptography library with GCM
+      from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+      import os
+      iv = os.urandom(12)
+      cipher = Cipher(algorithms.AES(key), modes.GCM(iv))
+      encryptor = cipher.encryptor()
+      ct = encryptor.update(data) + encryptor.finalize()
+      tag = encryptor.tag
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://blog.filippo.io/the-ecb-penguin/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38a/final"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38d/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'MODE_ECB'
+        - 'ECB'
+        - 'encrypt'
+        - 'cipher'
+        - 'AES'
+        - 'block'
+      taint_source_indicators:
+        - 'plaintext'
+        - 'data'
+        - 'message'
+        - 'user_input'
+      taint_sink_indicators:
+        - '\.encrypt\('
+        - 'cipher\.update'
+        - 'encryptor\.update'
+        - 'database'
+        - 'file\.write'
+      sanitization_patterns:
+        - 'MODE_GCM'
+        - 'MODE_CCM'
+        - 'MODE_SIV'
+        - 'MODE_CTR'
+        - 'modes\.GCM'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_volume_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker analyzes ECB-encrypted database fields in a healthcare application:
+        1. Attacker gains read access to encrypted patient records in the database
+        2. Because ECB mode is used, identical diagnoses produce identical ciphertext blocks
+        3. Attacker performs frequency analysis to identify common medical conditions
+        4. By correlating with known patient data (chosen-plaintext), attacker builds a codebook
+        5. Attacker decrypts diagnosis fields for all patients using the codebook
+        6. Attacker performs block substitution to modify patient records
+      example_payload: "cipher = AES.new(key, AES.MODE_ECB); encrypted = cipher.encrypt(pad(diagnosis, 16))"
+      attacker_objective: "Exploit ECB pattern leakage to deduce encrypted data contents and manipulate ciphertext blocks"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-002"
+        - "CRYPTO-PY-003"
+        - "CRYPTO-PY-005"
+
+  - rule_id: "CRYPTO-PY-007"
+    title: "Insecure SSL/TLS Context Configuration"
+    description: >
+      Detects insecure SSL/TLS configurations in Python applications including disabled
+      certificate verification, use of deprecated protocol versions, permissive hostname
+      checking, and weak cipher suites. Python's ssl module defaults are generally secure,
+      but developers frequently weaken security by disabling verification during development
+      or when dealing with self-signed certificates, and these insecure settings often make
+      it to production. The requests library's verify=False is particularly common and dangerous.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-295
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - ssl
+      - tls
+      - certificate-validation
+      - mitm
+      - transport-security
+      - python
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'verify\s*=\s*False'
+        description: "requests library SSL verification disabled"
+      - type: regex
+        pattern: 'ssl\._create_unverified_context\s*\('
+        description: "Creating unverified SSL context"
+      - type: regex
+        pattern: 'ssl\.create_default_context\s*\(\s*\)[\s\S]{0,100}check_hostname\s*=\s*False'
+        description: "SSL context with hostname checking disabled"
+      - type: regex
+        pattern: 'ssl\.create_default_context\s*\(\s*\)[\s\S]{0,100}verify_mode\s*=\s*ssl\.CERT_NONE'
+        description: "SSL context with certificate verification disabled"
+      - type: regex
+        pattern: 'ssl\.PROTOCOL_(?:SSLv2|SSLv3|SSLv23|TLSv1)\b'
+        description: "Deprecated SSL/TLS protocol constant"
+      - type: regex
+        pattern: 'CERT_NONE'
+        description: "Certificate verification mode set to CERT_NONE"
+      - type: regex
+        pattern: 'urllib3\.disable_warnings\s*\(\s*(?:urllib3\.exceptions\.)?InsecureRequestWarning'
+        description: "Suppressing InsecureRequestWarning (hiding the problem)"
+      - type: regex
+        pattern: 'ssl\.SSLContext\s*\(\s*ssl\.PROTOCOL_TLS\s*\)[\s\S]{0,100}verify_mode\s*=\s*ssl\.CERT_NONE'
+        description: "TLS context created then verification disabled"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'development.*only'
+      - 'localhost'
+      - 'self[_-]signed'
+      - '#\s*TODO.*remove'
+      - '#\s*TEMPORARY'
+      - 'mock'
+      - 'fixture'
+      - 'if.*DEBUG'
+      - 'if.*\.env.*dev'
+      - 'internal.*network'
+    bypass_variants:
+      - description: "SSL verification disabled through session object configuration"
+        pattern: 'session\.verify\s*=\s*False'
+      - description: "SSL context configured through environment variable"
+        pattern: 'PYTHONHTTPSVERIFY\s*=\s*[''"]?0[''"]?'
+      - description: "Monkey-patching ssl module to bypass verification"
+        pattern: 'ssl\._create_default_https_context\s*=\s*ssl\._create_unverified_context'
+    evasion_indicators:
+      - "SSL settings loaded from configuration file"
+      - "Verification disabled conditionally based on environment"
+      - "Global monkey-patching of ssl module"
+      - "Custom adapter or transport hiding insecure settings"
+    encoding_variants:
+      - type: "session_config"
+        pattern: '\.session\s*\(\s*\)[\s\S]{0,100}verify\s*=\s*False'
+      - type: "env_override"
+        pattern: 'os\.environ\[\s*[''"]CURL_CA_BUNDLE[''"]'
+      - type: "adapter_config"
+        pattern: 'HTTPAdapter[\s\S]{0,200}verify\s*=\s*False'
+    multi_function_chain_patterns:
+      - "ssl._create_unverified_context -> urlopen for API calls"
+      - "requests.Session(verify=False) -> multiple API requests"
+      - "ssl.SSLContext(CERT_NONE) -> database connection"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Disabled SSL verification enables MITM attacks to intercept credentials, API keys, and sensitive data transmitted over HTTPS"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "config_setting"
+        sink: "requests_call"
+        through: "verify_false"
+      - source: "ssl_context"
+        sink: "database_connection"
+        through: "CERT_NONE"
+      - source: "environment_variable"
+        sink: "global_ssl_context"
+        through: "monkey_patch"
+    impact: |
+      Insecure SSL/TLS configuration in Python applications enables severe attacks:
+      - MITM attackers can intercept all HTTPS traffic silently
+      - Authentication credentials and API keys exposed in transit
+      - Deprecated protocols vulnerable to POODLE, BEAST, CRIME, DROWN attacks
+      - CERT_NONE allows connections to attacker-controlled servers with fake certificates
+      - Suppressing InsecureRequestWarning hides but does not fix the vulnerability
+      - Violates PCI-DSS 4.0 requirements for TLS 1.2+, HIPAA, GDPR encryption requirements
+    remediation: |
+      Enforce secure SSL/TLS configuration:
+
+      ```python
+      # VULNERABLE: Disabled SSL verification
+      import requests
+      response = requests.get('https://api.example.com', verify=False)
+
+      # SECURE: Always verify SSL certificates (default behavior)
+      response = requests.get('https://api.example.com')
+
+      # SECURE: Use custom CA bundle if needed
+      response = requests.get('https://api.example.com',
+                              verify='/path/to/ca-bundle.crt')
+
+      # SECURE: Create proper SSL context
+      import ssl
+      context = ssl.create_default_context()
+      context.minimum_version = ssl.TLSVersion.TLSv1_2
+      # context.minimum_version = ssl.TLSVersion.TLSv1_3  # preferred
+
+      # SECURE: Use certifi for up-to-date CA certificates
+      import certifi
+      response = requests.get('https://api.example.com',
+                              verify=certifi.where())
+
+      # NEVER do this in production:
+      # ssl._create_default_https_context = ssl._create_unverified_context
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/295.html"
+      - "https://docs.python.org/3/library/ssl.html"
+      - "https://requests.readthedocs.io/en/latest/user/advanced/#ssl-cert-verification"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'requests'
+        - 'urllib'
+        - 'ssl'
+        - 'https'
+        - 'certificate'
+        - 'verify'
+        - 'connect'
+      taint_source_indicators:
+        - 'config\.'
+        - 'settings\.'
+        - 'os\.environ'
+        - 'DEBUG'
+      taint_sink_indicators:
+        - 'requests\.get'
+        - 'requests\.post'
+        - 'urlopen'
+        - 'connect'
+        - 'Session\('
+      sanitization_patterns:
+        - 'verify\s*=\s*True'
+        - 'verify\s*=\s*certifi'
+        - 'ssl\.create_default_context\s*\('
+        - 'CERT_REQUIRED'
+        - 'check_hostname\s*=\s*True'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + network_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits disabled SSL verification in a Python microservice:
+        1. Python service uses requests.get(url, verify=False) for inter-service communication
+        2. Attacker gains network position via ARP spoofing on the container network
+        3. Attacker presents a self-signed certificate for the target API endpoint
+        4. The Python service accepts the fake certificate without verification
+        5. Attacker captures OAuth tokens, API keys, and database credentials in transit
+        6. Using captured credentials, attacker accesses internal databases and services
+      example_payload: "requests.post('https://payment-api.internal/charge', json=payment_data, verify=False)"
+      attacker_objective: "Intercept HTTPS communications by exploiting disabled certificate verification for credential theft and data exfiltration"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-002"
+        - "CRYPTO-PY-003"
+
+  - rule_id: "CRYPTO-PY-008"
+    title: "Fernet Key Management Issues"
+    description: >
+      Detects insecure key management practices when using Python's cryptography library Fernet
+      symmetric encryption. Fernet is a high-level recipe using AES-128-CBC with HMAC-SHA256
+      for authenticated encryption, but its security depends entirely on proper key management.
+      Common issues include hardcoded keys, keys derived from weak passwords without proper KDF,
+      keys stored in plaintext files, keys logged or printed, and keys transmitted insecurely.
+      Fernet keys are URL-safe base64-encoded 32-byte values that are easily recognizable.
+    language: python
+    category: crypto
+    severity: High
+    confidence: 0.87
+    cwe: CWE-321
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - fernet
+      - key-management
+      - hardcoded-key
+      - key-derivation
+      - python
+      - authenticated-encryption
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'Fernet\s*\(\s*b?[''"][A-Za-z0-9_-]{43}=[''"]'
+        description: "Hardcoded Fernet key (base64url-encoded 32 bytes)"
+      - type: regex
+        pattern: 'Fernet\.generate_key\s*\(\s*\)[\s\S]{0,50}(?:print|logging|logger|log\.|stdout)'
+        description: "Fernet key printed or logged after generation"
+      - type: regex
+        pattern: 'FERNET_KEY\s*=\s*b?[''"][A-Za-z0-9_-]{43}=[''"]'
+        description: "Fernet key assigned as module-level constant"
+      - type: regex
+        pattern: 'Fernet\s*\(\s*(?:password|passwd|user_password|secret)\s*\.encode\s*\('
+        description: "Raw password used directly as Fernet key without KDF"
+      - type: regex
+        pattern: 'open\s*\(\s*[^)]+\)\s*\.(?:read|readline)\s*\(\s*\)[\s\S]{0,80}Fernet\s*\('
+        description: "Fernet key read from plaintext file"
+      - type: regex
+        pattern: 'base64\.urlsafe_b64encode\s*\(\s*(?:password|passwd|secret)'
+        description: "Password base64-encoded to create Fernet-like key without stretching"
+      - type: regex
+        pattern: 'MultiFernet\s*\(\s*\[\s*Fernet\s*\(\s*b?[''"][^''"]{43}=[''"]'
+        description: "Hardcoded key in MultiFernet rotation setup"
+      - type: regex
+        pattern: 'Fernet\s*\(\s*base64\.urlsafe_b64encode\s*\(\s*(?:hashlib\.(?:md5|sha1)|(?:password|secret)\.encode)'
+        description: "Weak key derivation for Fernet (hash or raw encode)"
+    anti_patterns:
+      - 'test_.*\.py$'
+      - '_test\.py$'
+      - 'tests/.*\.py$'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'os\.environ'
+      - 'os\.getenv'
+      - 'vault'
+      - 'kms'
+      - 'secretsmanager'
+      - 'CHANGEME'
+      - 'placeholder'
+      - 'TODO.*replace'
+      - 'mock'
+      - 'fixture'
+    bypass_variants:
+      - description: "Fernet key stored in separate config file and imported"
+        pattern: 'from\s+(?:config|settings|keys)\s+import\s+(?:FERNET_KEY|ENCRYPTION_KEY|SECRET_KEY)'
+      - description: "Key derived from weak password hash then base64 encoded"
+        pattern: 'base64\.urlsafe_b64encode\s*\(\s*hashlib\.\w+\s*\([^)]+\)\.digest\s*\(\s*\)\s*\)'
+      - description: "Key read from environment but with hardcoded fallback"
+        pattern: 'os\.(?:environ\.get|getenv)\s*\(\s*[''"]FERNET_KEY[''"][\s]*,\s*b?[''"][A-Za-z0-9_-]{43}=[''"]'
+    evasion_indicators:
+      - "Key imported from separate module that contains hardcoded value"
+      - "Key derived from predictable input without proper stretching"
+      - "Key stored in version-controlled configuration file"
+      - "Key with hardcoded fallback value in getenv"
+    encoding_variants:
+      - type: "raw_bytes_key"
+        pattern: 'Fernet\s*\(\s*b[''"][^''"]{43}=[''"]'
+      - type: "string_key"
+        pattern: 'Fernet\s*\(\s*[''"][^''"]{43}=[''"]\.encode\s*\(\s*\)'
+      - type: "variable_key"
+        pattern: '(?:fernet_key|encryption_key)\s*=\s*[''"][A-Za-z0-9_-]{43}=[''"]'
+    multi_function_chain_patterns:
+      - "generate_key -> print/log -> Fernet -> encrypt"
+      - "Hardcoded key -> Fernet -> encrypt -> database store"
+      - "Weak password -> base64 encode -> Fernet -> encrypt at rest"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Mismanaged Fernet keys enable decryption of all Fernet-encrypted data and forgery of Fernet tokens"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "hardcoded_key_string"
+        sink: "Fernet_constructor"
+        through: "variable_assignment"
+      - source: "weak_password"
+        sink: "Fernet_key"
+        through: "base64_encode_without_kdf"
+      - source: "plaintext_file"
+        sink: "Fernet_constructor"
+        through: "file_read"
+    impact: |
+      Fernet key management failures compromise all encrypted data:
+      - Hardcoded keys expose encryption capability to anyone with source code access
+      - Keys logged/printed may appear in log aggregation systems accessible to many users
+      - Keys derived from weak passwords without proper KDF are brute-forceable
+      - Keys stored in plaintext files risk exposure through file access vulnerabilities
+      - Fernet uses AES-128-CBC + HMAC-SHA256; a compromised key breaks both confidentiality and authenticity
+      - MultiFernet key rotation is meaningless if all keys are hardcoded
+    remediation: |
+      Implement proper Fernet key management:
+
+      ```python
+      # VULNERABLE: Hardcoded Fernet key
+      from cryptography.fernet import Fernet
+      key = b'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
+      f = Fernet(key)
+
+      # SECURE: Generate and store key securely
+      key = Fernet.generate_key()
+      # Store in environment variable, KMS, or vault
+
+      # SECURE: Load key from environment
+      import os
+      key = os.environ['FERNET_KEY'].encode()
+      f = Fernet(key)
+
+      # SECURE: Derive key from password with proper KDF
+      import base64
+      from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+      from cryptography.hazmat.primitives import hashes
+      kdf = PBKDF2HMAC(
+          algorithm=hashes.SHA256(),
+          length=32,
+          salt=salt,  # stored securely, unique per user
+          iterations=600000,
+      )
+      key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+      f = Fernet(key)
+
+      # SECURE: Use AWS KMS to protect Fernet key
+      import boto3
+      kms = boto3.client('kms')
+      response = kms.decrypt(CiphertextBlob=encrypted_fernet_key)
+      key = response['Plaintext']
+      f = Fernet(key)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/321.html"
+      - "https://cryptography.io/en/latest/fernet/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'Fernet'
+        - 'MultiFernet'
+        - 'encrypt'
+        - 'decrypt'
+        - 'token'
+        - 'generate_key'
+      taint_source_indicators:
+        - 'hardcoded_string'
+        - 'file\.read'
+        - 'password'
+        - 'config\.'
+      taint_sink_indicators:
+        - 'Fernet\('
+        - 'MultiFernet'
+        - '\.encrypt\('
+        - '\.decrypt\('
+      sanitization_patterns:
+        - 'os\.environ'
+        - 'os\.getenv'
+        - 'vault'
+        - 'kms'
+        - 'PBKDF2HMAC'
+        - 'Scrypt'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + key_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits hardcoded Fernet key in a Django REST API:
+        1. Attacker discovers the application's Git repository (exposed .git or public repo)
+        2. Searching for Fernet-related code reveals hardcoded key in settings.py
+        3. Attacker identifies Fernet-encrypted fields in the API responses
+        4. Using the extracted key, attacker decrypts all encrypted user data (SSN, credit cards)
+        5. Attacker also forges Fernet tokens to inject malicious encrypted payloads
+        6. Forged tokens pass HMAC verification because attacker has the authentic key
+      example_payload: "Fernet(b'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg=').encrypt(b'sensitive')"
+      attacker_objective: "Extract Fernet keys to decrypt all protected data and forge authenticated encryption tokens"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-PY-003"
+        - "CRYPTO-PY-004"
+        - "CRYPTO-PY-006"

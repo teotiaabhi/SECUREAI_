@@ -1,0 +1,2 @@
+[console_scripts]
+secureai = cli.cli:main

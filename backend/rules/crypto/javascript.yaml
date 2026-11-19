@@ -1,0 +1,1650 @@
+rules:
+  - rule_id: "CRYPTO-JS-001"
+    title: "Weak Hash Algorithm Usage (MD5/SHA1)"
+    description: >
+      Detects usage of cryptographically broken hash algorithms MD5 and SHA1 in JavaScript
+      applications. MD5 is vulnerable to collision attacks (demonstrated by Wang et al. in 2004)
+      and SHA1 was practically broken by the SHAttered attack in 2017. These algorithms must not
+      be used for digital signatures, certificate validation, password hashing, or integrity
+      verification of security-sensitive data. NIST deprecated SHA1 for digital signatures in
+      2011 and MD5 should never be used in any security context.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-328
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-hash
+      - md5
+      - sha1
+      - integrity
+      - deprecated-algorithm
+      - collision-attack
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'crypto\.createHash\s*\(\s*[''"]md5[''"]'
+        description: "Node.js crypto module creating MD5 hash"
+      - type: regex
+        pattern: 'crypto\.createHash\s*\(\s*[''"]sha1?[''"]'
+        description: "Node.js crypto module creating SHA1 hash"
+      - type: regex
+        pattern: 'CryptoJS\.MD5\s*\('
+        description: "CryptoJS library MD5 hash function call"
+      - type: regex
+        pattern: 'CryptoJS\.SHA1\s*\('
+        description: "CryptoJS library SHA1 hash function call"
+      - type: regex
+        pattern: 'md5\s*\(\s*[^)]+\)'
+        description: "Direct md5 function call from md5 npm package"
+      - type: regex
+        pattern: 'require\s*\(\s*[''"]md5[''"]'
+        description: "Import of md5 npm package"
+      - type: regex
+        pattern: 'import\s+.*\bmd5\b.*\s+from\s+[''"]md5[''"]'
+        description: "ES module import of md5 package"
+      - type: regex
+        pattern: 'createHmac\s*\(\s*[''"](?:md5|sha1)[''"]'
+        description: "HMAC creation with weak underlying hash algorithm"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\.test\.'
+      - '\/\/ nosec'
+      - '\/\/ crypto-ignore'
+      - 'checksum comparison for non-security'
+      - 'etag generation'
+      - 'cache[_-]?key'
+      - 'fingerprint for deduplication'
+      - '\/\/ legacy compatibility'
+      - '\.mock\.'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+    bypass_variants:
+      - description: "Dynamic algorithm selection to evade static detection"
+        pattern: 'crypto\.createHash\s*\(\s*(?:algo|hashType|method|hashAlg)\s*\)'
+      - description: "String concatenation to build algorithm name"
+        pattern: 'crypto\.createHash\s*\(\s*[''"]m[''"\s]*\+\s*[''"]d5[''"]'
+      - description: "Variable indirection for hash algorithm"
+        pattern: 'const\s+\w+\s*=\s*[''"]md5[''"][\s\S]{0,100}createHash\s*\(\s*\w+\s*\)'
+    evasion_indicators:
+      - "Algorithm name stored in variable or config"
+      - "Hash algorithm selected at runtime from user input"
+      - "Wrapper function obscuring direct crypto API call"
+      - "Third-party library wrapping native crypto"
+    encoding_variants:
+      - type: "hex_encoded"
+        pattern: '\\x6d\\x64\\x35'
+      - type: "unicode_escaped"
+        pattern: '\\u006d\\u0064\\u0035'
+      - type: "base64_obfuscated"
+        pattern: 'Buffer\.from\s*\(\s*[''"]bWQ1[''"]'
+    multi_function_chain_patterns:
+      - "createHash -> update -> digest chain with weak algorithm"
+      - "pbkdf2 with md5 as underlying hash"
+      - "HMAC with sha1 feeding into token generation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Collision attacks on MD5/SHA1 can lead to signature forgery, allowing attackers to impersonate trusted entities or tamper with integrity-protected data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_input"
+        sink: "hash_digest_comparison"
+        through: "createHash().update().digest()"
+      - source: "password_field"
+        sink: "database_storage"
+        through: "md5(password)"
+      - source: "file_content"
+        sink: "integrity_verification"
+        through: "createHash('sha1').update(data)"
+    impact: |
+      MD5 and SHA1 are cryptographically broken hash algorithms. MD5 collisions can be
+      generated in seconds on consumer hardware. SHA1 collisions have been demonstrated
+      (SHAttered attack). Using these algorithms for security purposes such as password
+      hashing, digital signatures, certificate validation, or data integrity verification
+      can lead to:
+      - Forgery of digitally signed documents or tokens
+      - Password cracking via rainbow tables or brute force
+      - Bypass of integrity checks through crafted collisions
+      - Non-compliance with PCI-DSS, HIPAA, FIPS 140-2, and SOC2 standards
+    remediation: |
+      Replace weak hash algorithms with cryptographically strong alternatives:
+
+      ```javascript
+      // VULNERABLE: Using MD5
+      const hash = crypto.createHash('md5').update(data).digest('hex');
+
+      // SECURE: Use SHA-256 or SHA-3 for integrity checks
+      const hash = crypto.createHash('sha256').update(data).digest('hex');
+
+      // SECURE: Use bcrypt/scrypt/argon2 for password hashing
+      const bcrypt = require('bcrypt');
+      const saltRounds = 12;
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+      // SECURE: Use SHA-512 for HMAC operations
+      const hmac = crypto.createHmac('sha512', secret).update(data).digest('hex');
+      ```
+    references:
+      - "https://nvd.nist.gov/vuln/detail/CVE-2004-2761"
+      - "https://shattered.io/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'password'
+        - 'token'
+        - 'signature'
+        - 'certificate'
+        - 'authentication'
+        - 'session'
+        - 'verify'
+      taint_source_indicators:
+        - 'req\.body'
+        - 'req\.params'
+        - 'req\.query'
+        - 'process\.env'
+        - 'fs\.readFile'
+      taint_sink_indicators:
+        - '\.digest\('
+        - '\.compare\('
+        - '\.equals\('
+        - 'database\.save'
+        - 'db\.insert'
+      sanitization_patterns:
+        - 'bcrypt\.hash'
+        - 'scrypt'
+        - 'argon2\.hash'
+        - 'crypto\.createHash\s*\(\s*[''"]sha256[''"]'
+        - 'crypto\.createHash\s*\(\s*[''"]sha512[''"]'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + business_impact_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targeting a Node.js application that uses MD5 to hash API tokens:
+        1. Attacker captures a valid API token hash from a leaked database
+        2. Using hashcat with MD5 mode, the attacker brute-forces the token in minutes
+        3. With the recovered token, attacker authenticates as the victim user
+        4. For SHA1-signed JWTs, attacker generates a collision to forge a valid signature
+           with elevated privileges in the claims payload
+      example_payload: "crypto.createHash('md5').update('admin_token_value').digest('hex')"
+      attacker_objective: "Forge authentication tokens or bypass integrity checks by exploiting weak hash collisions"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-002"
+        - "CRYPTO-JS-003"
+        - "CRYPTO-JS-005"
+
+  - rule_id: "CRYPTO-JS-002"
+    title: "Weak Cipher Algorithm Usage (DES/RC4)"
+    description: >
+      Detects usage of weak or broken symmetric cipher algorithms including DES, 3DES (Triple DES),
+      RC4 (ARC4/ARCFOUR), and Blowfish in JavaScript applications. DES uses a 56-bit key that can be
+      brute-forced in hours. RC4 has well-documented biases in its keystream (Royal Holloway attack,
+      Bar-mitzvah attack). NIST formally withdrew DES in 2005 and deprecated 3DES in 2018 with a
+      sunset date of 2023.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-cipher
+      - des
+      - rc4
+      - symmetric-encryption
+      - deprecated-algorithm
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'crypto\.createCipher(?:iv)?\s*\(\s*[''"](?:des|des-ede|des-ede3|des3|rc4|arcfour|arc4)[''"]'
+        description: "Node.js crypto createCipher with weak algorithm"
+      - type: regex
+        pattern: 'crypto\.createDecipher(?:iv)?\s*\(\s*[''"](?:des|des-ede|des-ede3|des3|rc4|arcfour|arc4)[''"]'
+        description: "Node.js crypto createDecipher with weak algorithm"
+      - type: regex
+        pattern: 'CryptoJS\.DES\.encrypt\s*\('
+        description: "CryptoJS DES encryption"
+      - type: regex
+        pattern: 'CryptoJS\.TripleDES\.encrypt\s*\('
+        description: "CryptoJS Triple DES encryption"
+      - type: regex
+        pattern: 'CryptoJS\.RC4\.encrypt\s*\('
+        description: "CryptoJS RC4 encryption"
+      - type: regex
+        pattern: 'CryptoJS\.Rabbit\.encrypt\s*\('
+        description: "CryptoJS Rabbit stream cipher (non-standard)"
+      - type: regex
+        pattern: 'createCipher\s*\(\s*[''"](?:bf|blowfish|cast)[''"]'
+        description: "Blowfish or CAST cipher usage via Node.js crypto"
+      - type: regex
+        pattern: 'algorithm\s*[=:]\s*[''"](?:des|rc4|3des|tripledes)[''"]'
+        description: "Weak algorithm specified in configuration object"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\/\/ nosec'
+      - '\/\/ crypto-ignore'
+      - '\/\/ legacy-required'
+      - 'migration\s+script'
+      - 'backward.?compat'
+      - 'decrypt.?only'
+      - 'read.?only.?legacy'
+      - '\.mock\.'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'deprecated.?wrapper'
+    bypass_variants:
+      - description: "Algorithm name built via string template literal"
+        pattern: 'createCipher(?:iv)?\s*\(\s*`(?:des|rc4)[^`]*`'
+      - description: "Algorithm stored in external config or environment variable"
+        pattern: 'createCipher(?:iv)?\s*\(\s*(?:config|process\.env)\.'
+      - description: "Algorithm name mapped through lookup object"
+        pattern: 'algorithms?\s*\[\s*[''"](?:legacy|default|fast)[''"]'
+    evasion_indicators:
+      - "Cipher algorithm selected from configuration file"
+      - "Algorithm name passed as function parameter"
+      - "Dynamic import of cipher module based on runtime conditions"
+      - "Wrapper class abstracting cipher selection"
+    encoding_variants:
+      - type: "hex_encoded_des"
+        pattern: '\\x64\\x65\\x73'
+      - type: "unicode_escaped"
+        pattern: '\\u0064\\u0065\\u0073'
+      - type: "base64_obfuscated"
+        pattern: 'Buffer\.from\s*\(\s*[''"]ZGVz[''"]'
+    multi_function_chain_patterns:
+      - "createCipher -> update -> final pipeline with DES"
+      - "CryptoJS.DES.encrypt chained with key derivation"
+      - "Config reads algorithm then passes to cipher factory"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak ciphers can be broken to decrypt sensitive data including credentials, session tokens, and PII, enabling account takeover or data theft"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data"
+        sink: "encrypted_storage"
+        through: "createCipher('des').update(data)"
+      - source: "api_payload"
+        sink: "encrypted_transmission"
+        through: "CryptoJS.RC4.encrypt(data, key)"
+      - source: "sensitive_config"
+        sink: "encrypted_file"
+        through: "createCipheriv('des-ede3', key, iv)"
+    impact: |
+      Using weak cipher algorithms exposes encrypted data to practical attacks:
+      - DES 56-bit keys can be brute-forced in under 24 hours using FPGA clusters
+      - 3DES is vulnerable to Sweet32 birthday attacks on 64-bit block ciphers
+      - RC4 keystream biases enable plaintext recovery (demonstrated in TLS attacks)
+      - All major compliance frameworks (PCI-DSS, HIPAA, NIST) prohibit these algorithms
+      - Data encrypted with these ciphers should be considered potentially compromised
+    remediation: |
+      Replace weak ciphers with AES-256-GCM (authenticated encryption):
+
+      ```javascript
+      // VULNERABLE: Using DES
+      const cipher = crypto.createCipher('des', password);
+
+      // SECURE: Use AES-256-GCM with proper IV
+      const key = crypto.scryptSync(password, salt, 32);
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+      let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      const authTag = cipher.getAuthTag();
+
+      // Store iv + authTag + encrypted together
+      ```
+    references:
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://sweet32.info/"
+      - "https://www.rc4nomore.com/"
+      - "https://nvd.nist.gov/vuln/detail/CVE-2016-2183"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'encrypt'
+        - 'decrypt'
+        - 'cipher'
+        - 'secret'
+        - 'password'
+        - 'sensitive'
+        - 'private'
+      taint_source_indicators:
+        - 'req\.body'
+        - 'user\.data'
+        - 'database\.query'
+        - 'fs\.readFile'
+      taint_sink_indicators:
+        - '\.update\('
+        - '\.final\('
+        - 'res\.send'
+        - 'db\.save'
+        - 'socket\.write'
+      sanitization_patterns:
+        - 'aes-256-gcm'
+        - 'aes-256-cbc'
+        - 'chacha20-poly1305'
+        - 'createCipheriv'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_sensitivity_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker intercepts encrypted API traffic using DES encryption:
+        1. Attacker captures encrypted payloads from network traffic
+        2. Using a DES brute-force tool (e.g., des-crack), attacker exhausts the 56-bit keyspace
+        3. Attacker recovers plaintext containing user credentials and API keys
+        4. For RC4-encrypted sessions, attacker uses statistical biases to recover session cookies
+        5. Attacker replays recovered credentials to gain unauthorized access
+      example_payload: "crypto.createCipher('des', 'weak-password').update(sensitiveData)"
+      attacker_objective: "Decrypt sensitive data by brute-forcing weak cipher keys or exploiting known cryptographic weaknesses"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-001"
+        - "CRYPTO-JS-003"
+        - "CRYPTO-JS-005"
+        - "CRYPTO-JS-006"
+
+  - rule_id: "CRYPTO-JS-003"
+    title: "Hardcoded Encryption Key"
+    description: >
+      Detects hardcoded cryptographic keys, passwords, and secrets embedded directly in JavaScript
+      source code. Hardcoded keys are extractable through static analysis, source code leaks,
+      decompilation, or version control history. This is a critical vulnerability because key
+      rotation becomes impossible without code changes, and the same key is shared across all
+      deployments. OWASP classifies hardcoded credentials as a Top 10 risk.
+    language: javascript
+    category: crypto
+    severity: Critical
+    confidence: 0.88
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - hardcoded-key
+      - secret-management
+      - credential-exposure
+      - key-management
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: '(?:encryption[_-]?key|secret[_-]?key|crypto[_-]?key|aes[_-]?key)\s*[=:]\s*[''"][A-Za-z0-9+/=]{16,}[''"]'
+        description: "Named encryption key variable with hardcoded string value"
+      - type: regex
+        pattern: 'createCipheriv\s*\(\s*[^,]+,\s*[''"][A-Fa-f0-9]{32,}[''"]'
+        description: "Hardcoded hex key passed directly to createCipheriv"
+      - type: regex
+        pattern: 'createCipheriv\s*\(\s*[^,]+,\s*Buffer\.from\s*\(\s*[''"][^''"]{16,}[''"]'
+        description: "Hardcoded key wrapped in Buffer.from for createCipheriv"
+      - type: regex
+        pattern: 'new\s+(?:Uint8Array|Buffer)\s*\(\s*\[\s*(?:0x[0-9a-fA-F]{1,2}\s*,\s*){7,}'
+        description: "Key as hardcoded byte array"
+      - type: regex
+        pattern: 'CryptoJS\.enc\.(?:Hex|Utf8|Base64)\.parse\s*\(\s*[''"][^''"]{16,}[''"]'
+        description: "CryptoJS key parsing from hardcoded string"
+      - type: regex
+        pattern: 'SecretKeySpec\s*\(\s*[''"][^''"]{8,}[''"]'
+        description: "Hardcoded key in SecretKeySpec-like construction"
+      - type: regex
+        pattern: '(?:ENCRYPTION|CIPHER|AES|CRYPTO)[_-]?(?:KEY|SECRET|PASSWORD)\s*=\s*[''"][^''"]{8,}[''"]'
+        description: "Constant with crypto-related name assigned string literal"
+      - type: regex
+        pattern: '\.(?:encrypt|decrypt)\s*\(\s*[^,]+,\s*[''"][A-Za-z0-9+/=]{8,}[''"]'
+        description: "Hardcoded key passed as second argument to encrypt/decrypt"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\.env\.example'
+      - '\.env\.template'
+      - 'process\.env\.'
+      - 'vault\.get'
+      - 'keyVault'
+      - 'aws-sdk.*KMS'
+      - 'secretsManager'
+      - '\/\/ nosec'
+      - 'placeholder'
+      - 'CHANGEME'
+      - 'TODO.*replace'
+      - 'example\.?key'
+    bypass_variants:
+      - description: "Key split across multiple string concatenations"
+        pattern: '(?:key|secret)\s*=\s*[''"][^''"]+[''"][\s]*\+[\s]*[''"][^''"]+[''"]'
+      - description: "Key built using String.fromCharCode to avoid literal detection"
+        pattern: 'String\.fromCharCode\s*\(\s*(?:\d+\s*,\s*){7,}'
+      - description: "Key encoded as base64 and decoded at runtime"
+        pattern: '(?:atob|Buffer\.from)\s*\(\s*[''"][A-Za-z0-9+/=]{16,}[''"]'
+    evasion_indicators:
+      - "Key value split across multiple variables or files"
+      - "Key assembled at runtime from multiple sources"
+      - "Key stored in obfuscated form and decoded before use"
+      - "Key embedded in binary data or resource files"
+    encoding_variants:
+      - type: "base64_encoded_key"
+        pattern: 'atob\s*\(\s*[''"][A-Za-z0-9+/=]{20,}[''"]'
+      - type: "hex_encoded_key"
+        pattern: '(?:key|secret)\s*=\s*[''"][0-9a-fA-F]{32,}[''"]'
+      - type: "unicode_escape_key"
+        pattern: '(?:key|secret)\s*=\s*[''"](?:\\u[0-9a-fA-F]{4}){8,}[''"]'
+    multi_function_chain_patterns:
+      - "Hardcoded key -> Buffer.from -> createCipheriv"
+      - "Constant key definition -> HMAC generation -> token signing"
+      - "Hardcoded passphrase -> scrypt/pbkdf2 -> cipher key derivation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Hardcoded keys extracted from source code or compiled artifacts grant attackers the ability to decrypt all data encrypted with that key across all environments"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "hardcoded_string_literal"
+        sink: "createCipheriv_key_parameter"
+        through: "variable_assignment"
+      - source: "constant_definition"
+        sink: "HMAC_secret"
+        through: "module_export"
+      - source: "config_object_literal"
+        sink: "jwt_sign_secret"
+        through: "options_object"
+    impact: |
+      Hardcoded encryption keys create catastrophic security vulnerabilities:
+      - Keys are exposed to anyone with source code access (developers, contractors, attackers)
+      - Keys persist in version control history even after removal
+      - Key rotation requires code changes and redeployment across all environments
+      - A single key compromise decrypts all data encrypted since key creation
+      - Violates PCI-DSS Requirement 3.5, NIST SP 800-57, and SOC2 CC6.1
+      - Extracted keys enable silent decryption of all historical encrypted data
+    remediation: |
+      Use a secrets management system and environment-based key injection:
+
+      ```javascript
+      // VULNERABLE: Hardcoded key
+      const key = 'my-secret-encryption-key-12345';
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+      // SECURE: Load key from environment variable
+      const key = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+      if (!key || key.length !== 32) throw new Error('Invalid encryption key');
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+      // SECURE: Use AWS KMS or similar key management service
+      const { KMSClient, DecryptCommand } = require('@aws-sdk/client-kms');
+      const kms = new KMSClient({ region: 'us-east-1' });
+      const decrypted = await kms.send(new DecryptCommand({
+        CiphertextBlob: encryptedKey
+      }));
+      const key = decrypted.Plaintext;
+
+      // SECURE: Use HashiCorp Vault
+      const vault = require('node-vault')({ endpoint: process.env.VAULT_ADDR });
+      const { data } = await vault.read('secret/data/encryption');
+      const key = Buffer.from(data.data.key, 'hex');
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/798.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'encrypt'
+        - 'decrypt'
+        - 'cipher'
+        - 'createCipher'
+        - 'createHmac'
+        - 'sign'
+        - 'jwt'
+      taint_source_indicators:
+        - 'const\s+.*key'
+        - 'let\s+.*secret'
+        - 'var\s+.*password'
+        - 'module\.exports'
+      taint_sink_indicators:
+        - 'createCipheriv'
+        - 'createDecipheriv'
+        - 'createHmac'
+        - 'jwt\.sign'
+        - 'pbkdf2'
+      sanitization_patterns:
+        - 'process\.env'
+        - 'vault\.read'
+        - 'kms\.decrypt'
+        - 'secretsManager\.getSecretValue'
+        - 'keyVault\.getSecret'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + exposure_surface_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker discovers hardcoded encryption keys in a Node.js REST API:
+        1. Attacker gains read access to source code via exposed .git directory or GitHub repo leak
+        2. Attacker searches for crypto-related variable names and finds AES key in config.js
+        3. Attacker uses the extracted key to decrypt sensitive database fields
+        4. Attacker decrypts PII, financial data, and API credentials stored in the database
+        5. Using decrypted API keys, attacker pivots to internal microservices
+      example_payload: "const ENCRYPTION_KEY = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';"
+      attacker_objective: "Extract hardcoded encryption keys to decrypt all protected data and gain access to downstream systems"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-002"
+        - "CRYPTO-JS-005"
+        - "CRYPTO-JS-006"
+
+  - rule_id: "CRYPTO-JS-004"
+    title: "Math.random() Used for Security-Sensitive Operations"
+    description: >
+      Detects usage of Math.random() for generating security-sensitive values such as tokens,
+      passwords, session identifiers, nonces, or cryptographic keys. Math.random() is a
+      pseudorandom number generator (PRNG) that is not cryptographically secure. Its output
+      is predictable given sufficient observations, and implementations across JavaScript
+      engines (V8, SpiderMonkey, JavaScriptCore) use algorithms like xorshift128+ that can
+      be reverse-engineered to predict future outputs from past values.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.90
+    cwe: CWE-338
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-random
+      - prng
+      - token-generation
+      - session-management
+      - predictable
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'Math\.random\s*\(\s*\)[\s\S]{0,80}(?:token|secret|key|password|nonce|salt|session|csrf|otp|pin)'
+        description: "Math.random near security-sensitive variable names"
+      - type: regex
+        pattern: '(?:token|secret|key|password|nonce|salt|session|csrf|otp|pin)[\s\S]{0,80}Math\.random\s*\(\s*\)'
+        description: "Security-sensitive variable assigned using Math.random"
+      - type: regex
+        pattern: 'Math\.random\s*\(\s*\)\.toString\s*\(\s*(?:16|36)\s*\)'
+        description: "Math.random converted to hex/base36 string for ID generation"
+      - type: regex
+        pattern: 'Math\.random\s*\(\s*\)[\s\S]{0,40}\.(?:substring|slice|substr)\s*\('
+        description: "Math.random output truncated for token-like usage"
+      - type: regex
+        pattern: 'Math\.floor\s*\(\s*Math\.random\s*\(\s*\)\s*\*\s*(?:0x|16|256|65536|0xFFFF)'
+        description: "Math.random scaled to byte-like range for crypto operations"
+      - type: regex
+        pattern: 'function\s+generate(?:Token|Key|Id|Secret|Password|Nonce|Salt)\s*\([^)]*\)\s*\{[\s\S]{0,200}Math\.random'
+        description: "Security generator function using Math.random internally"
+      - type: regex
+        pattern: 'uuid[\s\S]{0,50}Math\.random'
+        description: "UUID generation using Math.random instead of crypto"
+      - type: regex
+        pattern: 'Math\.random\s*\(\s*\)[\s\S]{0,50}charAt'
+        description: "Math.random used for character selection in token generation"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\/\/ nosec'
+      - 'game'
+      - 'animation'
+      - 'shuffle'
+      - 'sample'
+      - 'jitter'
+      - 'delay'
+      - 'color'
+      - 'position'
+      - 'mock'
+      - 'demo'
+      - 'placeholder'
+    bypass_variants:
+      - description: "Aliasing Math.random to a different variable name"
+        pattern: '(?:const|let|var)\s+\w+\s*=\s*Math\.random[\s;]'
+      - description: "Using Math.random through a wrapper utility function"
+        pattern: '(?:const|let|var)\s+(?:rand|rng|prng)\s*=\s*\(\s*\)\s*=>\s*Math\.random\s*\(\s*\)'
+      - description: "Seeded PRNG libraries using Math.random as entropy source"
+        pattern: 'seed(?:random|rng)\s*\(\s*Math\.random\s*\(\s*\)\s*\)'
+    evasion_indicators:
+      - "Math.random aliased to differently named function"
+      - "PRNG wrapper class obscuring Math.random usage"
+      - "Indirect call through eval or Function constructor"
+      - "Third-party library internally using Math.random"
+    encoding_variants:
+      - type: "bracket_notation"
+        pattern: 'Math\s*\[\s*[''"]random[''"]'
+      - type: "destructured"
+        pattern: 'const\s*\{\s*random\s*\}\s*=\s*Math'
+      - type: "reflected_call"
+        pattern: 'Reflect\.apply\s*\(\s*Math\.random'
+    multi_function_chain_patterns:
+      - "Math.random -> toString(36) -> substring -> token assignment"
+      - "Array.fill -> map(Math.random) -> join -> key generation"
+      - "Loop accumulating Math.random values into byte array"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Predictable tokens generated with Math.random can be guessed by attackers, enabling session hijacking, CSRF bypass, or password reset token prediction"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Math.random()"
+        sink: "session_token_assignment"
+        through: "toString(36).substring()"
+      - source: "Math.random()"
+        sink: "password_reset_token"
+        through: "hex_conversion"
+      - source: "Math.random()"
+        sink: "csrf_token_header"
+        through: "token_generation_function"
+    impact: |
+      Using Math.random() for security-sensitive operations enables prediction attacks:
+      - V8's xorshift128+ PRNG state can be recovered from ~5 observed outputs
+      - Attackers can predict future tokens, passwords, session IDs after observing a few values
+      - Password reset tokens become guessable, enabling account takeover
+      - CSRF tokens become predictable, bypassing CSRF protection
+      - Session identifiers can be predicted for session fixation/hijacking attacks
+      - OTP/PIN values can be predicted in real-time
+    remediation: |
+      Use crypto.randomBytes() or crypto.randomUUID() for secure random values:
+
+      ```javascript
+      // VULNERABLE: Math.random for token generation
+      const token = Math.random().toString(36).substring(2);
+
+      // SECURE: Use crypto.randomBytes for tokens
+      const crypto = require('crypto');
+      const token = crypto.randomBytes(32).toString('hex');
+
+      // SECURE: Use crypto.randomUUID for UUIDs (Node.js 14.17+)
+      const uuid = crypto.randomUUID();
+
+      // SECURE: Use crypto.randomInt for random integers
+      const otp = crypto.randomInt(100000, 999999);
+
+      // SECURE: Browser-side WebCrypto API
+      const array = new Uint8Array(32);
+      crypto.getRandomValues(array);
+      const token = Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/338.html"
+      - "https://blog.securityevaluators.com/hacking-the-javascript-lottery-80cc437e3b7f"
+      - "https://v8.dev/blog/math-random"
+      - "https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'token'
+        - 'secret'
+        - 'session'
+        - 'password'
+        - 'nonce'
+        - 'csrf'
+        - 'otp'
+      taint_source_indicators:
+        - 'Math\.random'
+        - 'Math\[.random.\]'
+      taint_sink_indicators:
+        - 'cookie'
+        - 'header'
+        - 'token'
+        - 'session'
+        - 'res\.set'
+        - 'localStorage'
+      sanitization_patterns:
+        - 'crypto\.randomBytes'
+        - 'crypto\.randomUUID'
+        - 'crypto\.getRandomValues'
+        - 'crypto\.randomInt'
+        - 'uuid\.v4'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + token_criticality_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits predictable password reset tokens:
+        1. Attacker requests multiple password reset tokens for their own account
+        2. Using observed tokens, attacker recovers the xorshift128+ PRNG internal state
+        3. Attacker predicts the next token that will be generated
+        4. Attacker triggers a password reset for the victim's account
+        5. Attacker submits the predicted token and sets a new password for the victim
+        6. Attacker gains full access to the victim's account
+      example_payload: "const resetToken = Math.random().toString(36).substr(2, 12);"
+      attacker_objective: "Predict security tokens generated with Math.random to hijack user sessions or bypass authentication"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-003"
+        - "CRYPTO-JS-005"
+
+  - rule_id: "CRYPTO-JS-005"
+    title: "Insufficient Cryptographic Key Length"
+    description: >
+      Detects usage of cryptographic keys that do not meet minimum length requirements for
+      their respective algorithms. RSA keys below 2048 bits are vulnerable to factoring attacks
+      (NIST recommends 2048+ through 2030, 3072+ beyond). AES keys below 256 bits offer
+      reduced security margins. Elliptic curve keys below 256 bits (equivalent to RSA 3072)
+      are considered weak. Short keys may comply with legacy standards but fail modern
+      security requirements and regulatory mandates.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.87
+    cwe: CWE-326
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - key-length
+      - rsa
+      - aes
+      - insufficient-key-size
+      - weak-key
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'generateKeyPair(?:Sync)?\s*\(\s*[''"]rsa[''"][^)]*modulusLength\s*:\s*(?:512|768|1024)\b'
+        description: "RSA key generation with insufficient modulus length"
+      - type: regex
+        pattern: 'modulusLength\s*:\s*(?:512|768|1024)\b'
+        description: "RSA modulus length below 2048 bits in key options"
+      - type: regex
+        pattern: 'createCipheriv\s*\(\s*[''"]aes-128-'
+        description: "AES-128 cipher usage (prefer AES-256)"
+      - type: regex
+        pattern: 'crypto\.generateKey(?:Sync)?\s*\(\s*[''"]aes[''"][\s\S]{0,50}length\s*:\s*128\b'
+        description: "AES key generation with 128-bit length"
+      - type: regex
+        pattern: 'randomBytes\s*\(\s*(?:8|12|16)\s*\)[\s\S]{0,80}(?:key|secret|encrypt)'
+        description: "Potentially short key generated via randomBytes near encryption context"
+      - type: regex
+        pattern: 'namedCurve\s*:\s*[''"](?:P-192|P-224|secp192r1|secp224r1|prime192v1)[''"]'
+        description: "Weak elliptic curve with insufficient key length"
+      - type: regex
+        pattern: 'keySize\s*:\s*(?:64|128)\b[\s\S]{0,50}(?:CryptoJS|encrypt|cipher)'
+        description: "CryptoJS with insufficient key size configuration"
+      - type: regex
+        pattern: 'dsa[\s\S]{0,80}(?:1024|modulusLength\s*:\s*1024)'
+        description: "DSA key generation with 1024-bit modulus"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\/\/ nosec'
+      - '\/\/ legacy-required'
+      - 'aes-128.*non-sensitive'
+      - 'cache[_-]?encrypt'
+      - 'performance[_-]?test'
+      - 'benchmark'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'temporary encryption'
+      - 'log encryption'
+    bypass_variants:
+      - description: "Key length stored in variable or config to avoid literal detection"
+        pattern: '(?:keyLength|keySize|modulusLength)\s*[=:]\s*(?:parseInt|Number)\s*\('
+      - description: "Key length passed from environment or configuration file"
+        pattern: 'modulusLength\s*:\s*(?:config|options|params)\.'
+      - description: "Key derived from short password without proper stretching"
+        pattern: 'scryptSync\s*\([^,]+,\s*[^,]+,\s*(?:16|24)\s*\)'
+    evasion_indicators:
+      - "Key length parameterized through configuration"
+      - "Key generation wrapped in utility function hiding length"
+      - "Key length determined at runtime from external input"
+      - "Multiple key candidates generated then selected"
+    encoding_variants:
+      - type: "variable_key_length"
+        pattern: 'modulusLength\s*:\s*\w+[\s\S]{0,80}(?:512|768|1024)'
+      - type: "computed_length"
+        pattern: 'modulusLength\s*:\s*\d+\s*\*\s*\d+'
+      - type: "config_reference"
+        pattern: 'modulusLength\s*:\s*(?:settings|cfg)\[\s*[''"]rsaBits[''"]'
+    multi_function_chain_patterns:
+      - "generateKeyPair with short modulus -> sign -> verify"
+      - "createCipheriv('aes-128-cbc') -> update -> final"
+      - "generateKey with insufficient length -> exportKey -> encrypt"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Short RSA keys can be factored using GNFS, enabling attackers to forge digital signatures and decrypt intercepted communications"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "key_generation_function"
+        sink: "encryption_operation"
+        through: "short_key_parameter"
+      - source: "generateKeyPair"
+        sink: "digital_signature"
+        through: "weak_rsa_key"
+      - source: "config_key_length"
+        sink: "createCipheriv"
+        through: "aes_key_derivation"
+    impact: |
+      Insufficient key lengths compromise the security of cryptographic operations:
+      - RSA-1024 can be factored by well-resourced attackers (estimated cost: ~$1M)
+      - RSA-512 and RSA-768 have been publicly factored
+      - AES-128 provides adequate security today but lacks safety margin for future threats
+      - Short ECC keys (P-192, P-224) offer insufficient security margins
+      - Non-compliance with NIST SP 800-131A, PCI-DSS, and FIPS 140-2 requirements
+      - Regulatory penalties for processing sensitive data with insufficient key lengths
+    remediation: |
+      Use recommended minimum key lengths for all algorithms:
+
+      ```javascript
+      // VULNERABLE: RSA with 1024-bit key
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+        modulusLength: 1024,
+      });
+
+      // SECURE: RSA with 4096-bit key
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+        modulusLength: 4096,
+        publicExponent: 65537,
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+      });
+
+      // SECURE: AES-256 instead of AES-128
+      const key = crypto.randomBytes(32); // 256 bits
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+      // SECURE: P-256 or P-384 elliptic curve
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', {
+        namedCurve: 'P-384'
+      });
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/326.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://www.keylength.com/en/4/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'generateKeyPair'
+        - 'modulusLength'
+        - 'keySize'
+        - 'keygen'
+        - 'encrypt'
+        - 'sign'
+      taint_source_indicators:
+        - 'config\.'
+        - 'options\.'
+        - 'settings\.'
+        - 'params\.'
+      taint_sink_indicators:
+        - 'createCipheriv'
+        - 'sign'
+        - 'encrypt'
+        - 'generateKeyPair'
+      sanitization_patterns:
+        - 'modulusLength\s*:\s*(?:2048|3072|4096)'
+        - 'aes-256'
+        - 'P-256'
+        - 'P-384'
+        - 'P-521'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + algorithm_strength_deficit)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets an application using 1024-bit RSA for JWT signing:
+        1. Attacker collects public key from JWKS endpoint or TLS certificate
+        2. Using distributed computing resources, attacker factors the 1024-bit RSA modulus
+        3. Attacker recovers the private key from the factored primes
+        4. Attacker forges JWTs with arbitrary claims (admin role, elevated permissions)
+        5. Attacker uses forged tokens to access admin API endpoints
+      example_payload: "crypto.generateKeyPairSync('rsa', { modulusLength: 1024 })"
+      attacker_objective: "Factor weak RSA keys to forge signatures or decrypt protected communications"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-001"
+        - "CRYPTO-JS-002"
+        - "CRYPTO-JS-006"
+
+  - rule_id: "CRYPTO-JS-006"
+    title: "Missing IV/Nonce in AES Encryption"
+    description: >
+      Detects AES encryption operations that use a missing, static, hardcoded, or zero-filled
+      initialization vector (IV) or nonce. IVs must be unique and unpredictable for CBC mode
+      and unique (but not necessarily random) for CTR/GCM modes. Reusing an IV with the same
+      key in GCM mode catastrophically breaks confidentiality and authenticity. The deprecated
+      crypto.createCipher() API derives the IV from the password, making it deterministic and
+      vulnerable to dictionary attacks.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.89
+    cwe: CWE-329
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - iv-reuse
+      - nonce
+      - aes
+      - initialization-vector
+      - cbc-mode
+      - gcm-mode
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'crypto\.createCipher\s*\(\s*[''"]aes'
+        description: "Deprecated createCipher API (deterministic IV derivation)"
+      - type: regex
+        pattern: 'iv\s*[=:]\s*Buffer\.alloc\s*\(\s*16\s*\)'
+        description: "Zero-filled IV buffer (Buffer.alloc zero-fills by default)"
+      - type: regex
+        pattern: 'iv\s*[=:]\s*[''"](?:0{16,32}|00000000000000000000000000000000)[''"]'
+        description: "Hardcoded zero-byte IV string"
+      - type: regex
+        pattern: 'iv\s*[=:]\s*Buffer\.from\s*\(\s*[''"][^''"]{16,}[''"]'
+        description: "Static IV from hardcoded string via Buffer.from"
+      - type: regex
+        pattern: 'iv\s*[=:]\s*new\s+Uint8Array\s*\(\s*\[\s*0\s*(?:,\s*0\s*){7,}'
+        description: "Zero-filled Uint8Array used as IV"
+      - type: regex
+        pattern: 'createCipheriv\s*\(\s*[^,]+,\s*[^,]+,\s*(?:null|undefined|''''|"")\s*\)'
+        description: "Null or empty IV passed to createCipheriv"
+      - type: regex
+        pattern: 'CryptoJS\.AES\.encrypt\s*\(\s*[^,]+,\s*[^,]+,\s*\{\s*iv\s*:\s*CryptoJS\.enc\.\w+\.parse\s*\(\s*[''"][0]{16,}[''"]'
+        description: "CryptoJS AES with zero IV"
+      - type: regex
+        pattern: 'const\s+iv\s*=\s*[''"][A-Za-z0-9+/=]{16,}[''"]'
+        description: "Static IV stored as constant string"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\/\/ nosec'
+      - 'crypto\.randomBytes\s*\(\s*(?:12|16)\s*\)'
+      - 'randomFillSync'
+      - 'getRandomValues'
+      - 'unique.*iv'
+      - 'generate.*iv'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'iv\s*=\s*crypto\.randomBytes'
+      - 'nonce\s*=\s*crypto\.randomBytes'
+    bypass_variants:
+      - description: "IV derived deterministically from message content"
+        pattern: 'iv\s*=\s*crypto\.createHash\s*\([^)]+\)\.update\s*\([^)]+\)\.digest\s*\(\s*\)'
+      - description: "IV reused from previous encryption stored in object property"
+        pattern: 'this\.\w*[iI][vV]\w*\s*=\s*[^;]+[\s\S]{0,200}createCipheriv'
+      - description: "Counter-based nonce without randomization"
+        pattern: '(?:nonce|iv)\s*=\s*(?:counter|sequence|index)\b'
+    evasion_indicators:
+      - "IV assigned from function return value that returns static data"
+      - "IV stored as class property and reused across encryptions"
+      - "IV derived from predictable values like timestamps or counters"
+      - "IV parameter omitted, relying on library defaults"
+    encoding_variants:
+      - type: "hex_zero_iv"
+        pattern: 'iv\s*[=:]\s*[''"]00000000000000000000000000000000[''"]'
+      - type: "base64_static_iv"
+        pattern: 'iv\s*[=:]\s*Buffer\.from\s*\(\s*[''"]AAAAAAAAAAAAAAAAAAAAAA==[''"]'
+      - type: "numeric_array_iv"
+        pattern: 'iv\s*[=:]\s*\[\s*(?:0\s*,\s*){15}0\s*\]'
+    multi_function_chain_patterns:
+      - "Static IV assignment -> createCipheriv -> encrypt loop reusing IV"
+      - "Hardcoded IV constant -> multiple cipher operations"
+      - "createCipher (deprecated) -> update -> final without explicit IV"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "IV reuse with GCM mode leaks the authentication key, allowing attackers to forge ciphertexts and bypass integrity verification"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "static_iv_constant"
+        sink: "createCipheriv_iv_parameter"
+        through: "variable_assignment"
+      - source: "zero_buffer"
+        sink: "aes_encryption"
+        through: "Buffer.alloc(16)"
+      - source: "hardcoded_nonce"
+        sink: "gcm_encryption"
+        through: "constant_propagation"
+    impact: |
+      Missing or reused IVs fundamentally break encryption security:
+      - CBC mode with predictable IV enables chosen-plaintext attacks (BEAST-style)
+      - GCM mode with nonce reuse leaks the GHASH key, breaking both confidentiality and authenticity
+      - CTR mode with repeated nonce produces identical keystreams, enabling XOR-based plaintext recovery
+      - Static IVs allow detection of identical plaintexts (violates IND-CPA security)
+      - The deprecated createCipher API derives IV from password, making it dictionary-attackable
+      - Potentially catastrophic in multi-tenant systems where IV reuse crosses tenant boundaries
+    remediation: |
+      Always generate a fresh random IV for each encryption operation:
+
+      ```javascript
+      // VULNERABLE: Static/zero IV
+      const iv = Buffer.alloc(16); // all zeros
+      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+
+      // VULNERABLE: Deprecated createCipher (deterministic IV)
+      const cipher = crypto.createCipher('aes-256-cbc', password);
+
+      // SECURE: Random IV for each encryption (CBC mode)
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+      // Prepend IV to ciphertext for decryption
+      const encrypted = Buffer.concat([iv, cipher.update(data), cipher.final()]);
+
+      // SECURE: Random nonce for GCM mode (12 bytes recommended)
+      const nonce = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+      const encrypted = cipher.update(data, 'utf8', 'hex') + cipher.final('hex');
+      const authTag = cipher.getAuthTag();
+      // Store: nonce + authTag + ciphertext
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/329.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38d/final"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38a/final"
+      - "https://eprint.iacr.org/2016/475.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'createCipheriv'
+        - 'createCipher'
+        - 'encrypt'
+        - 'AES'
+        - 'iv'
+        - 'nonce'
+        - 'initialization'
+      taint_source_indicators:
+        - 'Buffer\.alloc\s*\(\s*16'
+        - 'new\s+Uint8Array\s*\(\s*16'
+        - 'const\s+iv'
+        - 'static\s+iv'
+      taint_sink_indicators:
+        - 'createCipheriv'
+        - 'CryptoJS\.AES\.encrypt'
+        - '\.update\('
+        - '\.final\('
+      sanitization_patterns:
+        - 'crypto\.randomBytes\s*\(\s*(?:12|16)\s*\)'
+        - 'crypto\.randomFillSync'
+        - 'webcrypto\.getRandomValues'
+        - 'generateIV'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + cipher_mode_risk_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits IV reuse in an AES-GCM encrypted messaging system:
+        1. Attacker observes encrypted messages from the same user (same key, reused nonce)
+        2. By XORing two ciphertexts encrypted with the same key and nonce, attacker recovers
+           the XOR of the two plaintexts
+        3. Using known-plaintext (e.g., message headers), attacker recovers the keystream
+        4. Attacker also recovers the GHASH authentication key via polynomial analysis
+        5. Attacker forges authenticated ciphertexts with arbitrary content
+        6. Forged messages are accepted as authentic by the decryption routine
+      example_payload: "const iv = Buffer.alloc(16); crypto.createCipheriv('aes-256-gcm', key, iv);"
+      attacker_objective: "Exploit IV/nonce reuse to recover plaintext data and forge authenticated ciphertexts"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-002"
+        - "CRYPTO-JS-003"
+        - "CRYPTO-JS-005"
+
+  - rule_id: "CRYPTO-JS-007"
+    title: "Insecure TLS Configuration in Node.js"
+    description: >
+      Detects insecure TLS/SSL configurations in Node.js applications including disabled
+      certificate verification, use of deprecated protocol versions (SSLv2, SSLv3, TLS 1.0,
+      TLS 1.1), permissive cipher suites, and certificate pinning bypasses. These
+      misconfigurations enable man-in-the-middle (MITM) attacks where an attacker can
+      intercept, modify, or inject data into encrypted connections. Node.js defaults to
+      secure TLS settings, but developers often weaken them during development and fail
+      to restore them for production.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.91
+    cwe: CWE-295
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - tls
+      - ssl
+      - certificate-validation
+      - mitm
+      - transport-security
+      - node-security
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'rejectUnauthorized\s*[=:]\s*false'
+        description: "TLS certificate verification disabled"
+      - type: regex
+        pattern: "NODE_TLS_REJECT_UNAUTHORIZED\\s*[='\"]*\\s*['\"]?0['\"]?"
+        description: "Global TLS rejection disabled via environment variable"
+      - type: regex
+        pattern: 'process\.env\.NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*[''"]0[''"]'
+        description: "Programmatic setting of NODE_TLS_REJECT_UNAUTHORIZED to 0"
+      - type: regex
+        pattern: 'secureProtocol\s*[=:]\s*[''"](?:SSLv2_method|SSLv3_method|TLSv1_method|SSLv23_method)[''"]'
+        description: "Deprecated SSL/TLS protocol method specified"
+      - type: regex
+        pattern: 'minVersion\s*[=:]\s*[''"]TLSv1(?:\.1)?[''"]'
+        description: "TLS minimum version set to deprecated TLS 1.0 or 1.1"
+      - type: regex
+        pattern: 'checkServerIdentity\s*[=:]\s*(?:\(\s*\)\s*=>|function\s*\([^)]*\)\s*\{)\s*(?:return\s*(?:true|undefined|void\s*0)|(?:\}|;))'
+        description: "Server identity check callback returning truthy unconditionally"
+      - type: regex
+        pattern: 'agent\s*[=:]\s*new\s+https?\.Agent\s*\(\s*\{[^}]*rejectUnauthorized\s*:\s*false'
+        description: "HTTPS agent created with certificate validation disabled"
+      - type: regex
+        pattern: 'strictSSL\s*[=:]\s*false'
+        description: "strict SSL disabled in request library options"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\/\/ nosec'
+      - 'development.?only'
+      - 'localhost'
+      - 'self.?signed.?cert'
+      - 'internal.?network'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - '\/\/ TODO.*remove'
+      - '\/\/ TEMPORARY'
+      - 'debug.?mode'
+      - 'if\s*\(\s*process\.env\.NODE_ENV\s*===\s*[''"]development[''"]'
+    bypass_variants:
+      - description: "Certificate check disabled via intermediary configuration object"
+        pattern: 'options\s*\.\s*rejectUnauthorized\s*=\s*false'
+      - description: "TLS verification disabled through spread operator from config"
+        pattern: '\.\.\.(?:config|options|tlsOpts)[\s\S]{0,100}rejectUnauthorized'
+      - description: "Custom agent factory hiding insecure settings"
+        pattern: 'create(?:Agent|Https?Client)\s*\([^)]*\)[\s\S]{0,200}rejectUnauthorized\s*:\s*false'
+    evasion_indicators:
+      - "TLS settings loaded from external configuration"
+      - "rejectUnauthorized set conditionally based on environment"
+      - "Certificate bypass configured through middleware"
+      - "Global agent overridden in initialization code"
+    encoding_variants:
+      - type: "env_var_override"
+        pattern: 'process\.env\[\s*[''"]NODE_TLS_REJECT_UNAUTHORIZED[''"]'
+      - type: "dynamic_property"
+        pattern: 'options\[\s*[''"]rejectUnauthorized[''"]'
+      - type: "config_file_reference"
+        pattern: 'require\s*\(\s*[''"].*config[''"].*\)[\s\S]{0,100}(?:tls|ssl|reject)'
+    multi_function_chain_patterns:
+      - "https.Agent with rejectUnauthorized:false -> axios/request defaults"
+      - "tls.connect with disabled checks -> database connection"
+      - "process.env override -> global https agent -> all outbound requests"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Disabled TLS verification allows MITM attackers to intercept authentication credentials, API keys, and sensitive data in transit"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "config_setting"
+        sink: "https_request"
+        through: "agent_options"
+      - source: "environment_variable"
+        sink: "global_tls_context"
+        through: "process.env"
+      - source: "tls_connect_options"
+        sink: "database_connection"
+        through: "rejectUnauthorized_false"
+    impact: |
+      Insecure TLS/SSL configurations expose applications to critical attacks:
+      - Man-in-the-middle attackers can intercept and modify all encrypted traffic
+      - Authentication credentials, API keys, and tokens can be captured in transit
+      - Deprecated protocols (SSLv3, TLS 1.0/1.1) are vulnerable to POODLE, BEAST, and CRIME
+      - Disabled certificate verification allows attackers to present fraudulent certificates
+      - PCI-DSS explicitly prohibits SSL and early TLS; HIPAA requires strong encryption in transit
+      - Supply chain attacks via DNS hijacking become trivial without cert verification
+    remediation: |
+      Enforce secure TLS configuration across the application:
+
+      ```javascript
+      // VULNERABLE: Disabled certificate verification
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+      // SECURE: Always verify certificates (this is the default)
+      const https = require('https');
+      const agent = new https.Agent({
+        rejectUnauthorized: true,  // default, but be explicit
+        minVersion: 'TLSv1.3',    // require TLS 1.3 where possible
+        // Or minimum TLS 1.2
+        // minVersion: 'TLSv1.2',
+      });
+
+      // SECURE: Use certificate pinning for critical connections
+      const tls = require('tls');
+      const options = {
+        host: 'api.example.com',
+        port: 443,
+        checkServerIdentity: (host, cert) => {
+          const err = tls.checkServerIdentity(host, cert);
+          if (err) return err;
+          // Pin the certificate fingerprint
+          const expectedFingerprint = 'AB:CD:EF:...';
+          if (cert.fingerprint256 !== expectedFingerprint) {
+            return new Error('Certificate fingerprint mismatch');
+          }
+        },
+      };
+
+      // SECURE: Configure axios with proper TLS settings
+      const axios = require('axios');
+      const instance = axios.create({
+        httpsAgent: new https.Agent({
+          rejectUnauthorized: true,
+          minVersion: 'TLSv1.2',
+          ca: fs.readFileSync('/path/to/ca-bundle.crt'),
+        }),
+      });
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/295.html"
+      - "https://nodejs.org/api/tls.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html"
+      - "https://wiki.mozilla.org/Security/Server_Side_TLS"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'https'
+        - 'tls'
+        - 'ssl'
+        - 'certificate'
+        - 'request'
+        - 'axios'
+        - 'fetch'
+        - 'connect'
+      taint_source_indicators:
+        - 'config\.'
+        - 'process\.env'
+        - 'options\.'
+        - 'settings\.'
+      taint_sink_indicators:
+        - 'https\.request'
+        - 'tls\.connect'
+        - 'axios\.'
+        - 'fetch\('
+        - 'require\([''"]request[''"]'
+      sanitization_patterns:
+        - 'rejectUnauthorized\s*:\s*true'
+        - 'minVersion\s*:\s*[''"]TLSv1\.[23][''"]'
+        - 'ca\s*:'
+        - 'cert\s*:'
+        - 'checkServerIdentity'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + network_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker performs MITM on a Node.js microservice with disabled TLS verification:
+        1. Attacker positions themselves on the network (e.g., compromised router, ARP spoofing)
+        2. Attacker intercepts outbound HTTPS requests from the Node.js application
+        3. Because rejectUnauthorized is false, the app accepts the attacker's fraudulent certificate
+        4. Attacker decrypts, reads, and modifies API calls between microservices
+        5. Attacker captures OAuth tokens, database credentials, and user data in transit
+        6. Attacker injects malicious responses to trigger further exploitation (RCE, SQLi)
+      example_payload: "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';"
+      attacker_objective: "Intercept encrypted communications by exploiting disabled certificate verification to perform man-in-the-middle attacks"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-002"
+        - "CRYPTO-JS-003"
+
+  - rule_id: "CRYPTO-JS-008"
+    title: "WebCrypto API Misuse"
+    description: >
+      Detects insecure usage patterns of the Web Cryptography API (SubtleCrypto) in browser
+      and server-side JavaScript. Common misuses include using non-extractable key flags
+      improperly, selecting weak algorithms, performing encryption without authentication
+      (AES-CBC instead of AES-GCM), improper key derivation parameters, and exporting keys
+      in insecure formats. The WebCrypto API is designed to be secure by default, but
+      incorrect parameter choices can undermine its security guarantees.
+    language: javascript
+    category: crypto
+    severity: High
+    confidence: 0.85
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - webcrypto
+      - subtle-crypto
+      - browser-crypto
+      - aes-cbc
+      - key-derivation
+      - key-export
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'crypto\.subtle\.encrypt\s*\(\s*\{[^}]*name\s*:\s*[''"]AES-CBC[''"]'
+        description: "WebCrypto AES-CBC encryption (unauthenticated)"
+      - type: regex
+        pattern: 'crypto\.subtle\.generateKey\s*\(\s*\{[^}]*name\s*:\s*[''"]AES-CBC[''"]'
+        description: "WebCrypto generating AES-CBC key instead of AES-GCM"
+      - type: regex
+        pattern: 'crypto\.subtle\.importKey\s*\(\s*[''"]raw[''"]'
+        description: "WebCrypto raw key import (may indicate hardcoded key material)"
+      - type: regex
+        pattern: 'crypto\.subtle\.exportKey\s*\(\s*[''"](?:raw|pkcs8|spki)[''"][\s\S]{0,100}(?:localStorage|sessionStorage|document\.cookie|postMessage)'
+        description: "WebCrypto key exported and stored insecurely"
+      - type: regex
+        pattern: 'crypto\.subtle\.deriveKey\s*\(\s*\{[^}]*name\s*:\s*[''"]PBKDF2[''"][\s\S]{0,200}iterations\s*:\s*(?:[1-9]\d{0,3}|[1-9]\d{4})\b'
+        description: "PBKDF2 with insufficient iterations (less than 100,000)"
+      - type: regex
+        pattern: 'crypto\.subtle\.(?:encrypt|decrypt|sign|verify)\s*\(\s*[''"]'
+        description: "Algorithm passed as string instead of AlgorithmIdentifier object"
+      - type: regex
+        pattern: 'extractable\s*:\s*true[\s\S]{0,200}(?:sign|decrypt|unwrapKey)'
+        description: "Signing or decryption key marked as extractable"
+      - type: regex
+        pattern: 'crypto\.subtle\.encrypt\s*\(\s*\{[^}]*name\s*:\s*[''"]RSA-OAEP[''"][\s\S]{0,100}hash\s*:\s*[''"]SHA-1[''"]'
+        description: "RSA-OAEP with SHA-1 hash (weak)"
+    anti_patterns:
+      - 'test\.(js|ts|jsx|tsx)$'
+      - 'spec\.(js|ts|jsx|tsx)$'
+      - '__tests__/'
+      - '\/\/ nosec'
+      - 'polyfill'
+      - 'shim'
+      - 'fallback'
+      - 'AES-GCM'
+      - 'iterations\s*:\s*(?:[1-9]\d{5,})'
+      - 'extractable\s*:\s*false'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'demo'
+      - 'documentation'
+    bypass_variants:
+      - description: "Algorithm parameters constructed dynamically to evade detection"
+        pattern: 'crypto\.subtle\.encrypt\s*\(\s*(?:algo|params|config)\s*[,)]'
+      - description: "WebCrypto accessed through aliased variable"
+        pattern: '(?:const|let|var)\s+\w+\s*=\s*(?:window\.)?crypto\.subtle[\s\S]{0,100}\w+\.encrypt'
+      - description: "Algorithm object built from merged config objects"
+        pattern: 'Object\.assign\s*\(\s*\{\s*\}\s*,[\s\S]{0,100}(?:AES|RSA|HMAC)'
+    evasion_indicators:
+      - "Algorithm parameters stored in separate configuration object"
+      - "WebCrypto API accessed through wrapper library"
+      - "Key usage flags computed dynamically"
+      - "Algorithm selection based on feature detection"
+    encoding_variants:
+      - type: "bracket_notation_access"
+        pattern: 'crypto\s*\[\s*[''"]subtle[''"]'
+      - type: "polyfill_access"
+        pattern: '(?:msrCrypto|polycrypt|webcrypto)\.subtle'
+      - type: "destructured_import"
+        pattern: 'const\s*\{\s*subtle\s*\}\s*=\s*(?:globalThis|window|self)\.crypto'
+    multi_function_chain_patterns:
+      - "deriveKey with low PBKDF2 iterations -> encrypt with derived key"
+      - "importKey('raw', hardcoded) -> encrypt -> exportKey"
+      - "generateKey(extractable:true) -> exportKey('raw') -> localStorage.setItem"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "WebCrypto misuse can expose encryption keys via extractable flag, allow ciphertext manipulation via unauthenticated encryption, or enable brute-force via low PBKDF2 iterations"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_password"
+        sink: "deriveKey_with_low_iterations"
+        through: "PBKDF2_import"
+      - source: "raw_key_material"
+        sink: "localStorage_or_cookie"
+        through: "exportKey('raw')"
+      - source: "plaintext_data"
+        sink: "aes_cbc_encryption"
+        through: "subtle.encrypt('AES-CBC')"
+    impact: |
+      WebCrypto API misuse creates subtle but severe security vulnerabilities:
+      - AES-CBC without authentication allows ciphertext manipulation (padding oracle attacks)
+      - Low PBKDF2 iteration counts enable password brute-forcing
+      - Extractable keys can be stolen by XSS attacks
+      - Raw key export to insecure storage (localStorage) exposes keys to any script on the page
+      - RSA-OAEP with SHA-1 weakens the encryption scheme
+      - Incorrect key usage flags may allow keys to be used for unintended operations
+    remediation: |
+      Follow WebCrypto API best practices:
+
+      ```javascript
+      // VULNERABLE: AES-CBC without authentication
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-CBC', iv },
+        key,
+        data
+      );
+
+      // SECURE: Use AES-GCM for authenticated encryption
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv, tagLength: 128 },
+        key,
+        data
+      );
+
+      // SECURE: PBKDF2 with sufficient iterations
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(password),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+      );
+      const key = await crypto.subtle.deriveKey(
+        {
+          name: 'PBKDF2',
+          salt: crypto.getRandomValues(new Uint8Array(16)),
+          iterations: 600000,  // OWASP recommended minimum
+          hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,         // non-extractable
+        ['encrypt', 'decrypt']
+      );
+
+      // SECURE: Non-extractable keys for signing
+      const keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-384' },
+        false,         // non-extractable
+        ['sign', 'verify']
+      );
+      ```
+    references:
+      - "https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API"
+      - "https://www.w3.org/TR/WebCryptoAPI/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+      - "https://soatok.blog/2022/12/29/what-we-do-in-the-shadows-of-webcrypto/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'crypto\.subtle'
+        - 'SubtleCrypto'
+        - 'encrypt'
+        - 'decrypt'
+        - 'deriveKey'
+        - 'importKey'
+        - 'generateKey'
+      taint_source_indicators:
+        - 'password'
+        - 'user_input'
+        - 'TextEncoder'
+        - 'Uint8Array'
+      taint_sink_indicators:
+        - 'localStorage'
+        - 'sessionStorage'
+        - 'document\.cookie'
+        - 'postMessage'
+        - 'indexedDB'
+      sanitization_patterns:
+        - 'AES-GCM'
+        - 'iterations\s*:\s*[1-9]\d{5,}'
+        - 'extractable\s*:\s*false'
+        - 'SHA-256'
+        - 'SHA-384'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + browser_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits WebCrypto misuse in a browser-based password manager:
+        1. Application uses AES-CBC to encrypt stored passwords with a key derived via PBKDF2
+        2. PBKDF2 iteration count is only 1000, and the key is marked as extractable
+        3. Attacker injects XSS payload via stored cross-site scripting vulnerability
+        4. XSS script calls crypto.subtle.exportKey('raw', key) to extract the encryption key
+        5. Attacker decrypts all stored passwords using the extracted key
+        6. Alternatively, attacker exploits AES-CBC padding oracle to decrypt without the key
+      example_payload: "crypto.subtle.deriveKey({name:'PBKDF2',iterations:1000,hash:'SHA-1'},keyMat,{name:'AES-CBC',length:128},true,['encrypt','decrypt'])"
+      attacker_objective: "Extract encryption keys or exploit unauthenticated encryption to access protected data in browser-based applications"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JS-002"
+        - "CRYPTO-JS-005"
+        - "CRYPTO-JS-006"

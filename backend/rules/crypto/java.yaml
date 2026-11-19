@@ -1,0 +1,1663 @@
+rules:
+  - rule_id: "CRYPTO-JAVA-001"
+    title: "Weak Hash Algorithm via MessageDigest (MD5/SHA1)"
+    description: >
+      Detects usage of cryptographically broken hash algorithms MD5 and SHA-1 through Java's
+      MessageDigest API, Apache Commons DigestUtils, or Guava Hashing utilities. MD5 collisions
+      can be generated in seconds on commodity hardware. SHA-1 was practically broken by the
+      SHAttered attack (2017) and chosen-prefix collisions were demonstrated by Shambles (2020).
+      Java applications commonly use these via MessageDigest.getInstance("MD5") or third-party
+      libraries. NIST SP 800-131A Rev.2 disallows these algorithms for digital signatures.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-328
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-hash
+      - md5
+      - sha1
+      - messagedigest
+      - java
+      - integrity
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'MessageDigest\.getInstance\s*\(\s*"(?:MD5|SHA-?1)"\s*\)'
+        description: "MessageDigest.getInstance with weak algorithm string"
+      - type: regex
+        pattern: 'DigestUtils\.(?:md5|sha1|md5Hex|sha1Hex|md5Digest|sha1Digest)\s*\('
+        description: "Apache Commons DigestUtils weak hash methods"
+      - type: regex
+        pattern: 'Hashing\.(?:md5|sha1)\s*\(\s*\)'
+        description: "Guava Hashing utility with weak algorithm"
+      - type: regex
+        pattern: 'Mac\.getInstance\s*\(\s*"Hmac(?:MD5|SHA1)"\s*\)'
+        description: "HMAC with weak underlying hash algorithm"
+      - type: regex
+        pattern: 'new\s+(?:MD5|SHA1)Digest\s*\('
+        description: "Bouncy Castle MD5/SHA1 digest instantiation"
+      - type: regex
+        pattern: 'DigestAlgorithm\.(?:MD5|SHA1|SHA_1)\b'
+        description: "Enum-based weak digest algorithm selection"
+      - type: regex
+        pattern: 'MessageDigest\.getInstance\s*\(\s*(?:algorithm|algo|hashName)\s*\)'
+        description: "Dynamic algorithm selection via variable (requires context)"
+      - type: regex
+        pattern: 'import\s+java\.security\.MessageDigest[\s\S]{0,500}(?:MD5|SHA-?1)'
+        description: "MessageDigest import followed by weak algorithm usage"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'checksum'
+      - 'etag'
+      - 'cacheKey'
+      - 'fingerprint.*dedup'
+      - '@Deprecated'
+      - 'legacy'
+      - '@SuppressWarnings'
+      - 'migration'
+    bypass_variants:
+      - description: "Algorithm name from system property or config"
+        pattern: 'MessageDigest\.getInstance\s*\(\s*(?:System\.getProperty|config\.get|props\.get)\s*\('
+      - description: "Algorithm name stored in constant and referenced"
+        pattern: '(?:static\s+)?final\s+String\s+\w+\s*=\s*"(?:MD5|SHA-?1)"[\s\S]{0,200}getInstance\s*\(\s*\w+\s*\)'
+      - description: "Reflection-based MessageDigest instantiation"
+        pattern: 'Class\.forName\s*\([^)]*MessageDigest[^)]*\)'
+    evasion_indicators:
+      - "Algorithm name loaded from properties file"
+      - "Algorithm selected from enum or constant pool"
+      - "Wrapper class abstracting MessageDigest API"
+      - "Algorithm passed through dependency injection"
+    encoding_variants:
+      - type: "lowercase_algorithm"
+        pattern: 'MessageDigest\.getInstance\s*\(\s*"(?:md5|sha-?1)"'
+      - type: "mixed_case"
+        pattern: 'MessageDigest\.getInstance\s*\(\s*"(?:Md5|Sha1)"'
+      - type: "provider_specified"
+        pattern: 'MessageDigest\.getInstance\s*\(\s*"(?:MD5|SHA-?1)"\s*,\s*"'
+    multi_function_chain_patterns:
+      - "MessageDigest.getInstance('MD5') -> update -> digest chain"
+      - "DigestUtils.md5Hex -> token comparison"
+      - "Mac.getInstance('HmacMD5') -> init -> doFinal"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "MD5/SHA1 collision attacks enable signature forgery, certificate manipulation, and integrity check bypasses in Java applications"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_input"
+        sink: "hash_comparison"
+        through: "MessageDigest.getInstance('MD5').digest()"
+      - source: "password_parameter"
+        sink: "database_storage"
+        through: "DigestUtils.md5Hex(password)"
+      - source: "request_body"
+        sink: "token_validation"
+        through: "Mac.getInstance('HmacSHA1')"
+    impact: |
+      Using MD5 or SHA-1 in Java applications creates severe security vulnerabilities:
+      - MD5 collision generation is trivial (seconds on commodity hardware)
+      - SHA-1 chosen-prefix collisions demonstrated by Shambles attack (2020)
+      - Password hashes stored with MD5 are crackable at billions of attempts per second
+      - Digital signatures using these algorithms are forgeable
+      - Java Certificate validation with SHA-1 is deprecated since JDK 9
+      - Non-compliance with NIST SP 800-131A, PCI-DSS 4.0, FIPS 140-3
+    remediation: |
+      Replace weak hashes with SHA-256+ or use proper password hashing:
+
+      ```java
+      // VULNERABLE: MD5 for hashing
+      MessageDigest md = MessageDigest.getInstance("MD5");
+      byte[] hash = md.digest(data.getBytes());
+
+      // SECURE: SHA-256 for integrity checks
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] hash = md.digest(data.getBytes(StandardCharsets.UTF_8));
+
+      // SECURE: BCrypt for password hashing
+      import org.mindrot.jbcrypt.BCrypt;
+      String hashed = BCrypt.hashpw(password, BCrypt.gensalt(12));
+      boolean valid = BCrypt.checkpw(password, hashed);
+
+      // SECURE: HMAC-SHA256 for message authentication
+      Mac mac = Mac.getInstance("HmacSHA256");
+      mac.init(new SecretKeySpec(key, "HmacSHA256"));
+      byte[] hmac = mac.doFinal(data.getBytes());
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/328.html"
+      - "https://shattered.io/"
+      - "https://sha-mbles.github.io/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'MessageDigest'
+        - 'password'
+        - 'token'
+        - 'signature'
+        - 'verify'
+        - 'authenticate'
+        - 'DigestUtils'
+      taint_source_indicators:
+        - 'request\.getParameter'
+        - 'HttpServletRequest'
+        - '@RequestBody'
+        - 'Scanner'
+        - 'BufferedReader'
+      taint_sink_indicators:
+        - '\.digest\('
+        - '\.doFinal\('
+        - 'PreparedStatement'
+        - 'session\.setAttribute'
+        - 'response\.addCookie'
+      sanitization_patterns:
+        - 'SHA-256'
+        - 'SHA-384'
+        - 'SHA-512'
+        - 'SHA3-'
+        - 'BCrypt'
+        - 'Argon2'
+        - 'PBKDF2'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + business_impact_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a Spring Boot application using MD5 for password storage:
+        1. Attacker exploits SQL injection to extract user table with MD5 password hashes
+        2. Using hashcat in MD5 mode (mode 0), attacker cracks hashes at 25 billion/sec
+        3. Over 90% of passwords recovered within hours using wordlists and rules
+        4. Attacker uses recovered admin credentials to access the admin panel
+        5. From admin panel, attacker pivots to internal systems via SSRF
+      example_payload: "MessageDigest.getInstance(\"MD5\").digest(password.getBytes())"
+      attacker_objective: "Crack weak MD5/SHA1 password hashes or forge digital signatures to bypass authentication"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-002"
+        - "CRYPTO-JAVA-003"
+        - "CRYPTO-JAVA-005"
+
+  - rule_id: "CRYPTO-JAVA-002"
+    title: "Weak Cipher Algorithm (DES/RC4/ECB Mode)"
+    description: >
+      Detects usage of weak or broken cipher algorithms and insecure cipher modes in Java
+      applications. This includes DES (56-bit key), DESede/3DES (vulnerable to Sweet32),
+      RC4/ARCFOUR (biased keystream), Blowfish (64-bit block), and any cipher in ECB mode.
+      Java's Cipher.getInstance() transformation string format "Algorithm/Mode/Padding"
+      makes these detectable. The default transformation for some algorithms in certain JCE
+      providers may default to ECB mode, making explicit mode specification critical.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.94
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-cipher
+      - des
+      - rc4
+      - ecb
+      - symmetric-encryption
+      - java
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"(?:DES|DESede)(?:/[^"]*)?"\s*\)'
+        description: "Cipher.getInstance with DES or Triple DES"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"(?:RC4|ARCFOUR|ARC4)"\s*\)'
+        description: "Cipher.getInstance with RC4/ARCFOUR"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"(?:AES|DES|DESede|Blowfish|Camellia)/ECB/'
+        description: "Any cipher algorithm in ECB mode"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"AES"\s*\)'
+        description: "AES without explicit mode (defaults to ECB in many providers)"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"Blowfish(?:/[^"]*)?"\s*\)'
+        description: "Blowfish cipher (64-bit block size)"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"(?:RC2|IDEA|SEED)(?:/[^"]*)?"\s*\)'
+        description: "Other deprecated cipher algorithms"
+      - type: regex
+        pattern: 'KeyGenerator\.getInstance\s*\(\s*"(?:DES|DESede|RC4|Blowfish|RC2)"\s*\)'
+        description: "Key generation for weak cipher algorithm"
+      - type: regex
+        pattern: 'SecretKeyFactory\.getInstance\s*\(\s*"DES"\s*\)'
+        description: "SecretKeyFactory for DES key generation"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'legacy'
+      - 'migration'
+      - 'backward.*compat'
+      - 'decrypt.*only'
+      - 'read.*only.*legacy'
+      - '@Deprecated'
+      - '@SuppressWarnings'
+      - 'mock'
+    bypass_variants:
+      - description: "Transformation string built from constants or variables"
+        pattern: 'Cipher\.getInstance\s*\(\s*(?:ALGORITHM|CIPHER_SUITE|transformation)\s*\)'
+      - description: "Transformation string concatenated from parts"
+        pattern: 'Cipher\.getInstance\s*\(\s*\w+\s*\+\s*"/"\s*\+\s*\w+'
+      - description: "Cipher algorithm from properties or Spring @Value"
+        pattern: '@Value\s*\(\s*"[^"]*cipher[^"]*"\s*\)\s+(?:private\s+)?String\s+\w+'
+    evasion_indicators:
+      - "Cipher transformation loaded from properties file"
+      - "Algorithm name injected via Spring configuration"
+      - "Factory pattern hiding cipher selection"
+      - "Transformation string built dynamically"
+    encoding_variants:
+      - type: "variable_transformation"
+        pattern: 'static\s+final\s+String\s+\w+\s*=\s*"(?:DES|RC4|AES/ECB)'
+      - type: "properties_config"
+        pattern: 'cipher\.algorithm\s*=\s*(?:DES|RC4|AES/ECB)'
+      - type: "spring_value"
+        pattern: '@Value.*cipher.*\)[\s\S]{0,50}String\s+\w+Algorithm'
+    multi_function_chain_patterns:
+      - "Cipher.getInstance('DES') -> init -> doFinal encryption chain"
+      - "KeyGenerator.getInstance('DES') -> generateKey -> Cipher.init"
+      - "Cipher.getInstance('AES') [ECB default] -> update -> doFinal"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak ciphers allow brute-force key recovery and ciphertext decryption; ECB mode leaks plaintext patterns"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data"
+        sink: "cipher_doFinal"
+        through: "Cipher.getInstance('DES').init()"
+      - source: "sensitive_field"
+        sink: "database_column"
+        through: "DES_encryption"
+      - source: "api_payload"
+        sink: "encrypted_response"
+        through: "AES_ECB_encryption"
+    impact: |
+      Weak cipher algorithms and ECB mode create exploitable encryption:
+      - DES 56-bit key brute-forceable in hours on FPGA clusters
+      - 3DES/DESede vulnerable to Sweet32 birthday attack after ~32GB of data
+      - RC4/ARCFOUR keystream biases enable plaintext recovery
+      - ECB mode leaks plaintext patterns (identical blocks produce identical output)
+      - AES without explicit mode defaults to ECB in SunJCE provider
+      - Blowfish 64-bit blocks enable birthday attacks similar to Sweet32
+      - Non-compliance with PCI-DSS 4.0, NIST SP 800-131A, FIPS 140-3
+    remediation: |
+      Replace with AES-256/GCM or ChaCha20-Poly1305:
+
+      ```java
+      // VULNERABLE: DES cipher
+      Cipher cipher = Cipher.getInstance("DES");
+
+      // VULNERABLE: AES defaulting to ECB
+      Cipher cipher = Cipher.getInstance("AES");
+
+      // SECURE: AES-256/GCM (authenticated encryption)
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      SecureRandom random = new SecureRandom();
+      byte[] iv = new byte[12]; // 96-bit IV for GCM
+      random.nextBytes(iv);
+      GCMParameterSpec spec = new GCMParameterSpec(128, iv); // 128-bit auth tag
+      cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec);
+      byte[] ciphertext = cipher.doFinal(plaintext);
+
+      // SECURE: ChaCha20-Poly1305 (Java 11+)
+      Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
+      byte[] nonce = new byte[12];
+      random.nextBytes(nonce);
+      cipher.init(Cipher.ENCRYPT_MODE, secretKey,
+                  new IvParameterSpec(nonce));
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://sweet32.info/"
+      - "https://docs.oracle.com/en/java/javase/17/security/java-cryptography-architecture-jca-reference-guide.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'Cipher'
+        - 'encrypt'
+        - 'decrypt'
+        - 'KeyGenerator'
+        - 'SecretKey'
+        - 'doFinal'
+        - 'init'
+      taint_source_indicators:
+        - 'request\.getParameter'
+        - '@RequestBody'
+        - 'InputStream'
+        - 'BufferedReader'
+      taint_sink_indicators:
+        - '\.doFinal\('
+        - '\.update\('
+        - 'OutputStream'
+        - 'PreparedStatement'
+        - 'response\.getWriter'
+      sanitization_patterns:
+        - 'AES/GCM/NoPadding'
+        - 'AES/CCM/NoPadding'
+        - 'ChaCha20-Poly1305'
+        - 'AES/CTR'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + cipher_weakness_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits DES encryption in a Java enterprise application:
+        1. Attacker identifies DES-encrypted data in intercepted API responses
+        2. Block size analysis confirms 64-bit (8-byte) DES blocks
+        3. Attacker uses FPGA-based DES cracker to exhaustively search the 56-bit keyspace
+        4. Key recovered in approximately 12 hours
+        5. Attacker decrypts all historical and current encrypted communications
+        6. Extracted data includes PII, financial records, and internal API credentials
+      example_payload: "Cipher.getInstance(\"DES/ECB/PKCS5Padding\")"
+      attacker_objective: "Brute-force weak cipher keys or exploit ECB mode patterns to access encrypted data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-001"
+        - "CRYPTO-JAVA-003"
+        - "CRYPTO-JAVA-005"
+        - "CRYPTO-JAVA-006"
+
+  - rule_id: "CRYPTO-JAVA-003"
+    title: "Hardcoded SecretKeySpec or Encryption Key"
+    description: >
+      Detects hardcoded cryptographic keys in Java source code, particularly through
+      SecretKeySpec constructor with literal byte arrays or strings, hardcoded key constants,
+      and direct key material in initialization code. This is pervasive in Java enterprise
+      applications where developers embed keys in configuration classes, utility classes,
+      or Spring @Value defaults. Hardcoded keys in compiled .class files are trivially
+      extractable through Java decompilation tools (JD-GUI, CFR, Procyon).
+    language: java
+    category: crypto
+    severity: Critical
+    confidence: 0.89
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - hardcoded-key
+      - secret-management
+      - SecretKeySpec
+      - credential-exposure
+      - java
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'new\s+SecretKeySpec\s*\(\s*"[^"]{8,}"\.getBytes\s*\('
+        description: "SecretKeySpec from hardcoded string.getBytes()"
+      - type: regex
+        pattern: 'new\s+SecretKeySpec\s*\(\s*new\s+byte\s*\[\s*\]\s*\{[^}]+\}'
+        description: "SecretKeySpec from hardcoded byte array literal"
+      - type: regex
+        pattern: '(?:ENCRYPTION_KEY|SECRET_KEY|AES_KEY|CIPHER_KEY|HMAC_KEY)\s*=\s*"[^"]{8,}"'
+        description: "Constant with crypto-related name assigned hardcoded string"
+      - type: regex
+        pattern: 'private\s+(?:static\s+)?(?:final\s+)?(?:byte\s*\[\s*\]|String)\s+\w*[Kk]ey\w*\s*=\s*(?:new\s+byte\s*\[\s*\]|"[^"]{8,}")'
+        description: "Private key field with hardcoded value"
+      - type: regex
+        pattern: 'SecretKeySpec\s*\(\s*(?:Hex|Base64)\.decode(?:Hex)?\s*\(\s*"[^"]{16,}"'
+        description: "SecretKeySpec from hardcoded hex/base64 decoded string"
+      - type: regex
+        pattern: 'new\s+IvParameterSpec\s*\(\s*"[^"]{8,}"\.getBytes'
+        description: "Hardcoded IV in IvParameterSpec (also indicates poor key management)"
+      - type: regex
+        pattern: 'DatatypeConverter\.parseHexBinary\s*\(\s*"[0-9a-fA-F]{16,}"\s*\)[\s\S]{0,80}SecretKeySpec'
+        description: "Hardcoded hex key parsed for SecretKeySpec"
+      - type: regex
+        pattern: 'final\s+String\s+\w*(?:secret|key|password|passphrase)\w*\s*=\s*"[^"]{8,}"'
+        description: "Final String field with hardcoded secret value"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'System\.getenv'
+      - 'System\.getProperty'
+      - 'vault'
+      - 'KeyVault'
+      - 'KMS'
+      - 'CHANGEME'
+      - 'placeholder'
+      - 'TODO.*replace'
+    bypass_variants:
+      - description: "Key characters split across multiple string concatenations"
+        pattern: '(?:key|secret)\s*=\s*"[^"]+"\s*\+\s*"[^"]+"'
+      - description: "Key loaded from properties with hardcoded fallback"
+        pattern: '\.getProperty\s*\(\s*"[^"]*key[^"]*"\s*,\s*"[^"]{8,}"\s*\)'
+      - description: "Key encoded as char array and converted"
+        pattern: 'new\s+String\s*\(\s*new\s+char\s*\[\s*\]\s*\{[^}]+\}\s*\)'
+    evasion_indicators:
+      - "Key split across multiple concatenated strings"
+      - "Key stored as char array instead of String"
+      - "Key loaded from resource bundle with hardcoded values"
+      - "Key embedded in base64 string constant"
+    encoding_variants:
+      - type: "base64_encoded"
+        pattern: 'Base64\.getDecoder\(\)\.decode\s*\(\s*"[A-Za-z0-9+/=]{16,}"'
+      - type: "hex_encoded"
+        pattern: 'DatatypeConverter\.parseHexBinary\s*\(\s*"[0-9a-fA-F]{16,}"'
+      - type: "char_array"
+        pattern: 'new\s+char\s*\[\s*\]\s*\{\s*(?:''[^'']''\s*,\s*){7,}'
+    multi_function_chain_patterns:
+      - "Hardcoded string -> getBytes -> SecretKeySpec -> Cipher.init"
+      - "Base64.decode(literal) -> SecretKeySpec -> Mac.init"
+      - "Constant key field -> KeyGenerator seed -> encryption operation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Hardcoded keys in Java .class files are trivially extractable via decompilation, compromising all encrypted data across deployments"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "string_literal"
+        sink: "SecretKeySpec_constructor"
+        through: "getBytes()"
+      - source: "byte_array_literal"
+        sink: "Cipher_init"
+        through: "SecretKeySpec"
+      - source: "constant_field"
+        sink: "Mac_init"
+        through: "field_reference"
+    impact: |
+      Hardcoded keys in Java applications create catastrophic vulnerabilities:
+      - Java .class and .jar files are trivially decompilable (JD-GUI, CFR, Procyon)
+      - Keys embedded in Docker images are extractable from image layers
+      - Keys in version control persist forever in commit history
+      - All environments share the same key, so dev/staging compromise affects production
+      - Key rotation requires code changes, rebuild, and redeployment
+      - Violates PCI-DSS 3.5, NIST SP 800-57, SOC2 CC6.1, HIPAA technical safeguards
+    remediation: |
+      Use secure key management services:
+
+      ```java
+      // VULNERABLE: Hardcoded key
+      SecretKeySpec key = new SecretKeySpec(
+          "MySecretKey12345".getBytes(), "AES");
+
+      // SECURE: Load from environment variable
+      String keyHex = System.getenv("ENCRYPTION_KEY");
+      byte[] keyBytes = DatatypeConverter.parseHexBinary(keyHex);
+      SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
+
+      // SECURE: Use Java KeyStore
+      KeyStore ks = KeyStore.getInstance("JCEKS");
+      ks.load(new FileInputStream(keystorePath), keystorePassword);
+      SecretKey key = (SecretKey) ks.getKey("mykey", keyPassword);
+
+      // SECURE: Use AWS KMS
+      AWSKMS kmsClient = AWSKMSClientBuilder.defaultClient();
+      DecryptRequest req = new DecryptRequest()
+          .withCiphertextBlob(ByteBuffer.wrap(encryptedKey));
+      byte[] key = kmsClient.decrypt(req).getPlaintext().array();
+
+      // SECURE: Use HashiCorp Vault
+      VaultTemplate vault = new VaultTemplate(vaultEndpoint, tokenAuth);
+      String key = vault.read("secret/data/encryption")
+          .getData().get("key").toString();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/798.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+      - "https://docs.oracle.com/en/java/javase/17/security/java-cryptography-architecture-jca-reference-guide.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'SecretKeySpec'
+        - 'Cipher'
+        - 'encrypt'
+        - 'decrypt'
+        - 'Mac'
+        - 'HMAC'
+        - 'KeyGenerator'
+      taint_source_indicators:
+        - 'String\s+\w*key'
+        - 'byte\[\]\s+\w*key'
+        - 'final.*KEY'
+        - 'static.*SECRET'
+      taint_sink_indicators:
+        - 'Cipher\.init'
+        - 'Mac\.init'
+        - 'KeyAgreement'
+        - 'Signature\.init'
+      sanitization_patterns:
+        - 'System\.getenv'
+        - 'System\.getProperty'
+        - 'KeyStore'
+        - 'vault'
+        - 'KMS'
+        - 'SecureRandom'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + exposure_surface_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker decompiles a Java Spring Boot application:
+        1. Attacker downloads the .jar file from an exposed Actuator endpoint or Docker registry
+        2. Using JD-GUI decompiler, attacker extracts all .class files to readable Java source
+        3. Searching for SecretKeySpec reveals AES key hardcoded in EncryptionService.class
+        4. Attacker uses the key to decrypt sensitive database fields (SSN, credit cards)
+        5. Attacker also discovers JWT signing key enabling admin token forgery
+        6. Attacker accesses all application endpoints with forged admin JWT
+      example_payload: "new SecretKeySpec(\"ThisIsMySecretKey\".getBytes(\"UTF-8\"), \"AES\")"
+      attacker_objective: "Extract hardcoded encryption keys from compiled Java bytecode to decrypt all protected data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-002"
+        - "CRYPTO-JAVA-004"
+        - "CRYPTO-JAVA-006"
+
+  - rule_id: "CRYPTO-JAVA-004"
+    title: "java.util.Random Used Instead of SecureRandom"
+    description: >
+      Detects usage of java.util.Random for generating security-sensitive values instead
+      of java.security.SecureRandom. java.util.Random uses a 48-bit linear congruential
+      generator (LCG) whose internal state can be fully recovered from just two consecutive
+      output values. ThreadLocalRandom is similarly insecure for cryptographic purposes.
+      These classes must never be used for tokens, keys, session IDs, nonces, passwords,
+      CSRF tokens, or any value where unpredictability is a security requirement.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.91
+    cwe: CWE-338
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-random
+      - prng
+      - java.util.Random
+      - token-generation
+      - java
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Random\s*\(\s*\)[\s\S]{0,100}(?:token|key|secret|password|nonce|salt|session|csrf|otp|pin)'
+        description: "java.util.Random instance near security-sensitive variable names"
+      - type: regex
+        pattern: '(?:token|key|secret|password|nonce|salt|session|csrf|otp|pin)[\s\S]{0,100}(?:new\s+Random\s*\(|random\.next)'
+        description: "Security-sensitive variable populated from Random instance"
+      - type: regex
+        pattern: 'new\s+Random\s*\(\s*(?:System\.currentTimeMillis\s*\(\s*\)|System\.nanoTime\s*\(\s*\))\s*\)'
+        description: "Random seeded with current time (predictable)"
+      - type: regex
+        pattern: 'ThreadLocalRandom\.current\s*\(\s*\)[\s\S]{0,80}(?:token|key|secret|session|nonce|csrf)'
+        description: "ThreadLocalRandom used for security-sensitive values"
+      - type: regex
+        pattern: 'random\.nextBytes\s*\(\s*\w*(?:key|token|nonce|iv|salt)\w*\s*\)'
+        description: "Random.nextBytes filling security-sensitive byte array"
+      - type: regex
+        pattern: 'Math\.random\s*\(\s*\)[\s\S]{0,80}(?:token|key|secret|session|nonce|csrf|otp)'
+        description: "Math.random() used for security-sensitive values"
+      - type: regex
+        pattern: 'new\s+Random\s*\(\s*\d+L?\s*\)'
+        description: "Random with hardcoded seed (completely deterministic)"
+      - type: regex
+        pattern: 'UUID\.randomUUID[\s\S]{0,20}new\s+Random\b'
+        description: "UUID generation context near Random usage"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'shuffle'
+      - 'sample'
+      - 'jitter'
+      - 'delay'
+      - 'game'
+      - 'animation'
+      - 'simulation'
+      - 'mock'
+    bypass_variants:
+      - description: "Random instance stored as class field, used throughout class"
+        pattern: 'private\s+(?:static\s+)?(?:final\s+)?Random\s+\w+\s*=\s*new\s+Random'
+      - description: "Random wrapped in utility class"
+        pattern: 'class\s+\w*Random\w*[\s\S]{0,300}new\s+Random\s*\('
+      - description: "Random created via factory method"
+        pattern: '(?:Random|ThreadLocalRandom)\.(?:current|create)\s*\(\s*\)[\s\S]{0,100}(?:nextInt|nextLong|nextBytes)'
+    evasion_indicators:
+      - "Random instance field reused across method calls"
+      - "Utility class wrapping Random for token generation"
+      - "Factory method returning Random instead of SecureRandom"
+      - "Random obtained from dependency injection container"
+    encoding_variants:
+      - type: "field_reference"
+        pattern: 'this\.\w*rand\w*\.next(?:Int|Long|Bytes)\s*\('
+      - type: "static_field"
+        pattern: 'static\s+(?:final\s+)?Random\s+\w+\s*=\s*new\s+Random'
+      - type: "method_param"
+        pattern: 'void\s+\w+\s*\(\s*Random\s+\w+'
+    multi_function_chain_patterns:
+      - "new Random() -> nextInt/nextLong -> hex conversion -> token string"
+      - "Random.nextBytes(array) -> SecretKeySpec -> Cipher.init"
+      - "ThreadLocalRandom -> stream of random ints -> collect to key"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Predictable Random output enables token prediction, session hijacking, and CSRF bypass in Java web applications"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "new Random()"
+        sink: "session_token"
+        through: "nextLong().toString()"
+      - source: "ThreadLocalRandom.current()"
+        sink: "otp_value"
+        through: "nextInt()"
+      - source: "Math.random()"
+        sink: "csrf_token"
+        through: "hex_conversion"
+    impact: |
+      Using java.util.Random for security operations enables prediction attacks:
+      - Random's LCG state recoverable from two consecutive nextLong() outputs
+      - new Random(seed) with known/guessable seed produces fully deterministic output
+      - Time-based seeds (System.currentTimeMillis) narrow the search space dramatically
+      - ThreadLocalRandom shares the same weakness (not cryptographically secure)
+      - Attackers can predict session tokens, CSRF tokens, password reset tokens
+      - OTP values and verification codes become predictable
+      - Math.random() delegates to a static Random instance
+    remediation: |
+      Use SecureRandom for all security-sensitive random operations:
+
+      ```java
+      // VULNERABLE: java.util.Random
+      Random random = new Random();
+      byte[] token = new byte[32];
+      random.nextBytes(token);
+
+      // SECURE: SecureRandom
+      SecureRandom secureRandom = new SecureRandom();
+      byte[] token = new byte[32];
+      secureRandom.nextBytes(token);
+      String tokenHex = HexFormat.of().formatHex(token);
+
+      // SECURE: SecureRandom for integer range
+      int otp = secureRandom.nextInt(900000) + 100000; // 6-digit OTP
+
+      // SECURE: UUID (uses SecureRandom internally)
+      String sessionId = UUID.randomUUID().toString();
+
+      // SECURE: Spring Security token generator
+      @Autowired
+      private TokenGenerator tokenGenerator;
+      String token = tokenGenerator.generateToken();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/338.html"
+      - "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/security/SecureRandom.html"
+      - "https://jazzy.id.au/2010/09/20/cracking_random_number_generators_part_1.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'token'
+        - 'session'
+        - 'password'
+        - 'key'
+        - 'nonce'
+        - 'csrf'
+        - 'otp'
+        - 'secret'
+      taint_source_indicators:
+        - 'new\s+Random'
+        - 'ThreadLocalRandom'
+        - 'Math\.random'
+      taint_sink_indicators:
+        - 'session\.setAttribute'
+        - 'response\.addCookie'
+        - 'response\.setHeader'
+        - 'SecretKeySpec'
+        - 'PreparedStatement'
+      sanitization_patterns:
+        - 'SecureRandom'
+        - 'UUID\.randomUUID'
+        - 'crypto\.random'
+        - 'Security\.getRandom'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + token_criticality_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits predictable session tokens in a Java EE web application:
+        1. Application uses new Random() to generate session identifiers
+        2. Attacker observes two consecutive session IDs from their own sessions
+        3. Using LCG state recovery, attacker determines the Random internal state
+        4. Attacker predicts future session IDs for all users
+        5. Attacker waits for admin login and predicts their session ID
+        6. Attacker hijacks admin session by setting the predicted session cookie
+      example_payload: "new Random().nextLong() used as session identifier"
+      attacker_objective: "Predict random values generated by java.util.Random to forge tokens or hijack sessions"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-003"
+        - "CRYPTO-JAVA-005"
+        - "CRYPTO-JAVA-006"
+
+  - rule_id: "CRYPTO-JAVA-005"
+    title: "RSA Without OAEP Padding"
+    description: >
+      Detects RSA encryption using insecure padding schemes, particularly PKCS#1 v1.5 padding
+      (RSA/ECB/PKCS1Padding) or no padding at all (RSA/ECB/NoPadding). PKCS#1 v1.5 is
+      vulnerable to Bleichenbacher's adaptive chosen-ciphertext attack (1998), which remains
+      practically exploitable in modern implementations (ROBOT attack, 2018). RSA without
+      padding (textbook RSA) is trivially broken through mathematical attacks.
+      OAEP (Optimal Asymmetric Encryption Padding) with SHA-256 is the recommended standard.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-780
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - rsa
+      - padding
+      - bleichenbacher
+      - pkcs1
+      - oaep
+      - asymmetric-encryption
+      - java
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"RSA/ECB/PKCS1Padding"\s*\)'
+        description: "RSA with PKCS#1 v1.5 padding (Bleichenbacher-vulnerable)"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"RSA/ECB/NoPadding"\s*\)'
+        description: "RSA with no padding (textbook RSA)"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"RSA"\s*\)'
+        description: "RSA without explicit padding (provider-dependent default)"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"RSA/(?:ECB|None|NONE)/(?!OAEPWith)[^"]*"\s*\)'
+        description: "RSA with any non-OAEP padding scheme"
+      - type: regex
+        pattern: 'Signature\.getInstance\s*\(\s*"(?:NONEwithRSA|SHA1withRSA)"\s*\)'
+        description: "RSA signature without hash or with weak SHA1 hash"
+      - type: regex
+        pattern: 'Cipher\.getInstance\s*\(\s*"RSA/ECB/OAEPWithSHA-1AndMGF1Padding"\s*\)'
+        description: "RSA-OAEP with weak SHA-1 hash"
+      - type: regex
+        pattern: 'KeyPairGenerator\.getInstance\s*\(\s*"RSA"\s*\)[\s\S]{0,100}initialize\s*\(\s*(?:512|768|1024)\b'
+        description: "RSA key generation with insufficient key size"
+      - type: regex
+        pattern: '(?:PKCS1Padding|NoPadding)[\s\S]{0,50}RSA'
+        description: "Insecure RSA padding referenced near RSA operations"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'OAEPWithSHA-256'
+      - 'OAEPWithSHA256'
+      - 'OAEP.*SHA-256'
+      - 'legacy'
+      - '@Deprecated'
+      - 'migration'
+      - 'backward.*compat'
+      - 'mock'
+    bypass_variants:
+      - description: "Transformation string from variable or configuration"
+        pattern: 'Cipher\.getInstance\s*\(\s*(?:rsaTransformation|cipherMode|encryptionScheme)\s*\)'
+      - description: "Padding scheme specified in properties file"
+        pattern: 'rsa\.padding\s*=\s*PKCS1Padding'
+      - description: "Cipher transformation built via string concatenation"
+        pattern: '"RSA/"\s*\+\s*\w+\s*\+\s*"/"\s*\+\s*\w+'
+    evasion_indicators:
+      - "RSA transformation loaded from configuration"
+      - "Padding scheme selected from enum or constant"
+      - "Cipher factory wrapping transformation selection"
+      - "Transformation string built dynamically"
+    encoding_variants:
+      - type: "constant_reference"
+        pattern: 'static\s+final\s+String\s+\w+\s*=\s*"RSA/ECB/PKCS1Padding"'
+      - type: "spring_config"
+        pattern: '@Value.*rsa.*padding'
+      - type: "properties_reference"
+        pattern: 'cipher\.transformation\s*=\s*RSA/ECB/PKCS1Padding'
+    multi_function_chain_patterns:
+      - "Cipher.getInstance('RSA/ECB/PKCS1Padding') -> init(ENCRYPT) -> doFinal"
+      - "RSA Cipher with PKCS1 -> encrypt key material -> transport"
+      - "KeyPairGenerator -> generate(1024) -> Cipher(RSA) -> encrypt"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Bleichenbacher attack against PKCS#1 v1.5 enables decryption of RSA ciphertexts and recovery of encrypted key material"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "plaintext_data"
+        sink: "rsa_encrypt"
+        through: "Cipher.getInstance('RSA/ECB/PKCS1Padding')"
+      - source: "symmetric_key"
+        sink: "key_transport"
+        through: "RSA_PKCS1_wrap"
+      - source: "sensitive_payload"
+        sink: "encrypted_message"
+        through: "RSA_no_padding"
+    impact: |
+      Insecure RSA padding creates serious cryptographic vulnerabilities:
+      - PKCS#1 v1.5 padding is vulnerable to Bleichenbacher's oracle attack
+      - ROBOT attack (2018) demonstrated practical exploitation in production TLS servers
+      - Textbook RSA (NoPadding) allows mathematical attacks including chosen-ciphertext
+      - RSA-OAEP with SHA-1 weakens the security margin of the padding scheme
+      - RSA key transport with weak padding compromises wrapped symmetric keys
+      - Non-compliance with NIST SP 800-56B Rev.2 for key transport
+    remediation: |
+      Use RSA-OAEP with SHA-256 for encryption, PSS for signatures:
+
+      ```java
+      // VULNERABLE: PKCS#1 v1.5 padding
+      Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+
+      // SECURE: RSA-OAEP with SHA-256
+      Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
+      OAEPParameterSpec oaepSpec = new OAEPParameterSpec(
+          "SHA-256",
+          "MGF1",
+          MGF1ParameterSpec.SHA256,
+          PSource.PSpecified.DEFAULT
+      );
+      cipher.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec);
+      byte[] encrypted = cipher.doFinal(plaintext);
+
+      // SECURE: RSA-PSS for signatures (Java 11+)
+      Signature signature = Signature.getInstance("RSASSA-PSS");
+      PSSParameterSpec pssSpec = new PSSParameterSpec(
+          "SHA-256", "MGF1", MGF1ParameterSpec.SHA256, 32, 1
+      );
+      signature.setParameter(pssSpec);
+      signature.initSign(privateKey);
+      signature.update(data);
+      byte[] sig = signature.sign();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/780.html"
+      - "https://robotattack.org/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-56b/rev-2/final"
+      - "https://www.ietf.org/rfc/rfc8017.txt"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'RSA'
+        - 'Cipher'
+        - 'encrypt'
+        - 'decrypt'
+        - 'publicKey'
+        - 'privateKey'
+        - 'wrap'
+        - 'unwrap'
+      taint_source_indicators:
+        - 'plaintext'
+        - 'secretKey'
+        - 'symmetricKey'
+        - 'data'
+      taint_sink_indicators:
+        - '\.doFinal\('
+        - '\.wrap\('
+        - '\.unwrap\('
+        - 'outputStream'
+      sanitization_patterns:
+        - 'OAEPWithSHA-256'
+        - 'OAEPWithSHA256'
+        - 'RSASSA-PSS'
+        - 'SHA256withRSA/PSS'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + padding_oracle_availability)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker performs a Bleichenbacher attack against RSA PKCS#1 v1.5:
+        1. Java server uses RSA/ECB/PKCS1Padding for key transport in TLS handshake
+        2. Attacker sends modified ciphertexts and observes server error responses
+        3. Different errors for valid vs invalid padding create a padding oracle
+        4. Using ~10,000-100,000 oracle queries, attacker recovers the pre-master secret
+        5. Attacker decrypts the entire TLS session, exposing all transmitted data
+        6. This is the ROBOT attack, demonstrated in 2018 against major vendors
+      example_payload: "Cipher.getInstance(\"RSA/ECB/PKCS1Padding\").doFinal(sensitiveKey)"
+      attacker_objective: "Exploit padding oracle vulnerability in RSA PKCS#1 v1.5 to decrypt ciphertexts without the private key"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-001"
+        - "CRYPTO-JAVA-002"
+        - "CRYPTO-JAVA-006"
+
+  - rule_id: "CRYPTO-JAVA-006"
+    title: "Static or Hardcoded IV/Nonce in Encryption"
+    description: >
+      Detects static, hardcoded, or zero-filled initialization vectors (IV) and nonces in
+      Java encryption operations. IVs must be unique and unpredictable for CBC mode and
+      unique for GCM/CTR modes. Reusing a nonce with the same key in GCM mode catastrophically
+      breaks both confidentiality and authenticity by leaking the GHASH authentication key.
+      Java developers commonly hardcode IVs as byte array literals or derive them
+      deterministically from predictable values.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.90
+    cwe: CWE-329
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - iv-reuse
+      - nonce
+      - aes
+      - initialization-vector
+      - gcm
+      - cbc
+      - java
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+IvParameterSpec\s*\(\s*new\s+byte\s*\[\s*\]\s*\{[^}]+\}'
+        description: "IvParameterSpec from hardcoded byte array literal"
+      - type: regex
+        pattern: 'new\s+IvParameterSpec\s*\(\s*"[^"]{8,}"\.getBytes'
+        description: "IvParameterSpec from hardcoded string"
+      - type: regex
+        pattern: 'new\s+IvParameterSpec\s*\(\s*new\s+byte\s*\[\s*(?:8|12|16)\s*\]\s*\)'
+        description: "IvParameterSpec with zero-filled byte array"
+      - type: regex
+        pattern: 'new\s+GCMParameterSpec\s*\(\s*\d+\s*,\s*new\s+byte\s*\[\s*\]\s*\{[^}]+\}'
+        description: "GCMParameterSpec with hardcoded nonce"
+      - type: regex
+        pattern: 'new\s+GCMParameterSpec\s*\(\s*\d+\s*,\s*"[^"]+"\.getBytes'
+        description: "GCMParameterSpec nonce from hardcoded string"
+      - type: regex
+        pattern: 'static\s+(?:final\s+)?byte\s*\[\s*\]\s+\w*(?:[iI][vV]|nonce|NONCE)\w*\s*='
+        description: "Static IV or nonce field declaration"
+      - type: regex
+        pattern: 'private\s+(?:static\s+)?(?:final\s+)?byte\s*\[\s*\]\s+(?:IV|iv|NONCE|nonce)\s*=\s*\{'
+        description: "Private IV field with hardcoded initialization"
+      - type: regex
+        pattern: 'Arrays\.fill\s*\(\s*\w*(?:iv|IV|nonce)\w*\s*,\s*\(byte\)\s*0\s*\)'
+        description: "IV array explicitly filled with zeros"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'SecureRandom'
+      - 'random\.nextBytes'
+      - 'generateIV'
+      - 'uniqueIV'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+    bypass_variants:
+      - description: "IV derived deterministically from message hash"
+        pattern: 'MessageDigest[\s\S]{0,100}digest[\s\S]{0,50}IvParameterSpec'
+      - description: "IV reused from stored/cached value"
+        pattern: 'this\.\w*[iI][vV]\w*[\s\S]{0,100}IvParameterSpec\s*\(\s*this\.\w*[iI][vV]'
+      - description: "Counter-based nonce without randomization"
+        pattern: '(?:counter|sequence|index)[\s\S]{0,80}(?:IvParameterSpec|GCMParameterSpec)'
+    evasion_indicators:
+      - "IV loaded from configuration file with static value"
+      - "IV derived from timestamp or counter without randomization"
+      - "IV stored as class field and reused across encryptions"
+      - "IV from previous encryption ciphertext (CBC chaining vulnerability)"
+    encoding_variants:
+      - type: "hex_decoded_iv"
+        pattern: 'DatatypeConverter\.parseHexBinary\s*\(\s*"[0-9a-fA-F]{16,}"\s*\)[\s\S]{0,50}IvParameterSpec'
+      - type: "base64_decoded_iv"
+        pattern: 'Base64\.getDecoder\(\)\.decode\s*\(\s*"[^"]+"\s*\)[\s\S]{0,50}IvParameterSpec'
+      - type: "string_bytes_iv"
+        pattern: '"[^"]{16}"\.getBytes\s*\(\s*\)[\s\S]{0,50}IvParameterSpec'
+    multi_function_chain_patterns:
+      - "Static byte[] IV -> IvParameterSpec -> Cipher.init for all encryptions"
+      - "Hardcoded nonce -> GCMParameterSpec -> multiple doFinal calls"
+      - "Zero IV -> CBC encryption -> database storage"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "IV/nonce reuse in GCM mode leaks the authentication key, enabling ciphertext forgery and confidentiality breach"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "static_byte_array"
+        sink: "IvParameterSpec_constructor"
+        through: "field_reference"
+      - source: "hardcoded_string"
+        sink: "GCMParameterSpec_nonce"
+        through: "getBytes()"
+      - source: "zero_array"
+        sink: "cipher_init"
+        through: "IvParameterSpec"
+    impact: |
+      Static or reused IVs/nonces break encryption security:
+      - GCM nonce reuse leaks GHASH key, breaking both confidentiality and authenticity
+      - CBC with predictable IV enables chosen-plaintext attacks (BEAST-style)
+      - CTR mode with reused nonce produces identical keystreams for XOR plaintext recovery
+      - Zero IVs enable detection of identical plaintexts across all records
+      - Static IVs violate IND-CPA security (the minimum for modern encryption)
+      - Non-compliance with NIST SP 800-38D (GCM), SP 800-38A (CBC/CTR)
+    remediation: |
+      Generate a fresh random IV/nonce for each encryption operation:
+
+      ```java
+      // VULNERABLE: Hardcoded IV
+      byte[] iv = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+      IvParameterSpec ivSpec = new IvParameterSpec(iv);
+
+      // SECURE: Random IV for CBC (16 bytes)
+      SecureRandom random = new SecureRandom();
+      byte[] iv = new byte[16];
+      random.nextBytes(iv);
+      IvParameterSpec ivSpec = new IvParameterSpec(iv);
+      Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+      cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
+      // Prepend IV to ciphertext
+
+      // SECURE: Random nonce for GCM (12 bytes recommended)
+      byte[] nonce = new byte[12];
+      random.nextBytes(nonce);
+      GCMParameterSpec gcmSpec = new GCMParameterSpec(128, nonce);
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      cipher.init(Cipher.ENCRYPT_MODE, key, gcmSpec);
+      // Store: nonce + ciphertext + authTag
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/329.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38d/final"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38a/final"
+      - "https://eprint.iacr.org/2016/475.pdf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'IvParameterSpec'
+        - 'GCMParameterSpec'
+        - 'Cipher'
+        - 'init'
+        - 'encrypt'
+        - 'iv'
+        - 'nonce'
+      taint_source_indicators:
+        - 'new\s+byte\s*\['
+        - 'static.*byte\[\]'
+        - '".*"\.getBytes'
+        - 'parseHexBinary'
+      taint_sink_indicators:
+        - 'Cipher\.init'
+        - '\.doFinal'
+        - '\.update'
+      sanitization_patterns:
+        - 'SecureRandom'
+        - 'random\.nextBytes'
+        - 'cipher\.getIV\(\)'
+        - 'generateIV'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + cipher_mode_risk_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits nonce reuse in AES-GCM encryption:
+        1. Java microservice uses a static 12-byte nonce for all GCM encryptions
+        2. Attacker collects two ciphertexts encrypted with the same key and nonce
+        3. XOR of ciphertexts yields XOR of plaintexts; known plaintext recovers keystream
+        4. Attacker recovers GHASH authentication key via polynomial GCD
+        5. Attacker forges authenticated ciphertexts with arbitrary content
+        6. Forged ciphertexts pass GCM authentication verification
+      example_payload: "new GCMParameterSpec(128, \"static_nonce!\".getBytes())"
+      attacker_objective: "Exploit IV/nonce reuse to recover encryption keystream and forge authenticated ciphertexts"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-002"
+        - "CRYPTO-JAVA-003"
+        - "CRYPTO-JAVA-005"
+
+  - rule_id: "CRYPTO-JAVA-007"
+    title: "SSLContext with Permissive TrustManager"
+    description: >
+      Detects implementations of custom TrustManager that accept all certificates without
+      validation, effectively disabling the PKI trust model for TLS connections. This pattern
+      involves creating an X509TrustManager with empty checkClientTrusted/checkServerTrusted
+      methods and returning empty arrays from getAcceptedIssuers(). This is the most common
+      way to disable TLS certificate validation in Java and is frequently found in production
+      code due to developers working around self-signed certificates during development.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-295
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - tls
+      - ssl
+      - trust-manager
+      - certificate-validation
+      - mitm
+      - java
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'new\s+X509TrustManager\s*\(\s*\)\s*\{[\s\S]*?checkServerTrusted[\s\S]*?\{\s*\}'
+        description: "X509TrustManager with empty checkServerTrusted method"
+      - type: regex
+        pattern: 'TrustManager\s*\[\s*\]\s*\w+\s*=\s*new\s+TrustManager\s*\[\s*\]\s*\{[\s\S]*?X509TrustManager'
+        description: "TrustManager array with custom X509TrustManager implementation"
+      - type: regex
+        pattern: 'SSLContext\.getInstance\s*\(\s*"(?:SSL|TLS|TLSv1|TLSv1\.1)"\s*\)'
+        description: "SSLContext with deprecated protocol version"
+      - type: regex
+        pattern: 'getAcceptedIssuers\s*\(\s*\)\s*\{[\s\S]{0,50}return\s+(?:null|new\s+X509Certificate\s*\[\s*0?\s*\])'
+        description: "getAcceptedIssuers returning empty/null (trust all issuers)"
+      - type: regex
+        pattern: 'HostnameVerifier[\s\S]{0,50}return\s+true'
+        description: "HostnameVerifier that always returns true"
+      - type: regex
+        pattern: 'HttpsURLConnection\.setDefaultHostnameVerifier\s*\(\s*(?:new\s+HostnameVerifier|[^)]*return\s+true)'
+        description: "Default hostname verifier overridden to accept all hosts"
+      - type: regex
+        pattern: 'SSLSocketFactory\.getDefault\(\)[\s\S]{0,100}ALLOW_ALL|allTrust|trustAll'
+        description: "SSL socket factory with trust-all configuration"
+      - type: regex
+        pattern: 'TrustAllStrategy|NoopHostnameVerifier|InsecureTrustManagerFactory'
+        description: "Apache/Netty/Spring trust-all utility classes"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'development.*only'
+      - 'localhost'
+      - 'self.*signed'
+      - '@Deprecated'
+      - '//\s*TODO.*remove'
+      - '//\s*TEMPORARY'
+      - 'mock'
+      - 'if.*isDevMode'
+    bypass_variants:
+      - description: "Trust manager loaded via factory or dependency injection"
+        pattern: '(?:TrustManagerFactory|getBean)\s*\([^)]*\)[\s\S]{0,100}SSLContext\.init'
+      - description: "Trust-all configured via OkHttp or Apache HTTP client"
+        pattern: '\.sslSocketFactory\s*\(\s*sslContext\.getSocketFactory\s*\(\s*\)\s*,\s*trustManager'
+      - description: "Spring RestTemplate with disabled SSL verification"
+        pattern: 'RestTemplate[\s\S]{0,200}(?:NoopHostnameVerifier|TrustAllStrategy|disableSslVerification)'
+    evasion_indicators:
+      - "TrustManager implementation in separate utility class"
+      - "SSL configuration loaded via Spring profile"
+      - "TrustManager injected via dependency injection"
+      - "Library-specific trust bypass (OkHttp, Apache, Netty)"
+    encoding_variants:
+      - type: "lambda_verifier"
+        pattern: 'setHostnameVerifier\s*\(\s*\(\s*\w+\s*,\s*\w+\s*\)\s*->\s*true\s*\)'
+      - type: "anonymous_class"
+        pattern: 'new\s+HostnameVerifier\s*\(\s*\)\s*\{[\s\S]*?return\s+true'
+      - type: "method_reference"
+        pattern: 'setHostnameVerifier\s*\(\s*\w+::alwaysTrue\s*\)'
+    multi_function_chain_patterns:
+      - "new TrustManager[]{custom} -> SSLContext.init -> HttpsURLConnection"
+      - "SSLContext.getInstance('TLS') -> init(null, trustAll, null) -> socket factory"
+      - "Trust-all manager -> SSLSocketFactory -> OkHttpClient.Builder"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Permissive TrustManagers enable MITM attacks on all HTTPS connections, exposing authentication credentials and sensitive data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "custom_trust_manager"
+        sink: "SSLContext_init"
+        through: "TrustManager_array"
+      - source: "hostname_verifier"
+        sink: "HTTPS_connection"
+        through: "setDefaultHostnameVerifier"
+      - source: "ssl_context"
+        sink: "http_client"
+        through: "socket_factory"
+    impact: |
+      Permissive TrustManagers fundamentally break TLS security:
+      - All certificate chain validation is bypassed (self-signed, expired, wrong CN)
+      - MITM attackers can present any certificate and intercept all traffic
+      - Authentication credentials, session tokens, and API keys exposed
+      - Payment data and PII transmitted without actual encryption protection
+      - SSL/TLS becomes security theater (appears secure but provides no protection)
+      - Violates PCI-DSS 4.0, HIPAA, GDPR encryption-in-transit requirements
+    remediation: |
+      Use proper certificate validation:
+
+      ```java
+      // VULNERABLE: Trust all certificates
+      TrustManager[] trustAll = new TrustManager[]{
+          new X509TrustManager() {
+              public void checkServerTrusted(X509Certificate[] c, String s) {}
+              public void checkClientTrusted(X509Certificate[] c, String s) {}
+              public X509Certificate[] getAcceptedIssuers() { return null; }
+          }
+      };
+      SSLContext ctx = SSLContext.getInstance("TLS");
+      ctx.init(null, trustAll, null);
+
+      // SECURE: Use default TrustManager with system trust store
+      SSLContext ctx = SSLContext.getInstance("TLSv1.3");
+      ctx.init(null, null, new SecureRandom()); // uses default trust manager
+
+      // SECURE: Use custom trust store with pinned certificates
+      KeyStore trustStore = KeyStore.getInstance("PKCS12");
+      trustStore.load(new FileInputStream("truststore.p12"), password);
+      TrustManagerFactory tmf = TrustManagerFactory.getInstance("PKIX");
+      tmf.init(trustStore);
+      SSLContext ctx = SSLContext.getInstance("TLSv1.3");
+      ctx.init(null, tmf.getTrustManagers(), new SecureRandom());
+
+      // SECURE: Certificate pinning with OkHttp
+      CertificatePinner pinner = new CertificatePinner.Builder()
+          .add("api.example.com", "sha256/AAAAAAA...")
+          .build();
+      OkHttpClient client = new OkHttpClient.Builder()
+          .certificatePinner(pinner)
+          .build();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/295.html"
+      - "https://docs.oracle.com/en/java/javase/17/security/java-secure-socket-extension-jsse-reference-guide.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html"
+      - "https://owasp.org/www-community/controls/Certificate_and_Public_Key_Pinning"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'SSLContext'
+        - 'TrustManager'
+        - 'X509TrustManager'
+        - 'HostnameVerifier'
+        - 'HttpsURLConnection'
+        - 'SSLSocketFactory'
+      taint_source_indicators:
+        - 'new\s+TrustManager'
+        - 'TrustAllStrategy'
+        - 'NoopHostnameVerifier'
+        - 'InsecureTrustManagerFactory'
+      taint_sink_indicators:
+        - 'SSLContext\.init'
+        - 'setDefaultSSLSocketFactory'
+        - 'setDefaultHostnameVerifier'
+        - 'HttpsURLConnection'
+        - 'OkHttpClient'
+      sanitization_patterns:
+        - 'TrustManagerFactory\.getInstance\s*\(\s*"PKIX"'
+        - 'CertificatePinner'
+        - 'TLSv1\.3'
+        - 'checkServerTrusted.*throw'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + network_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits a trust-all TrustManager in a Spring Boot microservice:
+        1. Microservice uses custom TrustManager to connect to internal APIs over HTTPS
+        2. Attacker compromises a network device or performs ARP spoofing
+        3. Attacker intercepts HTTPS connections with a self-signed certificate
+        4. TrustManager accepts the attacker's certificate without validation
+        5. Attacker captures OAuth2 tokens exchanged between microservices
+        6. Using stolen tokens, attacker accesses APIs as the compromised service
+        7. Lateral movement through the microservice mesh using service-to-service trust
+      example_payload: "SSLContext.getInstance(\"TLS\").init(null, trustAllCerts, null)"
+      attacker_objective: "Intercept TLS-encrypted communications by exploiting permissive certificate validation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-002"
+        - "CRYPTO-JAVA-003"
+
+  - rule_id: "CRYPTO-JAVA-008"
+    title: "Bouncy Castle Misconfiguration"
+    description: >
+      Detects insecure configurations and misuse of the Bouncy Castle cryptography library
+      in Java applications. Bouncy Castle provides a wide range of cryptographic algorithms
+      and is widely used in enterprise Java for advanced crypto operations. Common misconfigurations
+      include using weak algorithms through the BC provider, improper parameter initialization,
+      using deprecated or experimental features, and insecure key agreement or signature schemes.
+      The flexibility of Bouncy Castle makes it particularly prone to misconfiguration.
+    language: java
+    category: crypto
+    severity: High
+    confidence: 0.86
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - bouncy-castle
+      - misconfiguration
+      - key-agreement
+      - signature
+      - java
+      - provider
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+(?:MD5|SHA1|RIPEMD)Digest\s*\('
+        description: "Bouncy Castle weak digest instantiation"
+      - type: regex
+        pattern: 'new\s+(?:DESEngine|DESedeEngine|RC4Engine|BlowfishEngine)\s*\('
+        description: "Bouncy Castle weak cipher engine instantiation"
+      - type: regex
+        pattern: 'new\s+(?:PKCS1Encoding|ISO9796d1Encoding)\s*\('
+        description: "Bouncy Castle insecure RSA encoding"
+      - type: regex
+        pattern: 'new\s+ECBBlockCipher\s*\('
+        description: "Bouncy Castle ECB mode block cipher"
+      - type: regex
+        pattern: 'Security\.addProvider\s*\(\s*new\s+BouncyCastleProvider\s*\(\s*\)\s*\)[\s\S]{0,200}(?:MD5|SHA1|DES|RC4|ECB)'
+        description: "BC provider registered then weak algorithm used"
+      - type: regex
+        pattern: 'new\s+RSAEngine\s*\(\s*\)[\s\S]{0,100}(?!OAEP)(?:init|processBlock)'
+        description: "RSAEngine without OAEP wrapping"
+      - type: regex
+        pattern: 'new\s+(?:CBCBlockCipher|SICBlockCipher)\s*\([^)]*\)[\s\S]{0,100}init\s*\(\s*true\s*,\s*new\s+KeyParameter'
+        description: "BC block cipher init without IV parameter"
+      - type: regex
+        pattern: 'new\s+DSASigner\s*\(\s*\)[\s\S]{0,100}(?:SHA1|MD5|RIPEMD)'
+        description: "DSA signer with weak hash algorithm"
+    anti_patterns:
+      - 'Test\.java$'
+      - 'Tests\.java$'
+      - 'test/'
+      - 'src/test/'
+      - '@Test'
+      - '//\s*NOSONAR'
+      - '//\s*nosec'
+      - 'legacy'
+      - '@Deprecated'
+      - 'migration'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'backward.*compat'
+    bypass_variants:
+      - description: "BC engine instantiated via factory pattern"
+        pattern: 'BlockCipherFactory\.create\s*\(\s*"(?:DES|RC4|Blowfish)"'
+      - description: "BC algorithm selected from configuration string"
+        pattern: '(?:engineName|cipherName)\s*=\s*"(?:DES|RC4|Blowfish)"[\s\S]{0,200}Engine'
+      - description: "BC provider used implicitly via JCE"
+        pattern: 'Cipher\.getInstance\s*\(\s*"[^"]+"\s*,\s*"BC"\s*\)[\s\S]{0,50}(?:DES|RC4|ECB)'
+    evasion_indicators:
+      - "Bouncy Castle engine selected from configuration"
+      - "Algorithm name passed through factory method"
+      - "BC provider registered globally then used via JCE standard API"
+      - "Custom provider wrapping BC with modified defaults"
+    encoding_variants:
+      - type: "provider_string"
+        pattern: 'Cipher\.getInstance\s*\([^,]+,\s*"BC"\s*\)'
+      - type: "provider_object"
+        pattern: 'Cipher\.getInstance\s*\([^,]+,\s*new\s+BouncyCastleProvider'
+      - type: "reflection"
+        pattern: 'Class\.forName\s*\(\s*"org\.bouncycastle'
+    multi_function_chain_patterns:
+      - "DESEngine -> CBCBlockCipher -> PaddedBufferedBlockCipher -> encrypt"
+      - "RSAEngine (no OAEP) -> init -> processBlock"
+      - "MD5Digest -> HMac -> init -> doFinal"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Bouncy Castle misconfiguration can expose weak algorithms, improper padding, and insecure key operations leading to data compromise"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "plaintext_data"
+        sink: "bc_cipher_processBlock"
+        through: "DESEngine_init"
+      - source: "message_data"
+        sink: "bc_digest_doFinal"
+        through: "MD5Digest_update"
+      - source: "rsa_plaintext"
+        sink: "RSAEngine_processBlock"
+        through: "no_OAEP_encoding"
+    impact: |
+      Bouncy Castle misconfiguration creates various cryptographic vulnerabilities:
+      - Weak digests (MD5, SHA1, RIPEMD) enable collision attacks
+      - ECBBlockCipher leaks plaintext patterns
+      - DESEngine/RC4Engine provide insufficient encryption strength
+      - PKCS1Encoding is vulnerable to Bleichenbacher oracle attacks
+      - RSAEngine without OAEP wrapping enables textbook RSA attacks
+      - CBCBlockCipher without proper IV reuses previous ciphertext block
+      - DSA with weak hash enables signature forgery
+    remediation: |
+      Use secure Bouncy Castle configurations:
+
+      ```java
+      // VULNERABLE: BC with DES and ECB
+      BlockCipher engine = new DESEngine();
+      BufferedBlockCipher cipher = new PaddedBufferedBlockCipher(
+          new ECBBlockCipher(engine));
+
+      // SECURE: BC with AES-GCM
+      AEADBlockCipher cipher = new GCMBlockCipher(new AESEngine());
+      AEADParameters params = new AEADParameters(
+          new KeyParameter(key), 128, nonce, associatedData);
+      cipher.init(true, params);
+
+      // SECURE: BC RSA-OAEP
+      AsymmetricBlockCipher cipher = new OAEPEncoding(
+          new RSAEngine(),
+          new SHA256Digest(),
+          new SHA256Digest(),
+          null
+      );
+
+      // SECURE: BC signatures with SHA-256
+      DSADigestSigner signer = new DSADigestSigner(
+          new ECDSASigner(), new SHA256Digest());
+
+      // SECURE: BC SHA-256 digest
+      Digest digest = new SHA256Digest();
+      digest.update(data, 0, data.length);
+      byte[] hash = new byte[digest.getDigestSize()];
+      digest.doFinal(hash, 0);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://www.bouncycastle.org/documentation.html"
+      - "https://www.bouncycastle.org/wiki/display/JA1/Provider+Installation"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'BouncyCastle'
+        - 'org\.bouncycastle'
+        - 'Engine'
+        - 'Digest'
+        - 'BlockCipher'
+        - 'Signer'
+        - 'Encoding'
+      taint_source_indicators:
+        - 'plaintext'
+        - 'data'
+        - 'message'
+        - 'input'
+      taint_sink_indicators:
+        - 'processBlock'
+        - 'doFinal'
+        - 'update'
+        - 'init'
+      sanitization_patterns:
+        - 'AESEngine'
+        - 'GCMBlockCipher'
+        - 'OAEPEncoding'
+        - 'SHA256Digest'
+        - 'SHA384Digest'
+        - 'SHA512Digest'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + algorithm_weakness_severity)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits Bouncy Castle RSA without OAEP in a Java payment system:
+        1. Payment system uses RSAEngine directly without OAEPEncoding
+        2. Attacker captures RSA-encrypted payment data from network traffic
+        3. Using chosen-ciphertext attacks against textbook RSA, attacker recovers plaintext
+        4. Attacker extracts credit card numbers from decrypted payment payloads
+        5. Alternatively, attacker exploits ECBBlockCipher to identify repeated transaction data
+        6. Pattern analysis reveals purchase amounts and card number blocks
+      example_payload: "new RSAEngine(); engine.init(true, pubKeyParams); engine.processBlock(data, 0, data.length)"
+      attacker_objective: "Exploit Bouncy Castle misconfiguration to decrypt protected data or forge cryptographic operations"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-JAVA-001"
+        - "CRYPTO-JAVA-002"
+        - "CRYPTO-JAVA-005"
+        - "CRYPTO-JAVA-006"

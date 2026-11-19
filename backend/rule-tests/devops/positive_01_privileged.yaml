@@ -1,0 +1,77 @@
+# ==============================================================================
+# Test:     positive_01_privileged
+# Expected: TRIGGER rule DEVOPS-YAML-001 (Privileged container detected)
+# Category: DevOps
+# Language: YAML (Kubernetes)
+# ==============================================================================
+# Description: Kubernetes Deployment with a container running in privileged
+# mode. Privileged containers have full access to the host's devices and kernel
+# capabilities, effectively granting root-level host access.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-agent
+  namespace: observability
+  labels:
+    app: monitoring-agent
+    team: platform-engineering
+    environment: production
+    version: "2.4.1"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: monitoring-agent
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: monitoring-agent
+        version: "2.4.1"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: monitoring-sa
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: agent
+          image: registry.internal.io/monitoring/agent:2.4.1
+          ports:
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          env:
+            - name: CLUSTER_NAME
+              value: "prod-us-east-1"
+            - name: LOG_LEVEL
+              value: "info"
+          securityContext:
+            privileged: true          # VULNERABLE: full host access
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /host/sys
+              readOnly: true
+      volumes:
+        - name: host-proc
+          hostPath:
+            path: /proc
+        - name: host-sys
+          hostPath:
+            path: /sys

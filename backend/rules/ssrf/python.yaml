@@ -1,0 +1,1373 @@
+# ============================================================================
+# SSRF Detection Rules - Python
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Server-Side Request Forgery (CWE-918)
+# Language: Python
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # SSRF-PY-001: requests.get with user-controlled URL
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-PY-001"
+    title: "requests.get/post with User-Controlled URL"
+    description: >
+      Detects usage of the Python requests library (requests.get, requests.post,
+      requests.request, etc.) where the target URL is derived from user-controlled
+      input such as Flask/Django request parameters, query strings, form data,
+      or JSON body fields. The requests library is the most popular HTTP client
+      in Python, and passing user-controlled URLs to it without validation
+      enables Server-Side Request Forgery attacks.
+    language: python
+    category: ssrf
+    severity: High
+    confidence: 0.93
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - requests
+      - python
+      - user-input
+      - http-client
+      - flask
+      - django
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'requests\s*\.\s*(get|post|put|delete|patch|head|options|request)\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data|values)\s*[\.\[]|flask\.request)'
+        description: "requests library method called with Flask request input"
+      - type: regex
+        pattern: 'requests\s*\.\s*(get|post|put|delete|patch|head|options)\s*\(\s*(?:url|uri|endpoint|target|dest|link|href)\s*[,)]'
+        description: "requests method using variable with URL-like name"
+      - type: regex
+        pattern: 'requests\s*\.\s*(get|post|put|delete|patch|head)\s*\(\s*f[`\x27"].*?\{(?:request\s*\.\s*(?:args|form|json)|url|uri|endpoint|target)'
+        description: "requests with f-string containing user-controlled variable"
+      - type: regex
+        pattern: 'requests\s*\.\s*Session\s*\(\s*\)[\s\S]{0,300}\.(?:get|post|put|delete)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "requests Session object with user-controlled URL"
+      - type: regex
+        pattern: '(?:url|uri|endpoint|target)\s*=\s*request\s*\.\s*(?:args|form|json|data|values)\s*\.?\s*(?:get\s*\(|__getitem__|\[)[\s\S]{0,200}requests\s*\.\s*(?:get|post)'
+        description: "URL variable assigned from request then used in requests call"
+      - type: regex
+        pattern: 'requests\s*\.\s*(get|post|put|delete|patch)\s*\(\s*(?:request\.GET|request\.POST|request\.data|request\.query_params)\s*[\.\[]'
+        description: "requests library with Django request input"
+      - type: regex
+        pattern: 'requests\s*\.\s*(get|post|put|delete)\s*\(\s*(?:data|params|kwargs|args)\s*\[\s*[`\x27"](?:url|uri|endpoint|target|callback|webhook)[`\x27"]\s*\]'
+        description: "requests with URL from dictionary lookup with URL-like key"
+      - type: regex
+        pattern: '(?:httpx|urllib3\.request|http\.client\.HTTPConnection)\s*\.?\s*(?:get|post|request|urlopen)\s*\(\s*(?:request\.|url|uri|endpoint)'
+        description: "Alternative Python HTTP clients with user-controlled URL"
+    anti_patterns:
+      - 'requests\s*\.\s*get\s*\(\s*[`\x27"]https?://(?:api\.|www\.)[a-zA-Z0-9]+\.'
+      - 'requests\s*\.\s*get\s*\(\s*[`\x27"]https?://localhost'
+      - 'requests\s*\.\s*get\s*\(\s*settings\.\w+'
+      - 'requests\s*\.\s*get\s*\(\s*(?:os\.environ|config|settings)\s*[\.\[]'
+      - 'requests\s*\.\s*get\s*\(\s*(?:API_URL|BASE_URL|SERVICE_URL)\s*\+'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*requests'
+      - 'responses\.add\s*\('
+      - 'requests_mock\.\w+'
+      - 'unittest\.mock'
+      - 'mock\.MagicMock'
+      - '@responses\.activate'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - 'assert\s+.*requests\.'
+    bypass_variants:
+      - description: "URL encoding bypass for hostname validation"
+        pattern: 'requests\s*\.\s*\w+\s*\(\s*(?:urllib\.parse\.(?:unquote|quote)|quote|unquote)\s*\('
+      - description: "Redirect following to internal IP (default behavior in requests)"
+        pattern: 'requests\s*\.\s*\w+\s*\([^)]*allow_redirects\s*=\s*True'
+      - description: "IPv6 address to bypass IPv4-only filtering"
+        pattern: 'requests\s*\.\s*\w+\s*\(\s*[`\x27"]https?://\[(?:::ffff:|::1|fe80:)'
+      - description: "Protocol smuggling via file:// or gopher://"
+        pattern: 'requests\s*\.\s*\w+\s*\(\s*(?:url|uri)\s*[,)][\s\S]{0,200}(?:file://|gopher://|dict://)'
+      - description: "URL with credentials to confuse parser (user@host)"
+        pattern: 'requests\s*\.\s*\w+\s*\(\s*[fF]?[`\x27"]https?://[^@]+@(?:169\.254|127\.|10\.|192\.168)'
+    evasion_indicators:
+      - "302/307 redirect chain to internal IP"
+      - "DNS rebinding via short TTL records"
+      - "URL shortener resolving to internal address"
+      - "IPv4-mapped IPv6 address bypass"
+      - "Decimal/octal IP representation"
+      - "URL with authentication section (user@host)"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'requests\.\w+\s*\(.*?%(?:25)?(?:31|36|37|38|39)[0-9A-Fa-f]'
+      - type: "unicode_encoding"
+        pattern: 'requests\.\w+\s*\(.*?\\u(?:FF|00)[0-9A-Fa-f]{2}'
+      - type: "double_encoding"
+        pattern: 'requests\.\w+\s*\(.*?%25(?:32|33|36|37)[0-9A-Fa-f]'
+      - type: "punycode"
+        pattern: 'requests\.\w+\s*\(.*?xn--[a-zA-Z0-9]+'
+    multi_function_chain_patterns:
+      - "request.args.get('url') -> validate_url() -> requests.get(url)"
+      - "request.json['endpoint'] -> urlparse() -> requests.post(endpoint)"
+      - "Flask route -> request.form['target'] -> requests.get(target)"
+      - "Django view -> request.GET['url'] -> requests.get(url) -> response.content"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Server-side HTTP requests enable internal network access and cloud credential theft"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('url')"
+        sink: "requests.get(url)"
+        through: "direct assignment or minimal validation"
+      - source: "request.json['endpoint']"
+        sink: "requests.post(endpoint, data=payload)"
+        through: "JSON body extraction to HTTP client"
+      - source: "request.GET['target']"
+        sink: "requests.get(target)"
+        through: "Django query parameter to requests library"
+    impact: |
+      - Access to internal services (Redis, Elasticsearch, MongoDB) not exposed externally.
+      - Theft of cloud metadata credentials (AWS IAM, GCP service accounts, Azure MI).
+      - Port scanning and service discovery on internal network.
+      - Data exfiltration from internal APIs and microservices.
+      - Potential RCE via chaining with vulnerable internal services.
+    remediation: |
+      1. Validate and restrict target URLs before making requests:
+         ```python
+         import ipaddress
+         import socket
+         from urllib.parse import urlparse
+
+         ALLOWED_SCHEMES = {'https'}
+         BLOCKED_RANGES = [
+             ipaddress.ip_network('10.0.0.0/8'),
+             ipaddress.ip_network('172.16.0.0/12'),
+             ipaddress.ip_network('192.168.0.0/16'),
+             ipaddress.ip_network('127.0.0.0/8'),
+             ipaddress.ip_network('169.254.0.0/16'),
+         ]
+
+         def validate_url(url: str) -> str:
+             parsed = urlparse(url)
+             if parsed.scheme not in ALLOWED_SCHEMES:
+                 raise ValueError(f'Scheme {parsed.scheme} not allowed')
+
+             # Resolve DNS and check IP
+             try:
+                 ip = socket.gethostbyname(parsed.hostname)
+                 ip_obj = ipaddress.ip_address(ip)
+                 for network in BLOCKED_RANGES:
+                     if ip_obj in network:
+                         raise ValueError(f'IP {ip} is in blocked range')
+             except socket.gaierror:
+                 raise ValueError('Cannot resolve hostname')
+
+             return url
+         ```
+      2. Use requests with `allow_redirects=False` and validate each redirect.
+      3. Implement network-level egress filtering.
+      4. Use a dedicated SSRF protection library (e.g., advocate).
+      5. Set strict timeouts to limit reconnaissance via timing attacks.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+      - "https://docs.python-requests.org/en/latest/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request\s*\)'
+        - 'class\s+\w+View\s*\('
+        - '@api_view\s*\('
+        - 'def\s+\w+\s*\(\s*\)\s*:'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\s*[\.\[]'
+        - 'request\.POST\s*[\.\[]'
+        - 'request\.data\s*[\.\[]'
+        - 'request\.query_params\s*[\.\[]'
+      taint_sink_indicators:
+        - 'requests\.\w+\s*\('
+        - 'httpx\.\w+\s*\('
+        - 'urllib\.request\.urlopen\s*\('
+        - 'urllib3\.\w+\s*\('
+      sanitization_patterns:
+        - 'validate_url\s*\('
+        - 'is_safe_url\s*\('
+        - 'is_valid_url\s*\('
+        - 'ALLOWED_HOSTS'
+        - 'advocate\.\w+'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + redirect_following_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask application has a URL preview endpoint:
+
+        @app.route('/api/preview')
+        def preview():
+            url = request.args.get('url')
+            resp = requests.get(url)
+            return jsonify({'content': resp.text[:500]})
+
+        An attacker requests:
+        GET /api/preview?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+        The server fetches AWS metadata and returns IAM role credentials.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/admin-role"
+      attacker_objective: "Exploit server-side requests to access internal resources and cloud credentials"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-PY-002"
+        - "SSRF-PY-004"
+        - "SSRF-PY-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-PY-002: urllib.request.urlopen with user input
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-PY-002"
+    title: "urllib.request.urlopen with User-Controlled Input"
+    description: >
+      Detects usage of Python's built-in urllib.request.urlopen() and related
+      urllib functions where the URL is derived from user-controlled input.
+      Unlike the requests library, urllib is part of Python's standard library
+      and supports additional protocols (file://, ftp://, gopher:// in older
+      versions) that expand the SSRF attack surface. The file:// protocol
+      handler enables local file reading, making this particularly dangerous.
+    language: python
+    category: ssrf
+    severity: High
+    confidence: 0.91
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - urllib
+      - python-stdlib
+      - file-protocol
+      - user-input
+      - urlopen
+      - standard-library
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'urllib\s*\.\s*request\s*\.\s*urlopen\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data|values)|url|uri|endpoint|target)'
+        description: "urllib.request.urlopen with user-controlled URL"
+      - type: regex
+        pattern: 'urlopen\s*\(\s*(?:request\s*\.\s*(?:args|form|json)|url|uri|endpoint|target)\s*[\.\[]'
+        description: "Imported urlopen called with user input"
+      - type: regex
+        pattern: 'urllib\s*\.\s*request\s*\.\s*Request\s*\(\s*(?:request\s*\.\s*(?:args|form|json)|url|uri|endpoint|target)'
+        description: "urllib.request.Request object constructed with user URL"
+      - type: regex
+        pattern: 'urllib\s*\.\s*request\s*\.\s*urlretrieve\s*\(\s*(?:request\s*\.\s*(?:args|form|json)|url|uri|endpoint|target)'
+        description: "urllib.request.urlretrieve with user-controlled URL"
+      - type: regex
+        pattern: 'urllib[23]?\s*\.\s*(?:urlopen|request\.urlopen)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Python 2/3 urllib variants with user input"
+      - type: regex
+        pattern: 'from\s+urllib\.request\s+import\s+(?:urlopen|Request|urlretrieve)[\s\S]{0,500}(?:urlopen|Request|urlretrieve)\s*\(\s*(?:request\.|url|uri|endpoint)'
+        description: "Direct urllib import followed by usage with user input"
+      - type: regex
+        pattern: 'opener\s*=\s*urllib\.request\.build_opener\s*\([\s\S]{0,300}opener\.open\s*\(\s*(?:url|uri|endpoint|request\.)'
+        description: "Custom urllib opener with user-controlled URL"
+      - type: regex
+        pattern: 'urllib\.request\.urlopen\s*\(\s*f[`\x27"].*?\{(?:url|uri|endpoint|target|request\.)'
+        description: "urlopen with f-string containing user-controlled variable"
+    anti_patterns:
+      - 'urllib\.request\.urlopen\s*\(\s*[`\x27"]https?://(?:api\.|www\.)[a-zA-Z0-9]+'
+      - 'urlopen\s*\(\s*[`\x27"]https?://localhost'
+      - 'urllib\.request\.urlopen\s*\(\s*(?:os\.environ|settings|config)\s*[\.\[]'
+      - 'urllib\.request\.urlopen\s*\(\s*(?:API_URL|BASE_URL|SERVICE_URL)'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*urllib'
+      - 'unittest\.mock\.patch'
+      - 'mock\.MagicMock'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo|sample)'
+      - 'httpretty\.\w+'
+      - 'responses\.add\s*\('
+      - 'urllib\.parse\.(?:quote|urlencode|urlparse)\s*\(\s*[`\x27"]https?://'
+      - '\.addheader\s*\(\s*[`\x27"]User-Agent'
+    bypass_variants:
+      - description: "file:// protocol to read local files"
+        pattern: 'urllib\.request\.urlopen\s*\(\s*[`\x27"]file:///'
+      - description: "Redirect following to internal IP (default in urllib)"
+        pattern: 'urllib\.request\.(?:urlopen|Request)\s*\([^)]*follow_redirects'
+      - description: "Netloc confusion via backslash in URL"
+        pattern: 'urllib\.request\.urlopen\s*\(\s*[`\x27"]https?://[^/]*\\\\[^/]*/'
+      - description: "Data URI to encode payload"
+        pattern: 'urllib\.request\.urlopen\s*\(\s*[`\x27"]data:.*?;base64,'
+      - description: "Custom protocol handler via OpenerDirector"
+        pattern: 'build_opener\s*\(\s*\w*Handler\s*\)[\s\S]{0,300}\.open\s*\('
+    evasion_indicators:
+      - "file:// protocol handler reading local files"
+      - "Custom OpenerDirector with permissive handlers"
+      - "URL encoding in hostname component"
+      - "301/302 redirect chain to internal resources"
+      - "Backslash in URL for parser confusion"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'urlopen\s*\(.*?%(?:25)?(?:30|31|32|36|37)[0-9A-Fa-f]'
+      - type: "unicode_normalization"
+        pattern: 'urlopen\s*\(.*?\\u(?:FF|00)[0-9A-Fa-f]{2}'
+      - type: "file_protocol"
+        pattern: 'urlopen\s*\(\s*[`\x27"]file://(?:%2[fF]){2}'
+    multi_function_chain_patterns:
+      - "request.args.get('url') -> urllib.parse.urlparse() -> urllib.request.urlopen()"
+      - "request.json['endpoint'] -> urllib.request.Request(endpoint) -> urlopen(req)"
+      - "Flask route -> request.form['target'] -> urlretrieve(target, filename)"
+      - "Django view -> request.GET['url'] -> urlopen(url).read()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "urllib supports file:// protocol enabling local file read in addition to network SSRF"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('url')"
+        sink: "urllib.request.urlopen(url)"
+        through: "direct parameter passing"
+      - source: "request.json['target']"
+        sink: "urllib.request.urlretrieve(target, path)"
+        through: "JSON body extraction"
+      - source: "request.GET['endpoint']"
+        sink: "urllib.request.urlopen(endpoint)"
+        through: "Django query parameter"
+    impact: |
+      - Server-Side Request Forgery to internal services and cloud metadata.
+      - Local file disclosure via file:// protocol (e.g., /etc/passwd, /proc/self/environ).
+      - Access to internal APIs and microservices on the server's network.
+      - Cloud credential theft from metadata endpoints.
+      - Information leakage through error messages containing internal responses.
+    remediation: |
+      1. Replace urllib with requests library and add URL validation:
+         ```python
+         import ipaddress
+         import socket
+         from urllib.parse import urlparse
+
+         def safe_urlopen(user_url: str) -> bytes:
+             parsed = urlparse(user_url)
+
+             # Block dangerous protocols
+             if parsed.scheme not in ('http', 'https'):
+                 raise ValueError(f'Protocol {parsed.scheme} not allowed')
+
+             # Block internal IPs
+             try:
+                 ip = socket.gethostbyname(parsed.hostname)
+                 ip_obj = ipaddress.ip_address(ip)
+                 if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                     raise ValueError(f'Internal IP {ip} not allowed')
+             except socket.gaierror:
+                 raise ValueError('Cannot resolve hostname')
+
+             import requests
+             resp = requests.get(user_url, allow_redirects=False, timeout=5)
+             return resp.content
+         ```
+      2. Never use urllib with file:// or other non-HTTP protocols for user input.
+      3. Resolve DNS and validate IPs before making requests.
+      4. Disable automatic redirect following.
+      5. Set strict timeouts on all outbound requests.
+    references:
+      - "https://docs.python.org/3/library/urllib.request.html"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - 'class\s+\w+View\s*\('
+        - 'from\s+urllib\.request\s+import'
+        - 'import\s+urllib\.request'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\.\w+'
+        - 'request\.POST\.\w+'
+        - 'request\.data\s*[\.\[]'
+      taint_sink_indicators:
+        - 'urllib\.request\.urlopen\s*\('
+        - 'urlopen\s*\('
+        - 'urllib\.request\.urlretrieve\s*\('
+        - 'urllib\.request\.Request\s*\('
+      sanitization_patterns:
+        - 'validate_url\s*\('
+        - 'is_safe_url\s*\('
+        - 'urlparse.*scheme.*(?:http|https)'
+        - 'ALLOWED_SCHEMES'
+        - 'block.*(?:file|ftp|gopher).*protocol'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + protocol_support_risk)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django view fetches content from a user-supplied URL:
+
+        def fetch_content(request):
+            url = request.GET.get('url')
+            response = urllib.request.urlopen(url)
+            return HttpResponse(response.read())
+
+        An attacker exploits the file:// protocol support:
+        GET /fetch?url=file:///etc/passwd
+
+        Or targets cloud metadata:
+        GET /fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+      example_payload: "file:///etc/passwd"
+      attacker_objective: "Read local files or access internal services via urllib's multi-protocol support"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-PY-001"
+        - "SSRF-PY-003"
+        - "SSRF-PY-004"
+
+  # --------------------------------------------------------------------------
+  # SSRF-PY-003: aiohttp ClientSession with tainted URL
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-PY-003"
+    title: "aiohttp ClientSession with User-Controlled URL"
+    description: >
+      Detects usage of the aiohttp async HTTP client library where the target
+      URL is derived from user-controlled input. aiohttp is commonly used in
+      async Python web applications (FastAPI, aiohttp.web, Sanic) and its
+      ClientSession can be exploited for SSRF when passed user-controlled URLs.
+      The async nature may complicate detection as requests happen across await
+      boundaries and coroutine chains.
+    language: python
+    category: ssrf
+    severity: High
+    confidence: 0.90
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - aiohttp
+      - async
+      - python
+      - fastapi
+      - user-input
+      - http-client
+      - asyncio
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'aiohttp\s*\.\s*ClientSession\s*\(\s*\)[\s\S]{0,500}\.(?:get|post|put|delete|patch|head|options|request)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "aiohttp ClientSession method with user-controlled URL"
+      - type: regex
+        pattern: 'session\s*\.\s*(?:get|post|put|delete|patch|head|options|request)\s*\(\s*(?:request\s*\.\s*(?:query|json|match_info|rel_url)|url|uri|endpoint|target)'
+        description: "Session method with user-controlled input (aiohttp context)"
+      - type: regex
+        pattern: 'async\s+with\s+aiohttp\s*\.\s*ClientSession\s*\(\s*\)\s+as\s+\w+\s*:[\s\S]{0,500}\.\s*(?:get|post|put|delete)\s*\(\s*(?:url|uri|endpoint|target)'
+        description: "Async context manager ClientSession with user URL"
+      - type: regex
+        pattern: 'async\s+with\s+\w+\s*\.\s*(?:get|post|put|delete)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Async context manager on session method with user input"
+      - type: regex
+        pattern: 'await\s+\w+\s*\.\s*(?:get|post|put|delete|patch|request)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Awaited session method call with user-controlled URL"
+      - type: regex
+        pattern: 'httpx\s*\.\s*AsyncClient\s*\(\s*\)[\s\S]{0,500}\.(?:get|post|put|delete)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "httpx AsyncClient with user-controlled URL"
+      - type: regex
+        pattern: '(?:url|uri|endpoint|target)\s*=\s*(?:request\.query|request\.json|request\.match_info)\s*[\.\[][\s\S]{0,200}(?:session|client)\s*\.\s*(?:get|post|put|delete)\s*\('
+        description: "User input assigned to variable then used in async HTTP call"
+      - type: regex
+        pattern: 'aiohttp\s*\.\s*request\s*\(\s*[`\x27"]\w+[`\x27"]\s*,\s*(?:url|uri|endpoint|target|request\.)'
+        description: "aiohttp.request convenience function with user URL"
+    anti_patterns:
+      - 'aiohttp\s*\.\s*ClientSession\s*\(\s*\)[\s\S]{0,100}\.get\s*\(\s*[`\x27"]https?://(?:api\.|www\.)'
+      - 'session\s*\.\s*get\s*\(\s*[`\x27"]https?://localhost'
+      - 'session\s*\.\s*get\s*\(\s*settings\.\w+'
+      - 'session\s*\.\s*get\s*\(\s*(?:os\.environ|config)\s*[\.\[]'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - 'pytest\.mark\.asyncio'
+      - 'aioresponses\s*\('
+      - 'mock\.patch.*aiohttp'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - '(?:#|""").*(?:test|example|demo)'
+      - 'aiohttp\.test_utils'
+      - 'TestClient\s*\('
+      - 'unittest\.mock'
+      - 'AsyncMock\s*\('
+    bypass_variants:
+      - description: "Redirect following in aiohttp (default max 10 redirects)"
+        pattern: '(?:session|client)\s*\.\s*\w+\s*\([^)]*max_redirects\s*=\s*(?:[1-9]\d*|None)'
+      - description: "Custom connector bypassing SSL verification"
+        pattern: 'aiohttp\s*\.\s*TCPConnector\s*\([^)]*(?:ssl\s*=\s*False|verify_ssl\s*=\s*False)'
+      - description: "Unix socket connector for local service access"
+        pattern: 'aiohttp\s*\.\s*UnixConnector\s*\('
+      - description: "Custom resolver allowing DNS manipulation"
+        pattern: 'aiohttp\s*\.\s*resolver\s*\.\s*(?:AsyncResolver|ThreadedResolver)\s*\('
+    evasion_indicators:
+      - "Redirect chain to internal URLs"
+      - "DNS rebinding across async boundaries"
+      - "Unix domain socket access via custom connector"
+      - "Custom resolver allowing DNS manipulation"
+      - "Async task scheduling delays enabling TOCTOU"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:session|client)\.\w+\s*\(.*?%(?:25)?(?:30|31|32|36|37)[0-9A-Fa-f]'
+      - type: "unicode_normalization"
+        pattern: '(?:session|client)\.\w+\s*\(.*?\\u(?:FF|00)[0-9A-Fa-f]{2}'
+      - type: "idn_encoding"
+        pattern: '(?:session|client)\.\w+\s*\(.*?xn--[a-zA-Z0-9]+'
+    multi_function_chain_patterns:
+      - "FastAPI route -> request.query_params -> aiohttp.ClientSession().get(url)"
+      - "aiohttp.web handler -> request.query['url'] -> session.get(url)"
+      - "Sanic route -> request.args -> async with session.get(url)"
+      - "async task -> stored URL -> aiohttp.ClientSession().post(url)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Async HTTP client enables SSRF with potential for concurrent scanning"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.query['url']"
+        sink: "session.get(url)"
+        through: "direct query parameter to async HTTP call"
+      - source: "request.json()['endpoint']"
+        sink: "await session.post(endpoint)"
+        through: "async JSON body parsing to HTTP client"
+      - source: "request.match_info['target']"
+        sink: "async with session.get(target)"
+        through: "URL path parameter to async HTTP request"
+    impact: |
+      - SSRF via async HTTP client enabling access to internal services.
+      - Concurrent internal network scanning via asyncio task parallelism.
+      - Cloud metadata credential theft from metadata endpoints.
+      - Access to Unix domain sockets via custom connectors.
+      - Amplified reconnaissance through async parallel requests.
+    remediation: |
+      1. Implement async URL validation before making requests:
+         ```python
+         import aiohttp
+         import aiodns
+         import ipaddress
+
+         async def safe_async_fetch(user_url: str) -> bytes:
+             parsed = urlparse(user_url)
+             if parsed.scheme not in ('http', 'https'):
+                 raise ValueError('Protocol not allowed')
+
+             resolver = aiodns.DNSResolver()
+             try:
+                 result = await resolver.gethostbyname(parsed.hostname, socket.AF_INET)
+                 ip = ipaddress.ip_address(result.addresses[0])
+                 if ip.is_private or ip.is_loopback or ip.is_link_local:
+                     raise ValueError('Internal IP not allowed')
+             except aiodns.error.DNSError:
+                 raise ValueError('Cannot resolve hostname')
+
+             async with aiohttp.ClientSession() as session:
+                 async with session.get(
+                     user_url,
+                     max_redirects=0,
+                     timeout=aiohttp.ClientTimeout(total=5)
+                 ) as resp:
+                     return await resp.read()
+         ```
+      2. Disable redirect following or validate each redirect destination.
+      3. Avoid using UnixConnector with user-controlled paths.
+      4. Set strict timeouts on all async HTTP requests.
+      5. Implement rate limiting on SSRF-prone endpoints.
+    references:
+      - "https://docs.aiohttp.org/en/stable/client.html"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'async\s+def\s+\w+\s*\('
+        - '@app\.\w+\s*\('
+        - 'from\s+aiohttp\s+import'
+        - 'import\s+aiohttp'
+        - 'from\s+fastapi\s+import'
+      taint_source_indicators:
+        - 'request\.query\s*[\.\[]'
+        - 'request\.json\s*\(\s*\)'
+        - 'request\.match_info\s*[\.\[]'
+        - 'request\.query_params\s*[\.\[]'
+        - 'await\s+request\.json\s*\(\s*\)'
+      taint_sink_indicators:
+        - 'session\.\w+\s*\('
+        - 'client\.\w+\s*\('
+        - 'aiohttp\.ClientSession'
+        - 'aiohttp\.request\s*\('
+        - 'httpx\.AsyncClient'
+      sanitization_patterns:
+        - 'validate_url\s*\('
+        - 'is_safe_url\s*\('
+        - 'check_url\s*\('
+        - 'ALLOWED_HOSTS'
+        - 'url_validator\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + async_amplification)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A FastAPI application proxies content from user-provided URLs:
+
+        @app.get('/api/fetch')
+        async def fetch_url(url: str):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    data = await resp.text()
+            return {'content': data}
+
+        An attacker provides:
+        GET /api/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+        The server fetches and returns cloud metadata credentials.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Exploit async HTTP client for SSRF to access internal services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-PY-001"
+        - "SSRF-PY-004"
+        - "SSRF-PY-005"
+
+  # --------------------------------------------------------------------------
+  # SSRF-PY-004: Cloud Metadata SSRF
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-PY-004"
+    title: "Cloud Metadata Endpoint SSRF in Python"
+    description: >
+      Detects Python code patterns that access cloud provider metadata
+      endpoints (AWS, GCP, Azure, Alibaba Cloud) either directly or
+      through user-controlled URLs. Cloud metadata services expose
+      temporary IAM credentials, instance identity, network configuration,
+      and user-data scripts. This is the most impactful SSRF target
+      in cloud-deployed applications and a primary vector for cloud
+      account compromise.
+    language: python
+    category: ssrf
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - cloud-metadata
+      - aws
+      - gcp
+      - azure
+      - iam
+      - credential-theft
+      - imds
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:requests|urllib\.request|aiohttp|httpx)\s*\.?\s*(?:get|urlopen|request)\s*\(\s*[`\x27"]https?://169\.254\.169\.254'
+        description: "Python HTTP client accessing AWS/GCP metadata IP"
+      - type: regex
+        pattern: '(?:requests|urllib\.request|aiohttp|httpx)\s*\.?\s*(?:get|urlopen|request)\s*\(\s*[`\x27"]https?://metadata\.google\.internal'
+        description: "Python HTTP client accessing GCP metadata hostname"
+      - type: regex
+        pattern: '169\.254\.169\.254/latest/(?:meta-data|user-data|dynamic|api/token)'
+        description: "AWS IMDS endpoint paths in Python code"
+      - type: regex
+        pattern: '(?:requests|urllib\.request|aiohttp|httpx)\s*\.?\s*(?:get|put|urlopen)\s*\(\s*[`\x27"]https?://(?:169\.254\.170\.2|100\.100\.100\.200)'
+        description: "AWS ECS task metadata or Alibaba Cloud metadata endpoint"
+      - type: regex
+        pattern: 'headers\s*=\s*\{[^}]*[`\x27"]Metadata-Flavor[`\x27"]\s*:\s*[`\x27"]Google[`\x27"]'
+        description: "GCP metadata request header"
+      - type: regex
+        pattern: 'headers\s*=\s*\{[^}]*[`\x27"]X-aws-ec2-metadata-token[`\x27"]'
+        description: "AWS IMDSv2 token header"
+      - type: regex
+        pattern: '(?:url|uri|endpoint|target)\s*=.*?(?:169\.254\.169\.254|metadata\.google\.internal|metadata\.azure\.com)'
+        description: "Variable containing cloud metadata URL"
+      - type: regex
+        pattern: 'f[`\x27"]https?://169\.254\.169\.254/.*?\{(?:path|endpoint|resource|key|role)[`\x27"]'
+        description: "F-string constructing metadata URL with variable path"
+    anti_patterns:
+      - '@mock\.patch.*169\.254'
+      - 'mock\.MagicMock.*metadata'
+      - '@pytest\.fixture.*metadata'
+      - 'def\s+test_.*metadata'
+      - 'METADATA.*BLOCKED'
+      - 'DENY.*169\.254'
+      - 'BLOCKED_IPS.*169\.254'
+      - 'assert.*(?:block|reject|deny).*metadata'
+      - 'boto3\.\w+'
+      - 'botocore\.\w+'
+      - 'google\.cloud\.\w+'
+      - 'azure\.\w+'
+      - '(?:#|""").*(?:test|mock|fake|stub|example)'
+      - 'os\.environ\.\w*AWS'
+      - 'responses\.add\s*\('
+    bypass_variants:
+      - description: "Decimal IP encoding (2852039166 = 169.254.169.254)"
+        pattern: '(?:requests|urllib)\.\w+\s*\(\s*[`\x27"]https?://2852039166'
+      - description: "Hex IP encoding (0xa9fea9fe)"
+        pattern: '(?:requests|urllib)\.\w+\s*\(\s*[`\x27"]https?://0xa9fea9fe'
+      - description: "Octal IP encoding (0251.0376.0251.0376)"
+        pattern: '(?:requests|urllib)\.\w+\s*\(\s*[`\x27"]https?://0251\.0376'
+      - description: "IPv6 mapped address (::ffff:169.254.169.254)"
+        pattern: '(?:requests|urllib)\.\w+\s*\(\s*[`\x27"]https?://\[::ffff:169\.254'
+      - description: "DNS rebinding attack targeting metadata IP"
+        pattern: '(?:requests|urllib)\.\w+\s*\(\s*[`\x27"]https?://(?:metadata|imds|meta)\.'
+    evasion_indicators:
+      - "Redirect to metadata IP"
+      - "DNS CNAME pointing to 169.254.169.254"
+      - "Decimal/octal/hex IP encoding"
+      - "IPv6 mapped IPv4 metadata address"
+      - "URL shortener resolving to metadata endpoint"
+      - "SSRF via PDF/image rendering libraries"
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: '(?:requests|urllib)\.\w+\s*\(.*?285203916[0-9]'
+      - type: "hex_ip"
+        pattern: '(?:requests|urllib)\.\w+\s*\(.*?0x[aA]9[fF][eE][aA]9[fF][eE]'
+      - type: "octal_ip"
+        pattern: '(?:requests|urllib)\.\w+\s*\(.*?0+251\.0+376'
+    multi_function_chain_patterns:
+      - "user input -> requests.get(url) -> metadata credential extraction"
+      - "SSRF via image URL -> PIL/Pillow -> metadata endpoint"
+      - "webhook URL -> requests.post(webhook) -> redirect to metadata"
+      - "PDF generation URL -> reportlab/weasyprint -> metadata fetch"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cloud metadata access yields IAM credentials for full cloud account compromise"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('url')"
+        sink: "requests.get('http://169.254.169.254/...')"
+        through: "URL validation bypass allowing metadata IP"
+      - source: "request.json['imageUrl']"
+        sink: "PIL.Image.open(urlretrieve(imageUrl))"
+        through: "image processing library fetching from metadata"
+      - source: "request.json['webhookUrl']"
+        sink: "requests.post(webhookUrl)"
+        through: "webhook redirect to metadata endpoint"
+    impact: |
+      - Theft of AWS IAM temporary credentials (AccessKeyId, SecretAccessKey, Token).
+      - Theft of GCP service account OAuth2 access tokens.
+      - Theft of Azure Managed Identity tokens.
+      - Access to instance user-data containing bootstrap secrets.
+      - Full cloud account compromise via privilege escalation from stolen credentials.
+      - Lateral movement to other cloud resources (S3, GCS, databases, functions).
+    remediation: |
+      1. Block metadata IP ranges at the application and network level:
+         ```python
+         import ipaddress
+         import socket
+         from urllib.parse import urlparse
+
+         METADATA_IPS = {
+             '169.254.169.254', '169.254.170.2',
+             '100.100.100.200', 'fd00:ec2::254'
+         }
+         METADATA_HOSTS = {
+             'metadata.google.internal',
+             'metadata.azure.com'
+         }
+
+         def block_metadata(url: str) -> None:
+             parsed = urlparse(url)
+             if parsed.hostname in METADATA_IPS or parsed.hostname in METADATA_HOSTS:
+                 raise ValueError('Metadata endpoint blocked')
+
+             ip = socket.gethostbyname(parsed.hostname)
+             if ip in METADATA_IPS:
+                 raise ValueError('DNS resolves to metadata IP')
+             ip_obj = ipaddress.ip_address(ip)
+             if ip_obj.is_link_local:
+                 raise ValueError('Link-local address blocked')
+         ```
+      2. Enable IMDSv2 on AWS EC2 instances.
+      3. Use VPC firewall rules to block metadata access from application subnets.
+      4. Implement iptables rules to block metadata access from container workloads.
+      5. Use GCP metadata concealment and restrict service account scopes.
+    references:
+      - "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+      - "https://cloud.google.com/compute/docs/metadata/overview"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://blog.appsecco.com/an-ssrf-privileged-aws-keys-and-the-capital-one-breach-4c3c2cded3af"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - 'class\s+\w+View\s*\('
+        - 'async\s+def\s+\w+\s*\('
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\s*[\.\[]'
+        - 'request\.data\s*[\.\[]'
+      taint_sink_indicators:
+        - 'requests\.\w+\s*\('
+        - 'urllib\.request\.urlopen\s*\('
+        - 'aiohttp.*\.(?:get|post)\s*\('
+        - 'httpx\.\w+\s*\('
+      sanitization_patterns:
+        - 'block_metadata\s*\('
+        - 'METADATA.*(?:BLOCK|DENY)'
+        - 'is_metadata_ip\s*\('
+        - '169\.254.*(?:block|deny|filter)'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * cloud_exposure_multiplier"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django application provides a URL content fetching feature:
+
+        def fetch(request):
+            url = request.POST.get('url')
+            response = requests.get(url, timeout=5)
+            return JsonResponse({'content': response.text})
+
+        Attacker sends:
+        POST /fetch
+        url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+        The server returns the IAM role name. The attacker then requests:
+        url=http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2AdminRole
+
+        This returns temporary AWS credentials enabling full cloud access.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2AdminRole"
+      attacker_objective: "Steal cloud IAM credentials via SSRF to metadata endpoint"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-PY-001"
+        - "SSRF-PY-002"
+        - "SSRF-PY-003"
+
+  # --------------------------------------------------------------------------
+  # SSRF-PY-005: DNS Rebinding via socket
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-PY-005"
+    title: "DNS Rebinding via Socket-Level Resolution"
+    description: >
+      Detects patterns where Python socket-level DNS resolution is performed
+      separately from the HTTP request, creating a time-of-check to time-of-use
+      (TOCTOU) vulnerability. When DNS is resolved via socket.gethostbyname()
+      or socket.getaddrinfo() for validation, and the HTTP client later
+      re-resolves the hostname, an attacker can use DNS rebinding to return
+      different IPs at different times, bypassing IP-based validation.
+    language: python
+    category: ssrf
+    severity: High
+    confidence: 0.86
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - dns-rebinding
+      - socket
+      - toctou
+      - dns-resolution
+      - python
+      - time-of-check
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'socket\s*\.\s*gethostbyname\s*\(\s*(?:hostname|host|domain|url|request\.)'
+        description: "socket.gethostbyname with user-controlled hostname"
+      - type: regex
+        pattern: 'socket\s*\.\s*getaddrinfo\s*\(\s*(?:hostname|host|domain|url|request\.)'
+        description: "socket.getaddrinfo with user-controlled input"
+      - type: regex
+        pattern: 'socket\s*\.\s*gethostbyname\s*\([^)]+\)[\s\S]{0,500}(?:requests|urllib|aiohttp|httpx)\s*\.?\s*(?:get|post|urlopen|request)\s*\('
+        description: "DNS resolution followed by HTTP request (TOCTOU pattern)"
+      - type: regex
+        pattern: 'ipaddress\s*\.\s*ip_address\s*\(\s*socket\s*\.\s*gethostbyname\s*\([^)]+\)\s*\)[\s\S]{0,500}(?:requests|urllib|aiohttp|httpx)\s*\.'
+        description: "IP validation after DNS resolution then separate HTTP request"
+      - type: regex
+        pattern: 'socket\s*\.\s*(?:create_connection|connect)\s*\(\s*\(\s*(?:hostname|host|domain|target|request\.)'
+        description: "Raw socket connection with user-controlled hostname"
+      - type: regex
+        pattern: 'dns\s*\.\s*(?:resolver|query)\s*\.\s*(?:resolve|query)\s*\(\s*(?:hostname|host|domain|request\.)'
+        description: "dnspython resolver with user-controlled domain"
+      - type: regex
+        pattern: '(?:is_private|is_loopback|is_reserved|is_link_local)[\s\S]{0,300}(?:requests|urllib|aiohttp|httpx)\s*\.?\s*(?:get|post|urlopen)\s*\('
+        description: "IP property check then HTTP request (rebinding window)"
+      - type: regex
+        pattern: 'gethostbyname\s*\([^)]+\)\s*[\s\S]{0,200}(?:not\s+)?(?:is_private|is_loopback|startswith\s*\(\s*[`\x27"](?:10\.|192\.168|172\.16|127\.))'
+        description: "Manual IP range check after DNS resolution"
+    anti_patterns:
+      - 'socket\.gethostbyname\s*\(\s*[`\x27"][a-zA-Z0-9\-]+\.[a-z]{2,}[`\x27"]'
+      - 'socket\.gethostbyname\s*\(\s*[`\x27"]localhost[`\x27"]'
+      - 'socket\.getaddrinfo\s*\(\s*[`\x27"][a-zA-Z]+\.[a-z]{2,}[`\x27"]'
+      - 'socket\.gethostbyname\s*\(\s*(?:os\.environ|settings|config)\.'
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - '@mock\.patch.*socket'
+      - 'unittest\.mock\.patch.*socket'
+      - 'mock\.MagicMock.*gethostbyname'
+      - '(?:#|""").*(?:test|example|demo|sample)'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - 'socket\.gethostbyname\s*\(\s*HOSTNAME\s*\)'
+      - 'assert.*socket\.gethostbyname'
+      - 'socket\.gethostname\s*\(\s*\)'
+      - 'socket\.getfqdn\s*\(\s*\)'
+    bypass_variants:
+      - description: "Rapid DNS rebinding between validation and request"
+        pattern: 'gethostbyname\s*\([^)]+\)[\s\S]{0,200}(?:not\s+is_private|is_public)[\s\S]{0,200}(?:requests|urllib)\.\w+\s*\('
+      - description: "Multiple A records with mixed public/private IPs"
+        pattern: 'getaddrinfo\s*\([^)]+\)[\s\S]{0,200}\[0\][\s\S]{0,200}(?:requests|urllib)\.\w+\s*\('
+      - description: "DNS cache poisoning via TTL manipulation"
+        pattern: '(?:ttl|cache_ttl|dns_cache)\s*(?:=|:)\s*0'
+      - description: "Race condition in async DNS validation"
+        pattern: 'await\s+(?:loop\.getaddrinfo|aiodns\.resolve)[\s\S]{0,300}(?:aiohttp|httpx)\.\w+'
+    evasion_indicators:
+      - "Zero TTL DNS records for rapid rebinding"
+      - "Wildcard DNS with attacker-controlled nameserver"
+      - "Multiple A/AAAA records alternating between public and private"
+      - "Async DNS resolution creating wider TOCTOU window"
+      - "Custom DNS resolver configuration"
+    encoding_variants:
+      - type: "hostname_obfuscation"
+        pattern: 'gethostbyname\s*\(\s*[`\x27"](?:0x[0-9a-fA-F]+|[0-7]{10,})\.'
+      - type: "unicode_hostname"
+        pattern: 'gethostbyname\s*\(\s*[`\x27"].*?\\u[0-9A-Fa-f]{4}'
+      - type: "punycode_domain"
+        pattern: 'gethostbyname\s*\(\s*[`\x27"]xn--[a-zA-Z0-9]+'
+    multi_function_chain_patterns:
+      - "user input -> urlparse() -> socket.gethostbyname() -> is_private check -> requests.get()"
+      - "request.args['url'] -> hostname extraction -> DNS validation -> HTTP request"
+      - "async DNS resolution -> IP check -> await aiohttp.get(url)"
+      - "socket.getaddrinfo() -> ipaddress validation -> requests.get() with original URL"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DNS rebinding bypasses IP validation to access internal network from server"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('url')"
+        sink: "requests.get(url)"
+        through: "urlparse -> socket.gethostbyname -> is_private check -> requests.get(original_url)"
+      - source: "request.json['domain']"
+        sink: "urllib.request.urlopen(url)"
+        through: "DNS resolution -> validation (rebindable) -> HTTP request"
+      - source: "request.data['target']"
+        sink: "aiohttp.ClientSession.get(target)"
+        through: "async DNS validation with TOCTOU window"
+    impact: |
+      - Bypass of DNS-based IP validation for SSRF protection.
+      - Access to internal services through rebinding to private IPs after validation.
+      - Cloud metadata credential theft via rebinding to 169.254.169.254.
+      - Circumvention of network-level SSRF protections.
+      - Potential for persistent access if credentials are obtained.
+    remediation: |
+      1. Pin DNS resolution by connecting to the resolved IP directly:
+         ```python
+         import socket
+         import ipaddress
+         import requests
+         from urllib.parse import urlparse
+         from requests.adapters import HTTPAdapter
+         from urllib3.util.connection import create_connection
+
+         def safe_fetch(user_url: str) -> requests.Response:
+             parsed = urlparse(user_url)
+
+             # Resolve DNS once
+             ip = socket.gethostbyname(parsed.hostname)
+             ip_obj = ipaddress.ip_address(ip)
+
+             # Validate IP
+             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                 raise ValueError(f'IP {ip} is blocked')
+
+             # Connect to the resolved IP, set Host header
+             port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+             pinned_url = f'{parsed.scheme}://{ip}:{port}{parsed.path}'
+             if parsed.query:
+                 pinned_url += f'?{parsed.query}'
+
+             return requests.get(
+                 pinned_url,
+                 headers={'Host': parsed.hostname},
+                 allow_redirects=False,
+                 timeout=5
+             )
+         ```
+      2. Use the advocate library for automatic DNS rebinding protection.
+      3. Implement DNS pinning at the resolver level.
+      4. Deploy network-level protections (internal DNS firewall, RPZ).
+      5. Set very short timeouts to reduce the rebinding window.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://crypto.stanford.edu/dns/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://github.com/JordanMilne/Advocate"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+socket'
+        - 'from\s+socket\s+import'
+        - 'import\s+ipaddress'
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.json\s*[\.\[]'
+        - 'request\.GET\s*[\.\[]'
+        - 'request\.data\s*[\.\[]'
+      taint_sink_indicators:
+        - 'socket\.gethostbyname\s*\('
+        - 'socket\.getaddrinfo\s*\('
+        - 'socket\.create_connection\s*\('
+        - 'requests\.\w+\s*\('
+        - 'urllib\.request\.urlopen\s*\('
+      sanitization_patterns:
+        - 'advocate\.\w+'
+        - 'dns_pinning'
+        - 'pinned_dns'
+        - 'resolved_ip.*requests\.get.*headers.*Host'
+        - 'connect_to_resolved_ip'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * toctou_window_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Python application validates URLs before fetching:
+
+        def fetch_url(request):
+            url = request.args.get('url')
+            parsed = urlparse(url)
+            ip = socket.gethostbyname(parsed.hostname)
+            if ipaddress.ip_address(ip).is_private:
+                return 'Blocked', 403
+            return requests.get(url).text  # Re-resolves DNS!
+
+        An attacker uses a domain (evil.example.com) with a DNS server that:
+        1. First resolution: returns 1.2.3.4 (public IP, passes validation)
+        2. Second resolution: returns 169.254.169.254 (metadata IP)
+
+        The validation passes, but requests.get() re-resolves and connects
+        to the metadata endpoint.
+      example_payload: "http://evil.attacker.com/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Bypass DNS-based SSRF validation via rebinding"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-PY-001"
+        - "SSRF-PY-004"
+        - "SSRF-PY-003"
+
+  # --------------------------------------------------------------------------
+  # SSRF-PY-006: Flask/Django Redirect to User-Controlled URL
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-PY-006"
+    title: "Flask/Django Redirect to User-Controlled URL"
+    description: >
+      Detects open redirect vulnerabilities in Flask and Django applications
+      where the redirect destination is derived from user input. While
+      primarily an open redirect issue (CWE-601), in the context of SSRF
+      chains, an open redirect on a trusted domain can be used to bypass
+      SSRF hostname validation. When a server trusts its own domain and
+      follows redirects, an attacker can redirect through the application
+      to reach internal resources.
+    language: python
+    category: ssrf
+    severity: High
+    confidence: 0.88
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - open-redirect
+      - flask
+      - django
+      - redirect
+      - url-validation
+      - chain-vector
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'redirect\s*\(\s*request\s*\.\s*(?:args|form|json|data|values)\s*\.?\s*(?:get\s*\()?[`\x27"]?(?:url|next|redirect|return|goto|continue|dest|target|redir)'
+        description: "Flask redirect() with user-controlled URL parameter"
+      - type: regex
+        pattern: 'HttpResponseRedirect\s*\(\s*request\s*\.\s*(?:GET|POST|data|query_params)\s*\.?\s*(?:get\s*\()?[`\x27"]?(?:url|next|redirect|return|goto)'
+        description: "Django HttpResponseRedirect with user-controlled URL"
+      - type: regex
+        pattern: 'return\s+redirect\s*\(\s*(?:url|next_url|redirect_url|return_url|goto|target|dest)\s*\)'
+        description: "Return redirect with URL variable likely from user input"
+      - type: regex
+        pattern: 'redirect\s*\(\s*request\s*\.\s*(?:args|GET)\s*\.\s*get\s*\(\s*[`\x27"](?:next|url|redirect|return_to|continue_to)[`\x27"]'
+        description: "Redirect with common user-controlled parameter names"
+      - type: regex
+        pattern: 'HttpResponseRedirect\s*\(\s*(?:next_url|redirect_url|return_url|url)\s*\)[\s\S]{0,200}(?:next_url|redirect_url|return_url|url)\s*=\s*request\.'
+        description: "Django redirect with variable assigned from request"
+      - type: regex
+        pattern: 'make_response\s*\([^)]*\)[\s\S]{0,100}\.headers\s*\[\s*[`\x27"]Location[`\x27"]\s*\]\s*=\s*(?:url|next|redirect|request\.)'
+        description: "Flask manual Location header set from user input"
+      - type: regex
+        pattern: 'Response\s*\(\s*[^)]*status\s*=\s*30[1237][^)]*headers\s*=\s*\{[^}]*[`\x27"]Location[`\x27"]\s*:\s*(?:url|next|request\.)'
+        description: "Manual redirect response with user-controlled Location"
+      - type: regex
+        pattern: 'abort\s*\(\s*redirect\s*\(\s*(?:url|next_url|request\.args\.get\s*\(\s*[`\x27"](?:next|url|redirect))'
+        description: "Flask abort with redirect to user-controlled URL"
+    anti_patterns:
+      - 'redirect\s*\(\s*url_for\s*\('
+      - 'redirect\s*\(\s*reverse\s*\('
+      - 'redirect\s*\(\s*[`\x27"]/\w+'
+      - 'HttpResponseRedirect\s*\(\s*reverse\s*\('
+      - 'HttpResponseRedirect\s*\(\s*[`\x27"]/\w+'
+      - 'is_safe_url\s*\(\s*(?:url|next)'
+      - 'url_has_allowed_host_and_scheme\s*\('
+      - 'validate_redirect_url\s*\('
+      - '@pytest\.fixture'
+      - 'def\s+test_\w+'
+      - 'class\s+\w+Test(?:Case)?\s*\('
+      - 'LOGIN_REDIRECT_URL\s*='
+      - 'LOGOUT_REDIRECT_URL\s*='
+      - 'redirect\s*\(\s*settings\.\w+'
+      - '(?:#|""").*(?:test|example|demo)'
+    bypass_variants:
+      - description: "Protocol-relative URL bypass (//evil.com)"
+        pattern: 'redirect\s*\(\s*[`\x27"]//[^/]'
+      - description: "Backslash normalization bypass (http:/\\evil.com)"
+        pattern: 'redirect\s*\(\s*[`\x27"](?:https?:)?(?:/\\\\|\\\\/)(?!localhost)'
+      - description: "URL-encoded redirect bypass"
+        pattern: 'redirect\s*\(\s*(?:urllib\.parse\.unquote|unquote)\s*\('
+      - description: "Subdomain confusion bypass"
+        pattern: 'redirect\s*\(\s*[`\x27"]https?://(?:evil\.)?(?:example\.com|trusted\.com)\.'
+      - description: "Data URI redirect"
+        pattern: 'redirect\s*\(\s*[`\x27"]data:text/html'
+    evasion_indicators:
+      - "Protocol-relative URLs (//evil.com) to bypass scheme checks"
+      - "Backslash in URL scheme section for parser confusion"
+      - "URL-encoded characters to bypass regex filters"
+      - "Subdomain squatting on trusted domains"
+      - "Tab/newline injection in URL for filter bypass"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'redirect\s*\(.*?%(?:25)?(?:2[fF]|3[aA]|40)'
+      - type: "unicode_normalization"
+        pattern: 'redirect\s*\(.*?\\u(?:FF|00)[0-9A-Fa-f]{2}'
+      - type: "double_encoding"
+        pattern: 'redirect\s*\(.*?%25(?:2[fF]|3[aA])'
+    multi_function_chain_patterns:
+      - "login form -> request.args['next'] -> redirect(next) after auth"
+      - "OAuth callback -> request.args['redirect_uri'] -> redirect(redirect_uri)"
+      - "logout handler -> request.args['return_to'] -> redirect(return_to)"
+      - "SSRF validation -> allow trusted domain -> open redirect on trusted domain -> internal resource"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Open redirect enables SSRF chain when server follows redirects from trusted domains"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('next')"
+        sink: "redirect(next_url)"
+        through: "login form parameter to redirect response"
+      - source: "request.GET.get('redirect_uri')"
+        sink: "HttpResponseRedirect(redirect_uri)"
+        through: "OAuth parameter to redirect"
+      - source: "request.args.get('return_to')"
+        sink: "redirect(return_to)"
+        through: "logout flow return URL"
+    impact: |
+      - Open redirect enabling phishing attacks via trusted domain.
+      - SSRF chain vector when combined with internal services that trust the application domain.
+      - OAuth token theft via redirect URI manipulation.
+      - Bypass of SSRF hostname validation through redirect on trusted domain.
+      - Session hijacking through redirect-based token leakage.
+    remediation: |
+      1. Validate redirect URLs against an allowlist of safe destinations:
+         ```python
+         from urllib.parse import urlparse
+
+         ALLOWED_HOSTS = {'example.com', 'www.example.com'}
+
+         def safe_redirect(url: str, default: str = '/') -> str:
+             if not url:
+                 return default
+
+             parsed = urlparse(url)
+
+             # Only allow relative URLs or same-host redirects
+             if parsed.netloc and parsed.netloc not in ALLOWED_HOSTS:
+                 return default
+
+             # Block protocol-relative URLs
+             if url.startswith('//'):
+                 return default
+
+             # Block non-HTTP protocols
+             if parsed.scheme and parsed.scheme not in ('http', 'https', ''):
+                 return default
+
+             return url
+
+         # Flask usage
+         @app.route('/login', methods=['POST'])
+         def login():
+             # ... authenticate user ...
+             next_url = safe_redirect(request.args.get('next', '/'))
+             return redirect(next_url)
+         ```
+      2. Use Django's url_has_allowed_host_and_scheme() for redirect validation.
+      3. Prefer relative URLs for internal redirects.
+      4. Use url_for() / reverse() for generating redirect targets.
+      5. Set the Referer-Policy header to prevent referrer-based token leakage.
+    references:
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/601.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request\s*\)'
+        - 'class\s+\w+View\s*\('
+        - 'def\s+(?:login|logout|callback|oauth)\s*\('
+      taint_source_indicators:
+        - 'request\.args\.get\s*\(\s*[`\x27"](?:next|url|redirect|return|goto)'
+        - 'request\.GET\.get\s*\(\s*[`\x27"](?:next|url|redirect)'
+        - 'request\.POST\.get\s*\(\s*[`\x27"]redirect'
+        - 'request\.query_params\.get\s*\('
+      taint_sink_indicators:
+        - 'redirect\s*\('
+        - 'HttpResponseRedirect\s*\('
+        - 'HttpResponsePermanentRedirect\s*\('
+        - 'headers\s*\[\s*[`\x27"]Location[`\x27"]\s*\]'
+      sanitization_patterns:
+        - 'is_safe_url\s*\('
+        - 'url_has_allowed_host_and_scheme\s*\('
+        - 'validate_redirect\s*\('
+        - 'safe_redirect\s*\('
+        - 'ALLOWED_REDIRECT_HOSTS'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * ssrf_chain_potential"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask application has an open redirect after login:
+
+        @app.route('/login', methods=['POST'])
+        def login():
+            user = authenticate(request.form)
+            if user:
+                next_url = request.args.get('next', '/')
+                return redirect(next_url)
+
+        An attacker registers a webhook on an internal service that trusts the
+        application domain. The attacker then configures the webhook URL as:
+        https://app.internal.com/login?next=http://169.254.169.254/latest/meta-data/
+
+        The internal service calls the webhook -> app.internal.com redirects to
+        metadata endpoint -> internal service follows redirect -> metadata exposed.
+      example_payload: "https://trusted-app.com/login?next=http://169.254.169.254/latest/meta-data/"
+      attacker_objective: "Chain open redirect with SSRF to bypass hostname validation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: false
+      related_rules:
+        - "SSRF-PY-001"
+        - "SSRF-PY-004"
+        - "SSRF-PY-005"

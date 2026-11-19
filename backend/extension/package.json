@@ -1,0 +1,100 @@
+{
+  "name": "secureai-scanner",
+  "displayName": "SecureAI Security Scanner",
+  "description": "Real-time security vulnerability scanner for your code. Detects 1000+ vulnerability patterns across 38 languages with inline diagnostics and hover tooltips.",
+  "version": "0.1.0",
+  "publisher": "secureai",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "security",
+    "vulnerability",
+    "scanner",
+    "sast",
+    "owasp"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "secureai.scanFile",
+        "title": "SecureAI: Scan Current File"
+      },
+      {
+        "command": "secureai.toggleRealTime",
+        "title": "SecureAI: Toggle Real-Time Scanning"
+      },
+      {
+        "command": "secureai.clearDiagnostics",
+        "title": "SecureAI: Clear All Findings"
+      }
+    ],
+    "configuration": {
+      "title": "SecureAI Scanner",
+      "properties": {
+        "secureai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time security scanning."
+        },
+        "secureai.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan files when saved."
+        },
+        "secureai.scanOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan files as you type (debounced)."
+        },
+        "secureai.scanDelay": {
+          "type": "number",
+          "default": 800,
+          "minimum": 200,
+          "maximum": 5000,
+          "description": "Delay in ms before scanning after typing (debounce)."
+        },
+        "secureai.minSeverity": {
+          "type": "string",
+          "default": "low",
+          "enum": ["critical", "high", "medium", "low", "info"],
+          "description": "Minimum severity level to show diagnostics."
+        },
+        "secureai.minConfidence": {
+          "type": "number",
+          "default": 40,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Minimum confidence (0-100) to show a finding."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "bundle-rules": "ts-node scripts/bundleRules.ts",
+    "prebuild": "npm run bundle-rules",
+    "build": "npm run bundle-rules && tsc -p ./",
+    "test": "ts-node tests/runTests.ts",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "js-yaml": "^4.1.0",
+    "@types/js-yaml": "^4.0.9"
+  },
+  "dependencies": {}
+}

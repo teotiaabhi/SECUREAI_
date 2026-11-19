@@ -1,0 +1,315 @@
+rules:
+- rule_id: DOCKER-SEC-001
+  title: Running as Root User
+  description: 'Detects Dockerfiles that run containers as root without switching to a non-root user.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - docker
+  - root-user
+  - privilege-escalation
+  patterns:
+  - type: regex
+    pattern: ^FROM\s+\w+
+  anti_patterns:
+  - USER
+  - user
+  - USER nobody
+  - USER nonroot
+  - USER 1000
+  - USER appuser
+  impact: 'Running as root inside containers allows privilege escalation
+
+    and escape to the host system.
+
+    '
+  remediation: "Add a USER instruction to run as non-root:\n  RUN addgroup -S appgroup && adduser -S appuser -G appgroup\n  USER appuser\n"
+- rule_id: DOCKER-SEC-002
+  title: Using Latest Tag
+  description: 'Detects use of :latest tag or no tag (defaults to latest).
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Medium
+  confidence: 0.88
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - docker
+  - image-tag
+  - supply-chain
+  patterns:
+  - type: regex
+    pattern: ^FROM\s+\w+(?:/\w+)*\s*$
+  - type: regex
+    pattern: ^FROM\s+\w+(?:/\w+)*:latest\b
+  anti_patterns:
+  - :sha256
+  - '@sha256'
+  - AS builder
+  impact: 'Using :latest tags makes builds non-reproducible and vulnerable
+
+    to supply chain attacks via image tag mutation.
+
+    '
+  remediation: "Pin images to specific digest or version:\n  FROM python:3.11-slim@sha256:abc123...\n"
+- rule_id: DOCKER-SEC-003
+  title: Secrets in Dockerfile
+  description: 'Detects secrets, passwords, or API keys embedded in Dockerfile.
+
+    '
+  language: dockerfile
+  category: secrets
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - docker
+  - secrets
+  - credentials
+  patterns:
+  - type: regex
+    pattern: (?:ENV|ARG)\s+(?:PASSWORD|PASSWD|SECRET|API_KEY|TOKEN|AWS_SECRET|DB_PASSWORD)\s*=\s*['"]?[^'"$\s]{4,}
+  - type: regex
+    pattern: RUN\s+.*(?:curl|wget).*(?:-u\s+\w+:\w+|--(?:user|password)\s+\w+)
+  - type: regex
+    pattern: (?:COPY|ADD)\s+.*(?:\.env|credentials|\.pem|\.key|id_rsa|\.npmrc|\.pypirc)\b
+  anti_patterns:
+  - ${}
+  - ARG PASSWORD
+  - changeme
+  impact: 'Secrets in Dockerfiles are visible in image layers and can be extracted.
+
+    '
+  remediation: "Use Docker BuildKit secrets:\n  RUN --mount=type=secret,id=mysecret cat /run/secrets/mysecret\nOr use environment variables at runtime.\n"
+- rule_id: DOCKER-SEC-004
+  title: ADD Instead of COPY
+  description: 'Detects use of ADD which can auto-extract tarballs and fetch URLs.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - docker
+  - add-vs-copy
+  patterns:
+  - type: regex
+    pattern: ^ADD\s+(?!--chown)(?!https?://)[^\s]+\s+[^\s]+
+  anti_patterns:
+  - ADD --chown
+  - ADD https://
+  - .tar
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-005
+  title: Exposed Sensitive Port
+  description: 'Detects exposure of potentially sensitive ports (debug, admin, DB).
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-200
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - docker
+  - exposed-ports
+  patterns:
+  - type: regex
+    pattern: EXPOSE\s+(?:22|2375|2376|5432|3306|1433|6379|27017|9200|11211|5900)\b
+  anti_patterns:
+  - '# internal'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-006
+  title: Privileged Operations in RUN
+  description: 'Detects privileged operations that weaken container security.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - docker
+  - privileges
+  patterns:
+  - type: regex
+    pattern: RUN\s+.*chmod\s+(?:777|666|a\+rwx)\b
+  - type: regex
+    pattern: RUN\s+.*(?:apt-get|apk|yum)\s+install\b.*(?:sudo|openssh-server|telnet|ftp|netcat|nmap|tcpdump)\b
+  - type: regex
+    pattern: RUN\s+.*setcap\s+cap_(?:net_admin|sys_admin|sys_ptrace)\b
+  anti_patterns:
+  - chmod 755
+  - chmod 644
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-007
+  title: Missing HEALTHCHECK
+  description: 'Detects Dockerfiles without HEALTHCHECK instruction.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Low
+  confidence: 0.72
+  cwe: CWE-693
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - docker
+  - healthcheck
+  patterns:
+  - type: regex
+    pattern: ^FROM\s+
+  anti_patterns:
+  - HEALTHCHECK
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-008
+  title: Package Install Without Version Pinning
+  description: 'Detects package installation without version pinning.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - docker
+  - version-pinning
+  patterns:
+  - type: regex
+    pattern: RUN\s+.*pip\s+install\s+(?!-r\b)(?!\S+=)\w+\s*$
+  - type: regex
+    pattern: RUN\s+.*npm\s+install\s+(?!--save-exact)[^@\s]+\s*$
+  - type: regex
+    pattern: RUN\s+.*(?:apt-get|apk)\s+(?:install|add)\s+-y?\s+\w+\s*$
+  anti_patterns:
+  - ==
+  - '@'
+  - =~
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-009
+  title: Insecure Registry or HTTP Download
+  description: 'Detects insecure HTTP downloads in Dockerfile.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: High
+  confidence: 0.88
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - docker
+  - insecure-download
+  patterns:
+  - type: regex
+    pattern: RUN\s+.*(?:curl|wget)\s+.*http://(?!localhost|127\.0\.0\.1)\S+
+  - type: regex
+    pattern: ADD\s+http://(?!localhost|127\.0\.0\.1)\S+
+  anti_patterns:
+  - https://
+  - '|.*sha256sum'
+  - '|.*gpg'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-010
+  title: Docker Socket Mount Risk
+  description: 'Detects Docker socket mounting in compose files.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - docker
+  - socket-mount
+  - privilege-escalation
+  patterns:
+  - type: regex
+    pattern: (?:volumes|VOLUME).*(?:/var/run/docker\.sock|docker\.sock)
+  anti_patterns:
+  - readonly
+  - :ro
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-011
+  title: Unsafe ENTRYPOINT/CMD Shell Form
+  description: 'Detects shell form ENTRYPOINT/CMD which invokes a shell process.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-78
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - docker
+  - entrypoint
+  - shell-form
+  patterns:
+  - type: regex
+    pattern: ^(?:CMD|ENTRYPOINT)\s+(?![\[])(?:sh|bash|/bin/sh|/bin/bash)
+  anti_patterns:
+  - CMD [
+  - ENTRYPOINT [
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: DOCKER-SEC-012
+  title: Missing .dockerignore Indicator
+  description: 'Detects COPY/ADD of sensitive directories into images.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-200
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 2
+  tags:
+  - docker
+  - dockerignore
+  patterns:
+  - type: regex
+    pattern: (?:COPY|ADD)\s+\.\s+[/\w]+
+  anti_patterns:
+  - .dockerignore
+  - COPY . .
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging

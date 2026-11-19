@@ -1,0 +1,217 @@
+# ============================================================================
+# Enterprise Deserialization Attack Rules
+# Ruleset Version: 4.0.0
+# Generated: 2026-03-05
+# Coverage: Java, PHP, Python, YAML, .NET BinaryFormatter
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # JAVA DESERIALIZATION (expanded)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "ENT-DESER-JAVA-001"
+    title: "Java XMLDecoder Deserialization (RCE)"
+    description: >
+      Detects usage of java.beans.XMLDecoder on untrusted data. XMLDecoder
+      can instantiate arbitrary classes and invoke methods, enabling RCE.
+    language: java
+    category: deserialization
+    severity: critical
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [deserialization, xmldecoder, rce, java]
+    detection_layer: 1
+    attack_surface_type: "api"
+    vulnerability_family: "unsafe-deserialization"
+    patterns:
+      - type: regex
+        pattern: 'new\s+XMLDecoder\s*\(\s*(?:request\.|getInputStream|new\s+(?:Buffered)?InputStream|inputStream|body)'
+        description: "XMLDecoder on untrusted input stream"
+      - type: regex
+        pattern: 'XMLDecoder\s+\w+\s*=\s*new\s+XMLDecoder\s*\('
+        description: "XMLDecoder instantiation (any)"
+    anti_patterns:
+      - "XMLEncoder"
+      - "// safe"
+      - "trusted"
+    remediation: >
+      Do not use XMLDecoder for untrusted data. Use JAXB or Jackson for XML parsing.
+      If XMLDecoder is required, only process files from trusted, verified sources.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["DESER-JAVA-001"]
+
+  - rule_id: "ENT-DESER-JAVA-002"
+    title: "Java SnakeYAML Unsafe Load (RCE)"
+    description: >
+      Detects SnakeYAML Yaml.load() without SafeConstructor. Default
+      constructor allows arbitrary Java object instantiation via !!tag.
+    language: java
+    category: deserialization
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [deserialization, yaml, snakeyaml, rce, java]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "unsafe-deserialization"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Yaml\s*\(\s*\)\.load\s*\('
+        description: "SnakeYAML load without SafeConstructor"
+      - type: regex
+        pattern: 'new\s+Yaml\s*\(\s*\)\.loadAll\s*\('
+        description: "SnakeYAML loadAll without SafeConstructor"
+      - type: regex
+        pattern: 'new\s+Yaml\s*\(\s*new\s+Constructor\s*\(\s*\)\s*\)\.load\s*\('
+        description: "SnakeYAML with default Constructor (unsafe)"
+    anti_patterns:
+      - "SafeConstructor"
+      - "new Yaml(new SafeConstructor())"
+      - "Yaml(new Constructor(MyClass.class))"
+      - "loadAs("
+    remediation: >
+      Use SafeConstructor: new Yaml(new SafeConstructor()).
+      Or specify expected class: new Yaml(new Constructor(MyConfig.class)).
+      SnakeYAML 2.0+ uses SafeConstructor by default.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # PHP DESERIALIZATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "ENT-DESER-PHP-001"
+    title: "PHP Object Injection via unserialize() With User Input"
+    description: >
+      Detects PHP unserialize() on user-controlled data without allowed_classes
+      restriction. Enables arbitrary object instantiation and POP chain attacks.
+    language: php
+    category: deserialization
+    severity: critical
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [deserialization, php, unserialize, object-injection]
+    detection_layer: 2
+    attack_surface_type: "web"
+    vulnerability_family: "unsafe-deserialization"
+    patterns:
+      - type: regex
+        pattern: '\bunserialize\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE|SERVER)\b'
+        description: "unserialize on direct superglobal"
+      - type: regex
+        pattern: '\bunserialize\s*\(\s*(?:\$(?:data|input|user|body|payload|content|value))\s*\)'
+        description: "unserialize on user-sourced variable"
+      - type: regex
+        pattern: '\bunserialize\s*\([^)]{0,200}(?:base64_decode|file_get_contents|fread|fgets)\s*\('
+        description: "unserialize on decoded/file content"
+    anti_patterns:
+      - "allowed_classes"
+      - "['allowed_classes' => false]"
+      - "['allowed_classes' => []]"
+      - "json_decode"
+    remediation: >
+      Use allowed_classes restriction: unserialize($data, ['allowed_classes' => false]).
+      Prefer json_encode()/json_decode() instead of serialize/unserialize.
+      If classes needed, whitelist: ['allowed_classes' => ['MyClass']].
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # PYTHON DESERIALIZATION (expanded)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "ENT-DESER-PY-001"
+    title: "Python YAML unsafe_load / FullLoader (RCE)"
+    description: >
+      Detects yaml.load() or yaml.unsafe_load() on untrusted input.
+      Default Loader and FullLoader can execute arbitrary Python code
+      via !!python/object tags.
+    language: python
+    category: deserialization
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [deserialization, yaml, python, rce]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "unsafe-deserialization"
+    patterns:
+      - type: regex
+        pattern: 'yaml\.(?:load|unsafe_load)\s*\(\s*(?:request\.|data|body|content|payload|f\.|input|user)'
+        description: "yaml.load on untrusted input"
+      - type: regex
+        pattern: 'yaml\.load\s*\([^)]{0,200}Loader\s*=\s*(?:yaml\.)?(?:Loader|UnsafeLoader|FullLoader)\b'
+        description: "yaml.load with unsafe Loader"
+      - type: regex
+        pattern: 'yaml\.(?:load_all|unsafe_load_all)\s*\([^)]{0,100}(?:request|data|body|input)'
+        description: "yaml.load_all on untrusted input"
+    anti_patterns:
+      - "yaml.safe_load"
+      - "SafeLoader"
+      - "yaml.safe_load_all"
+      - "Loader=yaml.SafeLoader"
+    remediation: >
+      Always use yaml.safe_load() or Loader=yaml.SafeLoader.
+      yaml.safe_load() only allows basic Python types (str, int, list, dict).
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # .NET BINARYFORMATTER
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "ENT-DESER-CS-001"
+    title: ".NET BinaryFormatter / ObjectStateFormatter Deserialization (RCE)"
+    description: >
+      Detects usage of BinaryFormatter, SoapFormatter, NetDataContractSerializer,
+      ObjectStateFormatter, or LosFormatter on untrusted data. These are
+      known-dangerous formatters that enable remote code execution.
+    language: csharp
+    category: deserialization
+    severity: critical
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [deserialization, binaryformatter, dotnet, rce, csharp]
+    detection_layer: 1
+    attack_surface_type: "api"
+    vulnerability_family: "unsafe-deserialization"
+    patterns:
+      - type: regex
+        pattern: '(?:BinaryFormatter|SoapFormatter|NetDataContractSerializer|ObjectStateFormatter|LosFormatter)\s*\(\s*\)[^;]{0,200}\.Deserialize\s*\('
+        description: "Dangerous .NET formatter deserialization"
+      - type: regex
+        pattern: 'new\s+(?:BinaryFormatter|SoapFormatter)\s*\(\s*\)\s*;[^}]{0,300}\.Deserialize\s*\('
+        description: "BinaryFormatter/SoapFormatter instantiation and deserialization"
+        flags: [DOTALL]
+      - type: regex
+        pattern: '(?:BinaryFormatter|NetDataContractSerializer)\b'
+        description: "Any usage of deprecated dangerous formatter"
+    anti_patterns:
+      - "// safe"
+      - "[Obsolete]"
+      - "JsonSerializer"
+      - "System.Text.Json"
+      - "JsonConvert"
+    remediation: >
+      Never use BinaryFormatter, SoapFormatter, or NetDataContractSerializer.
+      Use System.Text.Json or Newtonsoft.Json for serialization.
+      BinaryFormatter is obsolete as of .NET 5 and blocked in .NET 8+.
+      See: https://aka.ms/binaryformatter
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      high_impact_flag: true

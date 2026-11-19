@@ -1,0 +1,437 @@
+rules:
+- rule_id: EXTREME-DEPCONFUSE-001
+  title: Dependency Confusion - Private Package Name Leak
+  description: Detects package.json files that may be vulnerable to dependency confusion attacks by using unscoped private package names
+  language: javascript
+  category: devops
+  severity: Critical
+  confidence: 75
+  cwe: 427
+  owasp: A08:2021
+  tags:
+  - dependency-confusion
+  - supply-chain
+  - npm
+  - package-manager
+  requires:
+    file_paths:
+    - package.json
+    - '*/package.json'
+    required_content:
+    - '"name"'
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: '"name"\s*:\s*"(?!@)[a-z][a-z0-9-]*"'
+  - type: regex
+    pattern: '"publishConfig"\s*:\s*\{[^}]*"registry"\s*:\s*"https?://(?!registry\.npmjs\.org)'
+  anti_patterns:
+  - pattern: '"name"\s*:\s*"@\w+'
+    description: Using scoped package (safer)
+  - pattern: '"private"\s*:\s*true'
+    description: Package marked as private
+  impact: Attackers can publish malicious packages with the same name to public registries
+  remediation: 'Use scoped packages (@org/package), set private: true, configure .npmrc with registry'
+- rule_id: EXTREME-DEPCONFUSE-002
+  title: Dependency Confusion - requirements.txt Private Package
+  description: Detects Python requirements.txt with packages that may exist only in private registries
+  language: python
+  category: devops
+  severity: High
+  confidence: 70
+  cwe: 427
+  owasp: A08:2021
+  tags:
+  - dependency-confusion
+  - supply-chain
+  - pip
+  - python
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: --extra-index-url\s+https?://(?!pypi\.org|files\.pythonhosted\.org)
+  - type: regex
+    pattern: --index-url\s+https?://(?!pypi\.org|files\.pythonhosted\.org)
+  anti_patterns:
+  - pattern: --no-deps
+    description: Dependencies not resolved
+  impact: Extra index URLs alongside PyPI enable dependency confusion attacks
+  remediation: Use --index-url (not --extra-index-url) for private registries, or use pip-compile
+- rule_id: EXTREME-DEPCONFUSE-003
+  title: Dependency Confusion - .npmrc Misconfiguration
+  description: Detects .npmrc configurations that don't properly scope private registries
+  language: all
+  category: devops
+  severity: High
+  confidence: 80
+  cwe: 427
+  owasp: A08:2021
+  tags:
+  - dependency-confusion
+  - supply-chain
+  - npm
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: registry\s*=\s*https?://(?!registry\.npmjs\.org)[^\n]+
+  - type: regex
+    pattern: ^registry\s*=\s*https?://(?:artifactory|nexus|verdaccio|npm\.pkg\.github)
+  anti_patterns:
+  - pattern: '@\w+:registry\s*='
+    description: Scoped registry configuration
+  impact: Global registry override can expose both public and private packages to confusion
+  remediation: 'Use scoped registry config: @myorg:registry=https://private-registry/'
+- rule_id: EXTREME-SUPPLY-001
+  title: Supply Chain - Malicious Install Script
+  description: Detects suspicious pre/post install scripts in package.json
+  language: javascript
+  category: devops
+  severity: Critical
+  confidence: 80
+  cwe: 506
+  owasp: A08:2021
+  tags:
+  - supply-chain
+  - npm
+  - install-script
+  - malware
+  requires:
+    file_paths:
+    - package.json
+    - '*/package.json'
+    required_content:
+    - '"scripts"'
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: '"(?:pre|post)?install"\s*:\s*"(?:curl|wget|powershell|cmd\s*/c|bash\s+-c|node\s+-e|python\s+-c)'
+  - type: regex
+    pattern: '"(?:pre|post)?install"\s*:\s*"[^"]*(?:eval|exec|spawn|child_process)'
+  - type: regex
+    pattern: '"(?:pre|post)?install"\s*:\s*"[^"]*(?:http://|https://)[^"]*[|>]'
+  anti_patterns:
+  - pattern: '"preinstall"\s*:\s*"node\s+scripts/'
+    description: Running local script file
+  impact: Malicious install scripts execute code as soon as a package is installed
+  remediation: Audit install scripts, use npm audit, consider --ignore-scripts flag
+- rule_id: EXTREME-SUPPLY-002
+  title: Supply Chain - Typosquatting Indicators
+  description: Detects dependencies that look like typosquatted versions of popular packages
+  language: javascript
+  category: devops
+  severity: High
+  confidence: 70
+  cwe: 506
+  owasp: A08:2021
+  tags:
+  - supply-chain
+  - typosquatting
+  - npm
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: '"(?:lodashe?|loadash|1odash|l0dash|lodas|lodah)"\s*:'
+  - type: regex
+    pattern: '"(?:expres|expresss|exress|expess)"\s*:'
+  - type: regex
+    pattern: '"(?:reqeusts|requets|requst|requuests|request-promise-native)"\s*:'
+  - type: regex
+    pattern: '"(?:crytpo|crypro|nodecrypto)"\s*:'
+  anti_patterns:
+  - pattern: '"lodash":|"express":|"request":'
+    description: Correct package name
+  impact: Typosquatted packages install malicious code instead of the intended library
+  remediation: Double-check package names, use npm audit, enable package-lock.json
+- rule_id: EXTREME-SPRING-001
+  title: Spring Security Filter Chain Bypass
+  description: Detects Spring Security misconfigurations that allow filter chain bypass
+  language: java
+  category: framework_misuse
+  severity: Critical
+  confidence: 85
+  cwe: 863
+  owasp: A01:2021
+  tags:
+  - spring
+  - auth-bypass
+  - filter-chain
+  - framework-bypass
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: \.antMatchers\s*\(\s*"[^"]*"\s*\)\s*\.permitAll\s*\(\s*\)(?:[^;]*\.antMatchers\s*\(\s*"[^"]*\*\*")
+  - type: regex
+    pattern: web\.ignoring\s*\(\s*\)\s*\.(?:antMatchers|requestMatchers)\s*\(\s*"[^"]*"
+  - type: regex
+    pattern: \.authorizeRequests\s*\(\s*\)\s*\.anyRequest\s*\(\s*\)\s*\.permitAll
+  anti_patterns:
+  - pattern: \.anyRequest\s*\(\s*\)\s*\.authenticated
+    description: Default deny rule
+  impact: Security filter bypass allows unauthenticated access to protected endpoints
+  remediation: Always end filter chain with .anyRequest().authenticated(), use requestMatchers
+- rule_id: EXTREME-SPRING-002
+  title: Spring Actuator Exposure
+  description: Detects exposed Spring Boot Actuator endpoints without authentication
+  language: java
+  category: framework_misuse
+  severity: Critical
+  confidence: 85
+  cwe: 200
+  owasp: A05:2021
+  tags:
+  - spring
+  - actuator
+  - info-leak
+  - framework-misuse
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: management\.endpoints\.web\.exposure\.include\s*=\s*\*
+  - type: regex
+    pattern: management\.endpoint\.(?:env|heapdump|threaddump|shutdown)\.enabled\s*=\s*true
+  - type: regex
+    pattern: management\.security\.enabled\s*=\s*false
+  anti_patterns:
+  - pattern: management\.endpoints\.web\.exposure\.include\s*=\s*(?:health|info)\b
+    description: Only safe endpoints exposed
+  impact: Exposed actuator endpoints leak sensitive config, environment vars, and heap dumps
+  remediation: Restrict exposure to health/info only, require authentication for all actuators
+- rule_id: EXTREME-SPRING-003
+  title: Spring SpEL Injection
+  description: Detects Spring Expression Language injection via user input
+  language: java
+  category: rce
+  severity: Critical
+  confidence: 85
+  cwe: 917
+  owasp: A03:2021
+  tags:
+  - spel
+  - spring
+  - expression-injection
+  - rce
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: ExpressionParser\s*\(\s*\)\s*\.parseExpression\s*\(\s*(?:request\.|param\.|input|userExpr)
+  - type: regex
+    pattern: new\s+SpelExpressionParser\s*\(\s*\)\s*\.parseExpression\s*\(\s*\w+\s*\)
+  - type: regex
+    pattern: '@Value\s*\(\s*"#\{[^}]*\+\s*\w+'
+  anti_patterns:
+  - pattern: SimpleEvaluationContext
+    description: Restricted evaluation context
+  impact: SpEL injection enables arbitrary code execution on Spring servers
+  remediation: Use SimpleEvaluationContext (read-only), never parse user input as SpEL
+- rule_id: EXTREME-EXPRESS-001
+  title: Express.js Middleware Order Bypass
+  description: Detects routes defined before authentication/authorization middleware
+  language: javascript
+  category: framework_misuse
+  severity: High
+  confidence: 75
+  cwe: 863
+  owasp: A01:2021
+  tags:
+  - express
+  - middleware-bypass
+  - auth-bypass
+  - framework-misuse
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: app\.(?:get|post|put|delete)\s*\(\s*["\x27]/[^"]*["\x27]\s*,[^;]*\)\s*;[^;]*app\.use\s*\(\s*(?:auth|jwt|passport|session)
+  - type: regex
+    pattern: router\.(?:get|post|put|delete)\s*\([^)]*\)\s*;[^;]*router\.use\s*\(\s*(?:auth|verify|check)
+  anti_patterns:
+  - pattern: app\.use\s*\(\s*auth.*\n.*app\.(?:get|post)
+    description: Auth middleware before routes
+  impact: Routes before auth middleware are accessible without authentication
+  remediation: Define authentication middleware before any route handlers
+- rule_id: EXTREME-EXPRESS-002
+  title: Express.js Uncaught Error Information Leak
+  description: Detects Express error handlers that expose stack traces in production
+  language: javascript
+  category: framework_misuse
+  severity: Medium
+  confidence: 80
+  cwe: 209
+  owasp: A05:2021
+  tags:
+  - express
+  - error-handling
+  - info-leak
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: app\.use\s*\(\s*(?:function\s*\(|[(]\s*)err[^)]*\)\s*(?:=>|{)[^}]*res\.(?:json|send)\s*\(\s*\{[^}]*(?:stack|error\.message|err\.message)
+  - type: regex
+    pattern: res\.status\s*\(\s*500\s*\)\s*\.(?:json|send)\s*\(\s*(?:err|error)\s*\)
+  anti_patterns:
+  - pattern: process\.env\.NODE_ENV\s*===\s*["\x27]production
+    description: Environment-aware error handling
+  impact: Stack traces in error responses reveal internal code structure and file paths
+  remediation: Return generic error messages in production, log details server-side only
+- rule_id: EXTREME-FLASK-001
+  title: Flask Debug Mode in Production
+  description: Detects Flask debug mode enabled which exposes Werkzeug debugger
+  language: python
+  category: framework_misuse
+  severity: Critical
+  confidence: 90
+  cwe: 489
+  owasp: A05:2021
+  tags:
+  - flask
+  - debug
+  - rce
+  - framework-misuse
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: app\.run\s*\([^)]*debug\s*=\s*True
+  - type: regex
+    pattern: FLASK_DEBUG\s*=\s*(?:1|True|true)
+  - type: regex
+    pattern: app\.debug\s*=\s*True
+  anti_patterns:
+  - pattern: if\s+__name__.*debug
+    description: Debug only in direct execution
+  - pattern: os\.environ\.get.*DEBUG
+    description: Debug from environment variable
+  impact: Flask debug mode exposes interactive Werkzeug debugger allowing RCE
+  remediation: Never enable debug mode in production, use environment variables for config
+- rule_id: EXTREME-FLASK-002
+  title: Flask Secret Key Weakness
+  description: Detects weak or hardcoded Flask secret keys
+  language: python
+  category: framework_misuse
+  severity: Critical
+  confidence: 85
+  cwe: 798
+  owasp: A02:2021
+  tags:
+  - flask
+  - secret-key
+  - session-forgery
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: app\.secret_key\s*=\s*["\x27][^"\x27]{1,20}["\x27]
+  - type: regex
+    pattern: SECRET_KEY\s*=\s*["\x27](?:secret|changeme|dev|test|password|key123)["\x27]
+  - type: regex
+    pattern: app\.config\s*\[\s*["\x27]SECRET_KEY["\x27]\s*\]\s*=\s*["\x27][^"\x27]{1,20}["\x27]
+  anti_patterns:
+  - pattern: os\.environ|os\.urandom
+    description: Dynamic secret key
+  impact: Weak secret keys allow forging Flask session cookies to bypass authentication
+  remediation: Use os.urandom(32).hex() or os.environ.get('SECRET_KEY') with a strong random value
+- rule_id: EXTREME-NEXTJS-001
+  title: Next.js Server-Side Data Exposure
+  description: Detects sensitive data in getServerSideProps/getStaticProps passing to client
+  language: javascript
+  category: framework_misuse
+  severity: High
+  confidence: 75
+  cwe: 200
+  owasp: A05:2021
+  tags:
+  - nextjs
+  - ssr
+  - data-exposure
+  - framework-misuse
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: getServerSideProps[^}]*return\s*\{[^}]*props\s*:\s*\{[^}]*(?:password|secret|token|apiKey|api_key|private_key)
+  - type: regex
+    pattern: getStaticProps[^}]*return\s*\{[^}]*props\s*:\s*\{[^}]*(?:password|secret|token|apiKey)
+  anti_patterns:
+  - pattern: delete\s+\w+\.(?:password|secret)
+    description: Sensitive fields removed before return
+  impact: Server-side props are serialized to HTML and visible in page source
+  remediation: Never pass sensitive data in props; filter/transform server data before returning
+- rule_id: EXTREME-NEXTJS-002
+  title: Next.js API Route Without Authentication
+  description: Detects Next.js API routes that handle sensitive operations without authentication checks
+  language: javascript
+  category: framework_misuse
+  severity: High
+  confidence: 70
+  cwe: 306
+  owasp: A01:2021
+  tags:
+  - nextjs
+  - api-route
+  - auth-bypass
+  detection_layer: 3
+  patterns:
+  - type: regex
+    pattern: export\s+(?:default\s+)?(?:async\s+)?function\s+handler\s*\(\s*req\s*,\s*res\s*\)\s*\{[^}]*(?:DELETE|PUT|PATCH|update|delete|create|modify)
+  - type: regex
+    pattern: export\s+(?:default\s+)?(?:async\s+)?function.*\{[^}]*(?:prisma|db|knex|sql)\.(?:delete|update|create|insert)
+  anti_patterns:
+  - pattern: getSession|getToken|getServerSession|req\.headers\.authorization
+    description: Authentication check present
+  impact: Unprotected API routes allow unauthorized data manipulation
+  remediation: Add authentication middleware or check session/token in all mutating API routes
+- rule_id: EXTREME-DJANGO-001
+  title: Django Raw SQL Without Parameters
+  description: Detects Django raw SQL queries using string formatting instead of parameters
+  language: python
+  category: injection
+  severity: Critical
+  confidence: 90
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - django
+  - sqli
+  - raw-sql
+  - framework-misuse
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: \.raw\s*\(\s*f["\x27](?:SELECT|INSERT|UPDATE|DELETE)
+  - type: regex
+    pattern: \.raw\s*\(\s*["\x27][^"\x27]*%s[^"\x27]*["\x27]\s*%\s*
+  - type: regex
+    pattern: cursor\.execute\s*\(\s*f["\x27](?:SELECT|INSERT|UPDATE|DELETE)
+  - type: regex
+    pattern: connection\.cursor\(\)\.execute\s*\(\s*["\x27][^"\x27]*\.format\s*\(
+  anti_patterns:
+  - pattern: \.raw\s*\(\s*["\x27][^"\x27]*%s[^"\x27]*["\x27]\s*,\s*\[
+    description: Using parameterized raw query
+  impact: SQL injection via Django ORM raw() bypasses all ORM safety features
+  remediation: 'Use parameterized queries: Model.objects.raw(''SELECT ... WHERE id=%s'', [user_id])'
+- rule_id: EXTREME-DJANGO-002
+  title: Django Security Middleware Disabled
+  description: Detects disabled Django security middleware in settings
+  language: python
+  category: framework_misuse
+  severity: High
+  confidence: 85
+  cwe: 693
+  owasp: A05:2021
+  tags:
+  - django
+  - security-middleware
+  - framework-misuse
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: SECURE_SSL_REDIRECT\s*=\s*False
+  - type: regex
+    pattern: SESSION_COOKIE_SECURE\s*=\s*False
+  - type: regex
+    pattern: CSRF_COOKIE_SECURE\s*=\s*False
+  - type: regex
+    pattern: SECURE_HSTS_SECONDS\s*=\s*0
+  - type: regex
+    pattern: X_FRAME_OPTIONS\s*=\s*["\x27]ALLOW["\x27]
+  anti_patterns:
+  - pattern: if\s+DEBUG
+    description: Conditional on debug mode
+  impact: Disabled security middleware removes defense-in-depth protections
+  remediation: 'Enable all security middleware in production: SECURE_SSL_REDIRECT=True, etc.'

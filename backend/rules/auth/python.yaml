@@ -1,0 +1,1244 @@
+rules:
+- rule_id: AUTH-PY-001
+  title: Django SECRET_KEY Hardcoded in Source Code
+  description: 'Detects hardcoded SECRET_KEY in Django settings files. The SECRET_KEY is used for session signing, CSRF tokens,
+    password reset tokens, and all cryptographic operations. A leaked key enables session forgery and complete authentication
+    bypass.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - secret-key
+  - django
+  - hardcoded-credential
+  - session-signing
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: SECRET_KEY\s*=\s*['"][a-zA-Z0-9!@#$%^&*()_+\-=]{20,}['"]
+    description: Django SECRET_KEY hardcoded in settings
+  - pattern: SECRET_KEY\s*=\s*['"]django-insecure-
+    description: Default insecure Django SECRET_KEY
+  - pattern: SIGNING_KEY\s*=\s*['"][a-zA-Z0-9_\-]{16,}['"]
+    description: SimpleJWT SIGNING_KEY hardcoded
+  - pattern: app\.config\[\s*['"]SECRET_KEY['"]\s*\]\s*=\s*['"][^'"]{8,}['"]
+    description: Flask SECRET_KEY in config dict hardcoded
+  anti_patterns:
+  - pattern: os\.environ
+    description: Secret from environment variable
+  - pattern: os\.getenv
+    description: Secret from getenv
+  - pattern: config\(
+    description: Secret from config provider
+  - pattern: decouple
+    description: Secret from python-decouple
+  - pattern: dotenv
+    description: Secret from dotenv
+  - pattern: \btest\b|\bconftest\b|\bfixture\b|\bmock\b
+    description: Test or fixture context
+  bypass_variants:
+  - variant: SECRET_KEY with os.getenv fallback to hardcoded value
+    description: Environment variable with insecure default
+  - variant: Secret loaded from committed local_settings.py
+    description: Secret in file that gets committed to repository
+  evasion_indicators:
+  - Environment variable with hardcoded fallback
+  - Secret in committed config file
+  - Default Django-generated insecure key
+  encoding_variants:
+  - base64 encoded secret
+  - Secret in environment fallback
+  multi_function_chain_patterns:
+  - SECRET_KEY = 'hardcoded' -> session signing -> cookie forgery
+  - SECRET_KEY = 'insecure' -> CSRF token generation -> prediction
+  privilege_context_flags:
+  - Session management
+  - CSRF token generation
+  - Password reset tokens
+  business_logic_indicator:
+  - Django settings module
+  - Flask application configuration
+  probable_taint_paths:
+  - source: Hardcoded string in settings.py
+    sink: Django session signing / CSRF token generation
+    through: Static key value in source code
+  impact: 'A leaked SECRET_KEY allows attackers to forge session cookies, predict CSRF tokens, create password reset tokens,
+    and impersonate any user including administrators. This leads to complete authentication bypass.
+
+    '
+  remediation: 'Store SECRET_KEY in environment variables using os.environ[''DJANGO_SECRET_KEY'']. Use python-decouple or
+    django-environ for configuration management. Generate keys with django.core.management.utils.get_random_secret_key().
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://docs.djangoproject.com/en/5.0/ref/settings/#secret-key
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - settings\.py
+    - config\.py
+    taint_source_indicators:
+    - Hardcoded string literal
+    - Default insecure prefix
+    taint_sink_indicators:
+    - Session signing
+    - CSRF generation
+    sanitization_patterns:
+    - os.environ
+    - decouple.config
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: django-insecure- prefix found
+      modifier: '+0.5'
+    - condition: test settings file
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker finds Django SECRET_KEY in a public GitHub repository. 2. Attacker uses django-unsign to
+    forge a session cookie with admin user ID. 3. Attacker sets the forged sessionid cookie in their browser. 4. Attacker
+    accesses the Django admin panel as a superuser. 5. Full application compromise achieved.
+
+    '
+  confidence_factors:
+    increases:
+    - SECRET_KEY with long string literal in settings.py
+    - django-insecure- prefix present
+    decreases:
+    - Test or fixture context
+    - os.environ used for key loading
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-002
+    - AUTH-PY-007
+    dependency_chain: Leaked SECRET_KEY enables session forgery (AUTH-PY-008)
+    combined_risk_increase: Critical when combined with session misconfiguration
+- rule_id: AUTH-PY-002
+  title: Flask Session Secret Weak or Hardcoded
+  description: 'Detects weak, short, or hardcoded Flask session secrets. Flask uses the secret_key for signing session cookies.
+    A weak or predictable secret allows attackers to forge or tamper with session data.
+
+    '
+  language: python
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - flask
+  - session-secret
+  - hardcoded-credential
+  - weak-secret
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: app\.secret_key\s*=\s*['"][^'"]{1,15}['"]
+    description: Flask secret_key with short value (under 16 chars)
+  - pattern: app\.secret_key\s*=\s*['"](?:secret|password|changeme|default|dev|test|key)['"]
+    description: Flask secret_key with common weak value
+  - pattern: app\.config\[\s*['"]SECRET_KEY['"]\s*\]\s*=\s*['"][^'"]{1,15}['"]
+    description: Flask SECRET_KEY config with short value
+  - pattern: SECRET_KEY\s*=\s*['"](?:super.?secret|my.?secret|flask.?secret)['"]
+    description: Flask secret with predictable naming pattern
+  anti_patterns:
+  - pattern: os\.environ|os\.getenv
+    description: Secret from environment variable
+  - pattern: os\.urandom\(
+    description: Cryptographically random secret
+  - pattern: secrets\.token
+    description: Python secrets module
+  - pattern: config\.|dotenv
+    description: Configuration management
+  - pattern: \btest\b|\bconftest\b
+    description: Test context
+  - pattern: \bfixture\b|\bmock\b
+    description: Fixture or mock context
+  bypass_variants:
+  - variant: Secret loaded from .env file committed to repository
+    description: Dotenv file with secret checked into version control
+  - variant: app.secret_key set with os.getenv fallback to weak default
+    description: Weak fallback when environment variable not set
+  evasion_indicators:
+  - Weak default value in configuration
+  - Short secret easily brute-forced
+  - Common words used as secret
+  encoding_variants:
+  - Base64-encoded short secret
+  - Hex-encoded weak secret
+  multi_function_chain_patterns:
+  - app.secret_key = 'weak' -> flask.session -> cookie tamper
+  - SECRET_KEY = 'short' -> itsdangerous -> session forgery
+  privilege_context_flags:
+  - Flask session management
+  - Cookie signing
+  - CSRF protection
+  business_logic_indicator:
+  - Flask application factory
+  - Application configuration
+  probable_taint_paths:
+  - source: Hardcoded weak string
+    sink: itsdangerous session serializer
+    through: app.secret_key assignment
+  impact: 'A weak Flask secret allows attackers to brute-force the session signing key, forge arbitrary session cookies, and
+    impersonate any user in the application including administrators.
+
+    '
+  remediation: 'Generate a strong secret using os.urandom(32) or secrets.token_hex(32). Store it in an environment variable.
+    Never use common words or short strings as Flask secret keys.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://flask.palletsprojects.com/en/3.0.x/config/#SECRET_KEY
+  - https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - Flask\(
+    - app\.config
+    taint_source_indicators:
+    - Short string literal
+    - Common word literal
+    taint_sink_indicators:
+    - flask.session
+    - itsdangerous
+    sanitization_patterns:
+    - os.urandom
+    - secrets.token_hex
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: single-word secret
+      modifier: '+0.5'
+    - condition: test file context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker discovers Flask app uses app.secret_key = ''secret''. 2. Attacker uses flask-unsign to brute-force
+    common secret values. 3. Match found: secret_key = ''secret''. 4. Attacker forges a session cookie with admin privileges.
+    5. Full access to authenticated features achieved.
+
+    '
+  confidence_factors:
+    increases:
+    - Very short secret key value
+    - Common word used as secret
+    decreases:
+    - Environment variable used
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-001
+    - AUTH-PY-004
+    dependency_chain: Weak Flask secret enables session forgery
+    combined_risk_increase: Critical when combined with CSRF bypass
+- rule_id: AUTH-PY-003
+  title: Django @login_required Missing on Sensitive Views
+  description: 'Detects Django views handling sensitive operations without the @login_required decorator or LoginRequiredMixin.
+    Unprotected views allow anonymous users to access restricted functionality.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-306
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - django
+  - missing-auth
+  - login-required
+  - decorator
+  detection_layer: 2
+  attack_surface_type: authorization
+  patterns:
+  - pattern: def\s+(?:admin|user|account|payment|settings|dashboard|manage|profile)\w*\s*\(\s*request
+    description: Sensitive Django view without login_required
+  - pattern: class\s+\w*(?:Admin|User|Account|Payment)\w*View\s*\(\s*(?:View|TemplateView|ListView|DetailView)
+    description: Django CBV for sensitive resource without auth mixin
+  - pattern: '@api_view\s*\(\s*\[.*?\]\s*\)\s*\ndef\s+(?:admin|user|account|payment)\w*'
+    description: DRF api_view for sensitive endpoint without permission
+  - pattern: path\s*\(\s*['"].*?(?:admin|user|account|payment).*?['"]\s*,\s*\w+\.as_view\s*\(
+    description: Django URL for sensitive view without auth
+  anti_patterns:
+  - pattern: '@login_required'
+    description: Login required decorator present
+  - pattern: LoginRequiredMixin
+    description: Login required mixin present
+  - pattern: '@permission_required'
+    description: Permission required decorator
+  - pattern: IsAuthenticated
+    description: DRF authentication permission
+  - pattern: \btest\b|\bconftest\b|\bmock\b
+    description: Test context
+  - pattern: \bpublic\b|\bhealthcheck\b|\bstatic\b
+    description: Public endpoint
+  bypass_variants:
+  - variant: Auth check in view body instead of decorator
+    description: In-view auth check that may be incomplete
+  - variant: Middleware-based auth with exclusion for sensitive paths
+    description: Middleware exclusion list includes sensitive paths
+  evasion_indicators:
+  - Auth check in view body instead of decorator
+  - Class-level mixin overridden at method level
+  - Middleware exclusion for sensitive paths
+  encoding_variants:
+  - Class-based view without mixin
+  - Function-based view without decorator
+  multi_function_chain_patterns:
+  - URL config -> view without decorator -> sensitive data access
+  - Django URL -> CBV without LoginRequiredMixin -> user data
+  privilege_context_flags:
+  - Admin panel views
+  - User data management
+  - Financial operations
+  business_logic_indicator:
+  - Django view functions
+  - URL configuration
+  probable_taint_paths:
+  - source: Anonymous HTTP request
+    sink: Django view returning sensitive data
+    through: Missing @login_required decorator
+  impact: 'Anonymous users can access administrative panels, user data, payment operations, and settings pages without any
+    authentication. This leads to data exposure and unauthorized actions.
+
+    '
+  remediation: 'Add @login_required to all sensitive function-based views. Use LoginRequiredMixin for class-based views. Set
+    LOGIN_URL in settings. Consider using a deny-by-default middleware approach.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://docs.djangoproject.com/en/5.0/topics/auth/default/#the-login-required-decorator
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - from django
+    - urlpatterns
+    taint_source_indicators:
+    - request.GET
+    - request.POST
+    taint_sink_indicators:
+    - render()
+    - JsonResponse()
+    sanitization_patterns:
+    - '@login_required'
+    - LoginRequiredMixin
+  severity_scoring:
+    base_score: 8.5
+    exploitability: high
+    impact_score: 8.0
+    adjustments:
+    - condition: admin view context
+      modifier: '+1.0'
+    - condition: global auth middleware detected
+      modifier: '-3.0'
+  exploit_scenario: '1. Attacker discovers unprotected Django admin view at /internal/users/. 2. No @login_required decorator
+    is applied to the view. 3. Attacker accesses /internal/users/ without authentication. 4. Full user listing with PII is
+    returned to the anonymous user.
+
+    '
+  confidence_factors:
+    increases:
+    - Sensitive function name without decorator
+    - No auth mixin on CBV handling user data
+    decreases:
+    - Global auth middleware applied
+    - Public endpoint context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-004
+    - AUTH-PY-009
+    dependency_chain: Missing login_required makes all auth vulnerabilities critical
+    combined_risk_increase: Critical when combined with IDOR
+- rule_id: AUTH-PY-004
+  title: Flask-Login Authentication Bypass
+  description: 'Detects Flask routes handling sensitive operations without Flask-Login @login_required decorator, or patterns
+    where Flask-Login protections are weakened or bypassed through misconfiguration.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-306
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - flask
+  - flask-login
+  - authentication-bypass
+  - missing-decorator
+  detection_layer: 2
+  attack_surface_type: authorization
+  patterns:
+  - pattern: '@app\.route\s*\(\s*[''"].*?(?:admin|user|account|payment|settings|dashboard).*?[''"].*?\)\s*\ndef\s+\w+\s*\('
+    description: Sensitive Flask route without login_required
+  - pattern: '@\w+_bp\.route\s*\(\s*[''"].*?(?:admin|user|account|payment).*?[''"]'
+    description: Blueprint route for sensitive path without auth
+  - pattern: login_manager\.unauthorized_handler.*return.*200
+    description: Unauthorized handler returning 200 instead of redirect
+  - pattern: LOGIN_DISABLED\s*=\s*True
+    description: Flask-Login globally disabled
+  anti_patterns:
+  - pattern: '@login_required'
+    description: Login required decorator present
+  - pattern: current_user\.is_authenticated
+    description: Authentication check present
+  - pattern: '@roles_required|@roles_accepted'
+    description: Role-based access control
+  - pattern: flask_jwt_extended|jwt_required
+    description: JWT authentication
+  - pattern: \btest\b|\bconftest\b|\bmock\b
+    description: Test context
+  - pattern: \bpublic\b|\bhealthcheck\b|\bstatic\b
+    description: Public endpoint
+  bypass_variants:
+  - variant: login_manager.unauthorized with redirect to public page
+    description: Unauthorized handler that does not block access
+  - variant: '@login_required applied but current_user check missing in handler'
+    description: Decorator present but authorization logic missing
+  evasion_indicators:
+  - LOGIN_DISABLED flag in configuration
+  - Custom unauthorized handler that permits access
+  - Conditional login_required bypass
+  encoding_variants:
+  - Blueprint route without auth
+  - Direct function registration without decorator
+  multi_function_chain_patterns:
+  - Flask route -> no @login_required -> database access -> data exposure
+  - LOGIN_DISABLED=True -> all @login_required decorators bypassed
+  privilege_context_flags:
+  - Admin endpoints
+  - User data management
+  - Payment processing
+  business_logic_indicator:
+  - Flask route definitions
+  - Flask-Login configuration
+  probable_taint_paths:
+  - source: Unauthenticated request
+    sink: Flask route handler with DB access
+    through: Missing @login_required decorator
+  impact: 'Unauthenticated users can access sensitive endpoints including admin panels, user management, and payment processing.
+    LOGIN_DISABLED=True globally removes all authentication requirements.
+
+    '
+  remediation: 'Apply @login_required to all sensitive routes. Never set LOGIN_DISABLED=True in production. Ensure unauthorized_handler
+    returns 401 or redirects to login. Use Flask-Login''s fresh_login_required for critical operations.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://flask-login.readthedocs.io/en/latest/
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - Flask\(
+    - LoginManager\(
+    taint_source_indicators:
+    - request.form
+    - request.json
+    taint_sink_indicators:
+    - db.session
+    - render_template()
+    sanitization_patterns:
+    - '@login_required'
+    - current_user.is_authenticated
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: LOGIN_DISABLED=True
+      modifier: '+2.0'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker discovers sensitive Flask route at /admin/users. 2. Route lacks @login_required decorator.
+    3. Attacker accesses /admin/users directly without authentication. 4. Application returns full user listing with sensitive
+    data.
+
+    '
+  confidence_factors:
+    increases:
+    - Sensitive route without @login_required
+    - LOGIN_DISABLED=True in config
+    decreases:
+    - Global before_request auth check
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-002
+    - AUTH-PY-003
+    dependency_chain: Flask-Login bypass combined with weak secret enables full compromise
+    combined_risk_increase: Critical when session secret is also weak
+- rule_id: AUTH-PY-005
+  title: Password Stored in Plaintext
+  description: 'Detects patterns where passwords are stored or compared in plaintext without any hashing. Plaintext password
+    storage is the most severe credential management vulnerability.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-256
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - plaintext-password
+  - credential-storage
+  - no-hashing
+  - database-security
+  detection_layer: 2
+  attack_surface_type: authentication
+  patterns:
+  - pattern: password\s*==\s*(?:stored|user|db|input|request)\w*\.?(?:password|passwd|pwd)
+    description: Direct plaintext password comparison
+  - pattern: User\.objects\.create\(.*password\s*=\s*(?:request|form|data)\.
+    description: Django user creation without make_password
+  - pattern: INSERT.*INTO.*users.*password.*VALUES.*%s
+    description: SQL insert with raw password value
+  - pattern: user\.password\s*=\s*(?:request|form|data)\.
+    description: Password assigned directly without hashing
+  anti_patterns:
+  - pattern: make_password|check_password
+    description: Django password hashing
+  - pattern: bcrypt|argon2|scrypt|pbkdf2
+    description: Password hashing library used
+  - pattern: set_password
+    description: Django set_password method
+  - pattern: generate_password_hash|check_password_hash
+    description: Werkzeug password hashing
+  - pattern: \btest\b|\bconftest\b|\bmock\b
+    description: Test context
+  - pattern: hashlib|hmac
+    description: Hashing library used
+  bypass_variants:
+  - variant: Password hashed with reversible encryption (AES) instead of one-way hash
+    description: Reversible encryption mistaken for hashing
+  - variant: Password base64-encoded before storage
+    description: Encoding mistaken for encryption
+  evasion_indicators:
+  - Password stored with reversible encoding
+  - Direct string comparison for authentication
+  - Raw password insert into database
+  encoding_variants:
+  - Base64-encoded password stored
+  - ROT13-obfuscated password
+  multi_function_chain_patterns:
+  - request.form['password'] -> user.password = value -> db.commit()
+  - password == stored_password -> authentication success
+  privilege_context_flags:
+  - User registration
+  - Password change
+  - Authentication check
+  business_logic_indicator:
+  - User model definition
+  - Registration endpoint
+  - Login handler
+  probable_taint_paths:
+  - source: User-submitted password
+    sink: Database column
+    through: Direct assignment without hashing
+  impact: 'Plaintext passwords exposed in any database breach will immediately compromise all user accounts. Attackers gain
+    credentials usable for credential stuffing across other services.
+
+    '
+  remediation: 'Always use bcrypt, argon2, or PBKDF2 for password hashing. In Django, use set_password() and check_password().
+    In Flask, use generate_password_hash() from werkzeug.security.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/256.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  - https://owasp.org/Top10/A02_2021-Cryptographic_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - User|Account|Profile
+    - register|signup|login
+    taint_source_indicators:
+    - request.POST
+    - request.form
+    taint_sink_indicators:
+    - db.session.add
+    - .save()
+    sanitization_patterns:
+    - bcrypt.hashpw
+    - make_password
+  severity_scoring:
+    base_score: 9.8
+    exploitability: high
+    impact_score: 9.5
+    adjustments:
+    - condition: production code
+      modifier: '+0.0'
+    - condition: test context
+      modifier: '-5.0'
+  exploit_scenario: '1. Database breach occurs via SQL injection or misconfigured backup. 2. Attacker obtains users table
+    with plaintext passwords. 3. All user credentials are immediately usable without cracking. 4. Attacker performs credential
+    stuffing on other services. 5. Mass account compromise across multiple platforms.
+
+    '
+  confidence_factors:
+    increases:
+    - Direct password comparison with ==
+    - Password field stored without hashing
+    decreases:
+    - Hashing function called nearby
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-006
+    - AUTH-PY-010
+    dependency_chain: Plaintext passwords make any database exposure critical
+    combined_risk_increase: Maximum severity with SQL injection
+- rule_id: AUTH-PY-006
+  title: Insecure Password Hashing with MD5 or SHA1
+  description: 'Detects usage of MD5, SHA1, or SHA256 without proper key derivation for password hashing. These fast hash
+    algorithms allow rapid brute-force attacks on leaked password databases.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-916
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - weak-hashing
+  - md5
+  - sha1
+  - password-cracking
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: hashlib\.(?:md5|sha1)\s*\(.*password
+    description: hashlib.md5/sha1 on password
+  - pattern: hashlib\.new\s*\(\s*['"](?:md5|sha1)['"].*password
+    description: hashlib.new with weak algorithm for password
+  - pattern: make_password\(.*hasher\s*=\s*['"](?:md5|sha1|unsalted_md5)['"]
+    description: Django make_password with weak hasher
+  - pattern: \.hexdigest\s*\(\s*\).*password
+    description: Hash digest near password context
+  anti_patterns:
+  - pattern: bcrypt|argon2|scrypt|pbkdf2
+    description: Proper password hashing
+  - pattern: make_password\(\)|check_password\(
+    description: Django default hashing (PBKDF2)
+  - pattern: checksum|fingerprint|etag|file_hash
+    description: Non-password hashing context
+  - pattern: hmac\.compare_digest
+    description: HMAC comparison
+  - pattern: \btest\b|\bconftest\b|\bmock\b
+    description: Test context
+  - pattern: \bfixture\b|\bexample\b
+    description: Fixture or example context
+  bypass_variants:
+  - variant: 'Double hashing: hashlib.sha256(hashlib.sha256(password))'
+    description: Double hashing without proper KDF
+  - variant: 'Salt concatenation without PBKDF2: hashlib.sha256(salt + password)'
+    description: Manual salt without key stretching
+  evasion_indicators:
+  - Custom hash wrapper hiding weak algorithm
+  - Double hashing instead of proper KDF
+  - Salt concatenation without stretching
+  encoding_variants:
+  - hexdigest() output stored
+  - base64-encoded hash
+  multi_function_chain_patterns:
+  - password.encode() -> hashlib.md5() -> hexdigest() -> db.store()
+  - hashlib.sha1(salt + password) -> comparison with stored value
+  privilege_context_flags:
+  - User registration
+  - Password storage
+  - Authentication check
+  business_logic_indicator:
+  - User model
+  - Authentication module
+  probable_taint_paths:
+  - source: User-submitted password
+    sink: Database storage
+    through: MD5/SHA1 hash function
+  impact: 'MD5 passwords can be cracked at billions of hashes per second on GPU. SHA1 is only marginally better. Rainbow tables
+    instantly reverse unsalted hashes. A database breach exposes all user credentials within hours.
+
+    '
+  remediation: 'Use bcrypt with cost factor 12+, argon2id, or PBKDF2 with 600,000+ iterations. In Django, use the default
+    PASSWORD_HASHERS. In Flask, use werkzeug.security.generate_password_hash with method=''pbkdf2:sha256''.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/916.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  - https://owasp.org/Top10/A02_2021-Cryptographic_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - password
+    - register|signup|login
+    taint_source_indicators:
+    - request.POST['password']
+    - form.cleaned_data['password']
+    taint_sink_indicators:
+    - User.objects.create
+    - db.session.add
+    sanitization_patterns:
+    - bcrypt.hashpw
+    - argon2.hash
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 8.0
+    adjustments:
+    - condition: unsalted hash
+      modifier: '+1.0'
+    - condition: non-password context
+      modifier: '-5.0'
+  exploit_scenario: '1. Database breach reveals MD5-hashed passwords. 2. Attacker loads hashes into hashcat with GPU cluster.
+    3. At 50 billion MD5/sec, most passwords cracked in minutes. 4. 90% of user credentials recovered within 24 hours. 5.
+    Credential stuffing on email, banking, and social media.
+
+    '
+  confidence_factors:
+    increases:
+    - hashlib.md5 or hashlib.sha1 near password context
+    - make_password with hasher='md5'
+    decreases:
+    - Non-password hashing context (checksums, etc.)
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-005
+    - AUTH-PY-010
+    dependency_chain: Weak hashing combined with database exposure is critical
+    combined_risk_increase: High when combined with SQL injection
+- rule_id: AUTH-PY-007
+  title: Django CSRF_COOKIE_SECURE Set to False
+  description: 'Detects Django settings where CSRF_COOKIE_SECURE is explicitly set to False, allowing CSRF tokens to be transmitted
+    over unencrypted HTTP connections. This enables man-in-the-middle attackers to steal CSRF tokens.
+
+    '
+  language: python
+  category: auth
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-614
+  owasp: A05:2021 - Security Misconfiguration
+  tags:
+  - csrf
+  - cookie-security
+  - django
+  - mitm
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: CSRF_COOKIE_SECURE\s*=\s*False
+    description: CSRF cookie Secure flag disabled
+  - pattern: SESSION_COOKIE_SECURE\s*=\s*False
+    description: Session cookie Secure flag disabled
+  - pattern: CSRF_COOKIE_HTTPONLY\s*=\s*False
+    description: CSRF cookie HttpOnly flag disabled
+  - pattern: CSRF_COOKIE_SAMESITE\s*=\s*(?:['"]None['"]|None|False)
+    description: CSRF cookie SameSite disabled
+  anti_patterns:
+  - pattern: CSRF_COOKIE_SECURE\s*=\s*True
+    description: CSRF secure flag properly set
+  - pattern: SESSION_COOKIE_SECURE\s*=\s*True
+    description: Session secure flag properly set
+  - pattern: DEBUG\s*=\s*True
+    description: Development mode
+  - pattern: \btest\b|\bconftest\b
+    description: Test context
+  - pattern: \blocal\b|\bdev\b
+    description: Local development settings
+  - pattern: localhost
+    description: Local development context
+  bypass_variants:
+  - variant: CSRF_COOKIE_SECURE conditionally set based on DEBUG
+    description: Conditional secure flag that may not apply in staging
+  - variant: CSRF_TRUSTED_ORIGINS with wildcard domain
+    description: Overly permissive CSRF trusted origins
+  evasion_indicators:
+  - Secure flag disabled for development
+  - Conditional settings based on DEBUG
+  - SameSite=None for cross-origin support
+  encoding_variants:
+  - Boolean False in settings
+  - None value for SameSite
+  multi_function_chain_patterns:
+  - CSRF_COOKIE_SECURE=False -> CSRF token over HTTP -> MITM capture
+  - SESSION_COOKIE_SECURE=False -> session over HTTP -> hijacking
+  privilege_context_flags:
+  - CSRF protection configuration
+  - Session security settings
+  business_logic_indicator:
+  - Django settings module
+  - Production configuration
+  probable_taint_paths:
+  - source: CSRF token cookie
+    sink: HTTP transmission
+    through: Missing Secure flag
+  impact: 'CSRF tokens transmitted over HTTP can be intercepted by network-level attackers. Combined with insecure session
+    cookies, this enables both CSRF attacks and session hijacking on unencrypted connections.
+
+    '
+  remediation: 'Set CSRF_COOKIE_SECURE=True, SESSION_COOKIE_SECURE=True, CSRF_COOKIE_SAMESITE=''Lax'', and SESSION_COOKIE_SAMESITE=''Lax''
+    in production Django settings. Enforce HTTPS with SECURE_SSL_REDIRECT=True.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/614.html
+  - https://docs.djangoproject.com/en/5.0/ref/settings/#csrf-cookie-secure
+  - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+  context_awareness:
+    surrounding_context_patterns:
+    - settings.py
+    - CSRF_
+    taint_source_indicators:
+    - CSRF token cookie
+    - Session cookie
+    taint_sink_indicators:
+    - HTTP response Set-Cookie
+    - Unencrypted connection
+    sanitization_patterns:
+    - CSRF_COOKIE_SECURE = True
+    - SECURE_SSL_REDIRECT = True
+  severity_scoring:
+    base_score: 5.5
+    exploitability: medium
+    impact_score: 5.0
+    adjustments:
+    - condition: production settings file
+      modifier: '+1.5'
+    - condition: development settings
+      modifier: '-3.0'
+  exploit_scenario: '1. Application deploys with CSRF_COOKIE_SECURE=False. 2. Attacker on same network performs MITM on HTTP
+    traffic. 3. Attacker captures CSRF token from Set-Cookie header. 4. Attacker uses captured token to forge CSRF requests.
+    5. Fund transfer or password change executed as victim.
+
+    '
+  confidence_factors:
+    increases:
+    - Explicit False assignment in production settings
+    - Multiple security flags disabled
+    decreases:
+    - Development or local settings file
+    - DEBUG=True context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-008
+    - AUTH-PY-001
+    dependency_chain: Insecure CSRF cookie combined with HTTP enables MITM CSRF
+    combined_risk_increase: High when HTTPS is not enforced
+- rule_id: AUTH-PY-008
+  title: Session Timeout Not Configured
+  description: 'Detects Django and Flask applications where session timeout (SESSION_COOKIE_AGE / PERMANENT_SESSION_LIFETIME)
+    is not configured or set to an excessively long value. Long-lived sessions increase the window for session hijacking.
+
+    '
+  language: python
+  category: auth
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-613
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session-timeout
+  - session-management
+  - django
+  - flask
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: SESSION_COOKIE_AGE\s*=\s*(?:\d{8,})
+    description: Django session age set excessively long
+  - pattern: SESSION_EXPIRE_AT_BROWSER_CLOSE\s*=\s*False
+    description: Django session persists after browser close
+  - pattern: PERMANENT_SESSION_LIFETIME\s*=\s*timedelta\(days\s*=\s*(?:3[0-9]|[4-9][0-9]|[1-9]\d{2,})
+    description: Flask permanent session over 30 days
+  - pattern: session\.permanent\s*=\s*True(?!.*PERMANENT_SESSION_LIFETIME)
+    description: Flask permanent session without lifetime config
+  anti_patterns:
+  - pattern: SESSION_COOKIE_AGE\s*=\s*(?:36|72|86)00
+    description: Reasonable session timeout (1-24 hours)
+  - pattern: SESSION_EXPIRE_AT_BROWSER_CLOSE\s*=\s*True
+    description: Session expires at browser close
+  - pattern: PERMANENT_SESSION_LIFETIME\s*=\s*timedelta\(hours\s*=\s*[1-8]\)
+    description: Reasonable Flask session lifetime
+  - pattern: \btest\b|\bconftest\b
+    description: Test context
+  - pattern: \bdev\b|\blocal\b
+    description: Development context
+  - pattern: SESSION_COOKIE_AGE\s*=\s*\d{4,5}$
+    description: Reasonable timeout under a day
+  bypass_variants:
+  - variant: Session age setting overridden per-view with longer timeout
+    description: Per-view session timeout override
+  - variant: Remember-me functionality extending session beyond configured timeout
+    description: Remember-me bypasses session timeout
+  evasion_indicators:
+  - Default Django SESSION_COOKIE_AGE (2 weeks)
+  - No explicit session timeout configuration
+  - Permanent sessions without lifetime configuration
+  encoding_variants:
+  - Seconds-based timeout
+  - Timedelta-based timeout
+  multi_function_chain_patterns:
+  - No SESSION_COOKIE_AGE -> default 2 weeks -> long session window
+  - session.permanent=True -> no PERMANENT_SESSION_LIFETIME -> indefinite
+  privilege_context_flags:
+  - Session management
+  - Authentication persistence
+  business_logic_indicator:
+  - Django settings
+  - Flask configuration
+  probable_taint_paths:
+  - source: Authenticated session
+    sink: Long-lived session cookie
+    through: Missing or excessive timeout
+  impact: 'Long-lived sessions increase the window for session hijacking via XSS, network interception, or shared computer
+    access. Sessions that persist for weeks leave stolen tokens valid for extended periods.
+
+    '
+  remediation: 'Set SESSION_COOKIE_AGE to 3600 (1 hour) or 7200 (2 hours) for sensitive applications. Enable SESSION_EXPIRE_AT_BROWSER_CLOSE=True
+    in Django. Set PERMANENT_SESSION_LIFETIME=timedelta(hours=1) in Flask.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/613.html
+  - https://docs.djangoproject.com/en/5.0/ref/settings/#session-cookie-age
+  - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - settings.py
+    - SESSION_
+    taint_source_indicators:
+    - Session cookie
+    - Session data
+    taint_sink_indicators:
+    - Long-lived cookie
+    - Persistent session
+    sanitization_patterns:
+    - SESSION_COOKIE_AGE = 3600
+    - SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+  severity_scoring:
+    base_score: 5.0
+    exploitability: medium
+    impact_score: 5.0
+    adjustments:
+    - condition: financial application
+      modifier: '+2.0'
+    - condition: public information site
+      modifier: '-2.0'
+  exploit_scenario: '1. User logs into application on a shared computer. 2. Session timeout is set to 2 weeks (default). 3.
+    User forgets to log out. 4. Next user on the shared computer accesses the active session. 5. Unauthorized access to victim''s
+    account for up to 2 weeks.
+
+    '
+  confidence_factors:
+    increases:
+    - Excessively long SESSION_COOKIE_AGE
+    - No session timeout configuration at all
+    decreases:
+    - Reasonable timeout configured
+    - Session expires at browser close
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-007
+    - AUTH-PY-001
+    dependency_chain: Long sessions amplify impact of session theft
+    combined_risk_increase: High when combined with insecure cookie flags
+- rule_id: AUTH-PY-009
+  title: Permission Decorator Bypass
+  description: 'Detects patterns where Django or DRF permission decorators are present but can be bypassed due to misconfiguration,
+    such as custom permission classes that always return True, missing object-level permissions, or DEFAULT_PERMISSION_CLASSES
+    set to AllowAny.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-863
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - permission-bypass
+  - django
+  - drf
+  - authorization
+  detection_layer: 3
+  attack_surface_type: authorization
+  patterns:
+  - pattern: DEFAULT_PERMISSION_CLASSES.*AllowAny
+    description: DRF default permission set to AllowAny
+  - pattern: permission_classes\s*=\s*\[\s*AllowAny\s*\]
+    description: AllowAny on specific viewset
+  - pattern: def\s+has_permission.*return\s+True
+    description: Custom permission always returning True
+  - pattern: authentication_classes\s*=\s*\[\s*\]
+    description: Empty authentication classes
+  - pattern: '@csrf_exempt.*@api_view'
+    description: CSRF exempt on API view
+  anti_patterns:
+  - pattern: IsAuthenticated
+    description: Proper authentication permission
+  - pattern: has_object_permission.*return.*owner
+    description: Object-level ownership check
+  - pattern: IsAdminUser
+    description: Admin user check
+  - pattern: request\.user
+    description: User context check
+  - pattern: \btest\b|\bconftest\b
+    description: Test context
+  - pattern: \bpublic\b|\bhealthcheck\b
+    description: Public endpoint
+  bypass_variants:
+  - variant: Permission class defined but has_permission always returns True
+    description: Permissive custom permission class
+  - variant: Object permissions defined but check_object_permissions not called
+    description: Object permissions not enforced
+  evasion_indicators:
+  - Custom permission that always permits
+  - Object permissions not checked
+  - AllowAny in default settings
+  encoding_variants:
+  - ViewSet without permission_classes
+  - APIView with empty authentication_classes
+  multi_function_chain_patterns:
+  - DEFAULT_PERMISSION_CLASSES=[AllowAny] -> all endpoints unprotected
+  - has_permission returns True -> authorization bypassed
+  privilege_context_flags:
+  - API endpoint authorization
+  - Resource access control
+  business_logic_indicator:
+  - DRF settings
+  - ViewSet configuration
+  probable_taint_paths:
+  - source: Unauthenticated request
+    sink: Protected resource
+    through: Permissive permission class
+  impact: 'Permissive permission classes allow unauthorized users to access, modify, or delete resources they should not have
+    access to. This leads to data breaches and unauthorized operations.
+
+    '
+  remediation: 'Set DEFAULT_PERMISSION_CLASSES to [IsAuthenticated] in DRF settings. Implement proper has_permission and has_object_permission
+    in custom permission classes. Always verify ownership in object-level permissions.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/863.html
+  - https://www.django-rest-framework.org/api-guide/permissions/
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - REST_FRAMEWORK
+    - ViewSet|APIView
+    taint_source_indicators:
+    - request.data
+    - request.query_params
+    taint_sink_indicators:
+    - get_queryset
+    - serializer.save
+    sanitization_patterns:
+    - IsAuthenticated
+    - has_object_permission
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: AllowAny in DEFAULT_PERMISSION_CLASSES
+      modifier: '+1.0'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. DRF settings have DEFAULT_PERMISSION_CLASSES = [AllowAny]. 2. Attacker discovers API endpoints via
+    /api/ prefix. 3. All CRUD operations are accessible without authentication. 4. Attacker reads all user data and modifies
+    records.
+
+    '
+  confidence_factors:
+    increases:
+    - AllowAny in default or viewset permissions
+    - has_permission always returning True
+    decreases:
+    - IsAuthenticated in default permissions
+    - Public API endpoint
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-003
+    - AUTH-PY-004
+    dependency_chain: Permission bypass makes all IDOR vulnerabilities critical
+    combined_risk_increase: Critical when combined with missing auth
+- rule_id: AUTH-PY-010
+  title: OAuth2 Token Validation Missing
+  description: 'Detects OAuth2 token handling in Python applications where tokens are accepted without proper validation,
+    including missing signature verification, expiration checks, audience validation, or issuer verification.
+
+    '
+  language: python
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-347
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - oauth2
+  - token-validation
+  - jwt
+  - authentication-bypass
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: jwt\.decode\(.*options.*verify_signature.*False
+    description: JWT decode with signature verification disabled
+  - pattern: jwt\.decode\(.*verify\s*=\s*False
+    description: JWT decode with verification disabled
+  - pattern: access_token.*(?!verify|validate|decode).*request\.user
+    description: Access token used without validation
+  - pattern: bearer_token.*=.*request\.headers.*(?!jwt\.decode|verify)
+    description: Bearer token extracted without validation
+  anti_patterns:
+  - pattern: jwt\.decode.*algorithms.*RS256
+    description: Proper algorithm-pinned JWT decode
+  - pattern: verify_signature.*True
+    description: Signature verification enabled
+  - pattern: oauth.*validate|token.*verify
+    description: Token validation function
+  - pattern: audience|aud
+    description: Audience validation
+  - pattern: \btest\b|\bconftest\b|\bmock\b
+    description: Test context
+  - pattern: issuer|iss
+    description: Issuer validation
+  bypass_variants:
+  - variant: Token validated but audience claim not checked
+    description: Cross-service token acceptance
+  - variant: Token signature verified but expiration ignored
+    description: Expired token still accepted
+  evasion_indicators:
+  - Signature verification disabled
+  - Missing audience validation
+  - Expiration check disabled
+  - Issuer not verified
+  encoding_variants:
+  - PyJWT options dict
+  - python-jose verify parameter
+  multi_function_chain_patterns:
+  - request.headers['Authorization'] -> jwt.decode(verify=False) -> trust claims
+  - bearer_token -> no validation -> set request.user
+  privilege_context_flags:
+  - OAuth2 authentication flow
+  - API authorization
+  - Token-based access control
+  business_logic_indicator:
+  - OAuth2 provider integration
+  - Token middleware
+  probable_taint_paths:
+  - source: Authorization header with bearer token
+    sink: User identity assignment
+    through: Missing token validation
+  impact: 'Without proper token validation, attackers can forge tokens, use expired tokens, or use tokens issued for different
+    services. This enables authentication bypass and impersonation of any user.
+
+    '
+  remediation: 'Always validate JWT tokens with algorithms pinned to RS256 or ES256. Enable signature verification, expiration
+    checks, audience validation, and issuer verification. Use established libraries like PyJWT with strict options.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/347.html
+  - https://pyjwt.readthedocs.io/en/stable/usage.html
+  - https://datatracker.ietf.org/doc/html/rfc6749
+  context_awareness:
+    surrounding_context_patterns:
+    - import jwt
+    - OAuth|Bearer
+    taint_source_indicators:
+    - request.headers['Authorization']
+    - Bearer token
+    taint_sink_indicators:
+    - request.user
+    - current_user
+    sanitization_patterns:
+    - jwt.decode with algorithms
+    - verify_signature=True
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: verify=False explicitly set
+      modifier: '+0.5'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. API uses jwt.decode(token, options={''verify_signature'': False}). 2. Attacker crafts JWT with arbitrary
+    claims (admin role). 3. Attacker signs with any key or no key. 4. Server accepts the forged token without signature check.
+    5. Attacker gains admin access to the application.
+
+    '
+  confidence_factors:
+    increases:
+    - verify=False or verify_signature=False
+    - Bearer token used without decode/verify
+    decreases:
+    - Proper jwt.decode with algorithms
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-PY-001
+    - AUTH-PY-003
+    dependency_chain: Missing token validation enables complete auth bypass
+    combined_risk_increase: Critical when combined with missing auth decorators

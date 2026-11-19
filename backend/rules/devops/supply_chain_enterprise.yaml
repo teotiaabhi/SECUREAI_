@@ -1,0 +1,201 @@
+# ============================================================================
+# Enterprise Supply Chain Attack Detection Rules
+# Ruleset Version: 4.0.0
+# Generated: 2026-03-05
+# Coverage: Dependency confusion, typosquatting, lifecycle scripts,
+#           unsafe installs, lockfile tampering
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # DEPENDENCY CONFUSION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "SUPPLY-DEP-001"
+    title: "npm Dependency Confusion — Missing Scope / Registry Pin"
+    description: >
+      Detects npm packages that could be vulnerable to dependency confusion
+      attacks where a malicious public package with the same name as an
+      internal package is installed instead.
+    language: javascript
+    category: devops
+    severity: high
+    confidence: 0.82
+    cwe: CWE-829
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [supply-chain, dependency-confusion, npm, nodejs]
+    detection_layer: 2
+    attack_surface_type: "build"
+    vulnerability_family: "supply-chain"
+    patterns:
+      - type: regex
+        pattern: '"(?:registry|publishConfig)":\s*\{[^}]{0,200}"registry":\s*"https?://(?!registry\.npmjs\.org)[^"]*"'
+        description: "npm config pointing to private registry without scope"
+      - type: regex
+        pattern: '"(?:dependencies|devDependencies)":\s*\{[^}]{0,500}(?:"@internal/|"@company/|"@private/)'
+        description: "Internal scoped packages (verify registry pin)"
+    anti_patterns:
+      - "@scope/"
+      - ".npmrc"
+      - "registry="
+      - "//registry"
+    remediation: >
+      Use npm scopes (@company/package-name) for all internal packages.
+      Pin the internal registry in .npmrc: @company:registry=https://internal-registry.
+      Use package-lock.json to lock resolved registries.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  - rule_id: "SUPPLY-DEP-002"
+    title: "pip Dependency Confusion — Extra Index URL"
+    language: python
+    category: devops
+    severity: high
+    confidence: 0.85
+    cwe: CWE-829
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [supply-chain, dependency-confusion, pip, python]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "supply-chain"
+    patterns:
+      - type: regex
+        pattern: '--extra-index-url\s+https?://(?!pypi\.org|files\.pythonhosted\.org)'
+        description: "pip extra-index-url to private registry (confusion risk)"
+      - type: regex
+        pattern: 'extra-index-url\s*=\s*https?://(?!pypi\.org|files\.pythonhosted\.org)'
+        description: "pip.conf extra-index-url (confusion risk)"
+    anti_patterns:
+      - "--index-url"
+      - "index-url ="
+      - "--no-index"
+      - "--find-links"
+    remediation: >
+      Use --index-url (not --extra-index-url) to replace the default PyPI.
+      Or use --extra-index-url with --only-binary :all: and hash verification.
+      Pin packages with hashes in requirements.txt.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # MALICIOUS LIFECYCLE SCRIPTS
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "SUPPLY-SCRIPT-001"
+    title: "npm Lifecycle Script Executing External Code"
+    description: >
+      Detects npm package.json lifecycle scripts (preinstall, postinstall,
+      install) that download or execute external code, a common malware vector.
+    language: javascript
+    category: devops
+    severity: critical
+    confidence: 0.90
+    cwe: CWE-829
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [supply-chain, npm, lifecycle-script, malware]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "supply-chain"
+    patterns:
+      - type: regex
+        pattern: '"(?:preinstall|postinstall|install|preuninstall|postuninstall)"\s*:\s*"[^"]{0,300}(?:curl|wget|powershell|cmd\.exe|bash\s+-c|sh\s+-c|eval|node\s+-e)\b'
+        description: "Lifecycle script with external code download/execution"
+      - type: regex
+        pattern: '"(?:preinstall|postinstall)"\s*:\s*"[^"]{0,300}(?:https?://|ftp://|\\\\\\\\|//)\b'
+        description: "Lifecycle script fetching from external URL"
+      - type: regex
+        pattern: '"(?:preinstall|postinstall)"\s*:\s*"node\s+[^"]{0,100}\.js"'
+        description: "Lifecycle script running custom node script"
+    anti_patterns:
+      - '"postinstall": "husky install"'
+      - '"postinstall": "patch-package"'
+      - '"postinstall": "prisma generate"'
+      - '"install": "node-gyp rebuild"'
+      - '"postinstall": "ngcc"'
+    remediation: >
+      Audit all lifecycle scripts in dependencies.
+      Use npm install --ignore-scripts for initial install, then audit.
+      Consider using npm config set ignore-scripts true globally.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # UNSAFE PACKAGE INSTALLATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "SUPPLY-INSTALL-001"
+    title: "pip Install from Git/URL (Unverified Source)"
+    language: python
+    category: devops
+    severity: medium
+    confidence: 0.85
+    cwe: CWE-829
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [supply-chain, pip, git-install, python]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "supply-chain"
+    patterns:
+      - type: regex
+        pattern: 'pip\s+install\s+(?:git\+|https?://|ftp://|svn\+)'
+        description: "pip install from VCS/URL"
+      - type: regex
+        pattern: '(?:install_requires|dependency_links)\s*=\s*\[[^\]]{0,300}(?:git\+|https?://)'
+        description: "setup.py with git/URL dependency"
+      - type: regex
+        pattern: '^\s*(?:git\+|https?://|ftp://).*#egg='
+        description: "requirements.txt with VCS dependency"
+    anti_patterns:
+      - "@v"
+      - "@main"
+      - "# pinned"
+      - "--hash"
+    remediation: >
+      Pin git dependencies to specific commit hashes, not branches.
+      Use pip install git+https://...@COMMIT_HASH.
+      Prefer publishing internal packages to a private registry.
+    severity_scoring:
+      severity_weight: 6
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # LOCKFILE TAMPERING
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "SUPPLY-LOCK-001"
+    title: "Lockfile Registry Mismatch / Tampering Indicator"
+    language: all
+    category: devops
+    severity: high
+    confidence: 0.85
+    cwe: CWE-494
+    owasp: "A08:2021-Software and Data Integrity Failures"
+    tags: [supply-chain, lockfile, integrity, npm, yarn]
+    detection_layer: 1
+    attack_surface_type: "build"
+    vulnerability_family: "supply-chain"
+    patterns:
+      - type: regex
+        pattern: '"resolved":\s*"https?://(?!registry\.npmjs\.org|registry\.yarnpkg\.com|registry\.npmmirror\.com)[^"]*\.(?:tgz|tar\.gz)"'
+        description: "npm lockfile resolved to non-standard registry"
+      - type: regex
+        pattern: '"integrity":\s*""'
+        description: "npm lockfile with empty integrity hash"
+      - type: regex
+        pattern: '"resolved":\s*"https?://[^"]*"[^}]{0,200}"integrity":\s*"(?!sha512-|sha256-)'
+        description: "Lockfile with weak/unexpected integrity algorithm"
+    anti_patterns:
+      - "registry.npmjs.org"
+      - "registry.yarnpkg.com"
+      - "# internal registry"
+    remediation: >
+      Review lockfile changes in code review — especially resolved URLs.
+      Use npm ci (not npm install) in CI/CD for lockfile integrity.
+      Enable npm audit signatures verification.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"

@@ -1,0 +1,125 @@
+rules:
+- rule_id: PLI-INJ-001
+  title: SQL Injection in Embedded SQL
+  description: 'Detects dynamic SQL with string concatenation in PL/I.
+
+    '
+  language: pli
+  category: injection
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - embedded-sql
+  patterns:
+  - type: regex
+    pattern: EXEC\s+SQL\s+(?:EXECUTE\s+IMMEDIATE|PREPARE)\s+
+  - type: regex
+    pattern: (?:sql_stmt|sql_string|ws_sql)\s*=\s*'(?:SELECT|INSERT|UPDATE|DELETE)\b.*'\s*\|\|\s*\w+
+  anti_patterns:
+  - :host_var
+  - USING
+  impact: 'SQL injection in PL/I mainframe programs can compromise DB2 databases.
+
+    '
+  remediation: "Use host variables in embedded SQL:\n  EXEC SQL SELECT * FROM ACCOUNTS WHERE ID = :WS_ACCT_ID;\n"
+- rule_id: PLI-INJ-002
+  title: Buffer Overflow in PL/I
+  description: 'Detects potential buffer overflow from unsafe string operations.
+
+    '
+  language: pli
+  category: injection
+  severity: High
+  confidence: 0.8
+  cwe: CWE-120
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - buffer-overflow
+  - string-operations
+  patterns:
+  - type: regex
+    pattern: SUBSTR\s*\(\s*\w+\s*,\s*\d+\s*,\s*(?:LENGTH|VERIFY|INDEX)\s*\(
+  - type: regex
+    pattern: UNSPEC\s*\(\s*\w+\s*\)\s*=\s*UNSPEC\s*\(
+  anti_patterns:
+  - STRINGRANGE
+  - STRINGSIZE
+  - MIN(
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: PLI-AUTH-001
+  title: Hardcoded Credentials in PL/I
+  description: 'Detects hardcoded passwords in PL/I programs.
+
+    '
+  language: pli
+  category: auth
+  severity: High
+  confidence: 0.88
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: DCL\s+(?:PASSWORD|PASSWD|SECRET|API_KEY)\s+CHAR\s*\(\d+\)\s+INIT\s*\(\s*'[^']{4,}
+  - type: regex
+    pattern: (?:password|passwd|secret)\s*=\s*'[^']{4,}'
+  anti_patterns:
+  - INIT(' ')
+  - BLANKS
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: PLI-CRYPTO-001
+  title: Weak Encryption in PL/I
+  description: 'Detects custom or weak encryption implementations.
+
+    '
+  language: pli
+  category: crypto
+  severity: High
+  confidence: 0.78
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 2
+  tags:
+  - weak-crypto
+  patterns:
+  - type: regex
+    pattern: (?:IEXOR|BOOL)\s*\(
+  - type: regex
+    pattern: CALL\s+(?:ENCRYPT|ENCIPHER)\b.*(?:DES|TDES)\b
+  anti_patterns:
+  - AES
+  - ICSF
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: PLI-SEC-001
+  title: Sensitive Data in PUT Statement
+  description: 'Detects output of sensitive data via PUT SKIP/DISPLAY.
+
+    '
+  language: pli
+  category: secrets
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - data-exposure
+  patterns:
+  - type: regex
+    pattern: PUT\s+(?:SKIP|EDIT|LIST|DATA)\s*\(.*(?:PASSWORD|PASSWD|SECRET|SSN|CREDIT_CARD)\b
+  - type: regex
+    pattern: DISPLAY\s*\(.*(?:PASSWORD|PASSWD|SECRET)\b
+  anti_patterns:
+  - MASK
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately

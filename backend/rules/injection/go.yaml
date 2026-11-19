@@ -1,0 +1,2297 @@
+rules:
+- rule_id: GO-INJ-001
+  title: SQL Injection via String Concatenation
+  description: 'Detects SQL query construction using fmt.Sprintf or string concatenation with user-controlled input instead
+    of parameterized queries. This includes detection across database/sql, GORM, sqlx, ent, and other Go ORM/query builder
+    libraries.
+
+    '
+  language: go
+  category: injection
+  severity: Critical
+  confidence: 0.93
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - database-sql
+  - gorm
+  - sqlx
+  - ent
+  - pgx
+  patterns:
+  - type: regex
+    pattern: db\.(?:Query|QueryRow|Exec|QueryContext|ExecContext)\s*\([^,)]*fmt\.Sprintf\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b
+  - type: regex
+    pattern: db\.(?:Query|QueryRow|Exec)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\+\s*\w+
+  - type: regex
+    pattern: fmt\.Sprintf\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*%s[^"]*"[^)]*(?:r\.(?:URL|Form|PostForm)|request|param|input|user)
+  - type: regex
+    pattern: \.(?:Raw|Where|Having|Group|Order)\s*\(\s*fmt\.Sprintf\s*\(
+  - type: regex
+    pattern: \.(?:Raw|Where)\s*\(\s*"[^"]*"\s*\+\s*(?:r\.|c\.|ctx\.|gin\.|req\.|param|input)
+  - type: regex
+    pattern: strings\.Join\s*\([^)]*\)\s*.*(?:Query|Exec|Raw)\s*\(
+    description: SQL built via strings.Join then passed to a query function
+  - type: regex
+    pattern: (?:tx|conn)\.(?:Query|QueryRow|Exec|ExecContext|QueryContext)\s*\([^,)]*fmt\.Sprintf
+    description: SQL injection via transaction or connection objects
+  - type: regex
+    pattern: sqlx\.(?:Get|Select|MustExec|NamedExec)\s*\([^,)]*fmt\.Sprintf
+    description: SQL injection through sqlx convenience functions with Sprintf
+  - type: regex
+    pattern: (?:pgx|pgxpool)\.(?:Query|QueryRow|Exec|SendBatch)\s*\([^,)]*fmt\.Sprintf
+    description: SQL injection via pgx/pgxpool PostgreSQL driver
+  - type: regex
+    pattern: \.(?:Clauses|Table|Select|Joins)\s*\(\s*"[^"]*"\s*\+\s*(?:r\.|c\.|ctx\.)
+    description: GORM clause injection via string concatenation with request context
+  - type: regex
+    pattern: \.Exec\s*\(\s*`[^`]*\$\{[^}]*\}[^`]*`
+    description: Template literal with variable interpolation passed to Exec
+  - type: regex
+    pattern: query\s*(?:\+|=\s*.*\+)\s*(?:r\.(?:URL|Form|PostForm|Header)|c\.(?:Query|Param|PostForm)|ctx\.(?:Query|Param))
+    description: Query string variable built by concatenating user input from HTTP frameworks
+  - type: regex
+    pattern: \.(?:Raw|Where|Having|Order)\s*\(\s*(?:query|sql|stmt|sqlStr|sqlQuery)\s*[,)]
+    description: GORM method receiving a variable that may contain unsanitized SQL
+  anti_patterns:
+  - db.Query(.*,$
+  - db.QueryRow(.*,$
+  - Prepare(
+  - Placeholder
+  - squirrel
+  - sqlx.Named
+  - db.Where(".*\?",
+  - .Where(".*\?",
+  - .Where(".*=\s*\?"
+  - gorm.io/gorm
+  - .Create(&
+  - .Save(&
+  - .First(&
+  - .Find(&
+  - .Model(&
+  - .Updates(map
+  - .Pluck(
+  - sqlx.Rebind
+  - sqlx.In(
+  - sq.Select
+  - sq.Insert
+  - sq.Eq{
+  - squirrel.Select
+  - squirrel.Eq{
+  - ent.Client
+  - .Querier
+  - chi.URLParam
+  - gin.Context
+  - echo.Context
+  - middleware.Logger
+  - middleware.Recover
+  context_awareness:
+    surrounding_context_patterns:
+    - import\s+"database/sql"
+    - import\s+"github\.com/jmoiron/sqlx"
+    - import\s+"gorm\.io/gorm"
+    - import\s+"github\.com/jackc/pgx"
+    - import\s+"github\.com/go-sql-driver/mysql"
+    - sql\.Open\s*\(
+    - gorm\.Open\s*\(
+    - sqlx\.Connect\s*\(
+    taint_source_indicators:
+    - r\.URL\.Query\(\)
+    - r\.FormValue\s*\(
+    - r\.PostFormValue\s*\(
+    - r\.Header\.Get\s*\(
+    - r\.Body
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    - c\.Bind\s*\(
+    - c\.BindJSON\s*\(
+    - ctx\.QueryParam\s*\(
+    - ctx\.Param\s*\(
+    - ctx\.FormValue\s*\(
+    - chi\.URLParam\s*\(
+    - json\.NewDecoder\s*\(r\.Body\)
+    - io\.ReadAll\s*\(r\.Body\)
+    - mux\.Vars\s*\(
+    taint_sink_indicators:
+    - db\.Query\s*\(
+    - db\.QueryRow\s*\(
+    - db\.Exec\s*\(
+    - tx\.Query\s*\(
+    - tx\.Exec\s*\(
+    - \.Raw\s*\(
+    - \.Where\s*\(
+    - \.Having\s*\(
+    - \.Order\s*\(
+    - sqlx\.Get\s*\(
+    - sqlx\.Select\s*\(
+    sanitization_patterns:
+    - db\.Prepare\s*\(
+    - sqlx\.Named\s*\(
+    - sqlx\.Rebind\s*\(
+    - squirrel\.
+    - sq\.Eq\{
+    - sq\.And\{
+    - \.Where\s*\(\s*"[^"]*\\?"
+    - \.Where\s*\(\s*"[^"]*\\$\\d+"
+    - strconv\.Atoi\s*\(
+    - strconv\.ParseInt\s*\(
+    - regexp\.MustCompile\s*\(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_probability)
+    exploitability_score: 9.5
+    base_risk: Critical
+    environmental_modifier: Increases if database holds PII or financial data
+  exploit_scenario:
+    attack_example: 'A Go HTTP handler accepts a username from query parameters and constructs a SQL query via fmt.Sprintf.
+      An attacker supplies a crafted username like '' OR ''1''=''1'' -- to bypass authentication or extract all rows.
+
+      '
+    example_payload: admin' OR '1'='1' --
+    attacker_objective: 'Bypass authentication, extract sensitive data from the database, modify or delete records, or escalate
+      to OS command execution via features like xp_cmdshell (SQL Server) or COPY TO PROGRAM (PostgreSQL).
+
+      '
+    attack_vector: Network / HTTP request parameters
+    exploit_complexity: Low
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.85
+    proximity_to_user_input: 0.95
+    sanitization_absence: 0.92
+    false_positive_likelihood: Low when fmt.Sprintf with %s is directly inside a query call
+    false_negative_likelihood: Medium for multi-step query construction across functions
+  impact: 'SQL injection enabling unauthorized data access, modification, deletion,
+
+    and potential command execution through database-specific features. May
+
+    lead to complete database compromise, data exfiltration, and lateral
+
+    movement within the infrastructure.
+
+    '
+  remediation: "Use parameterized queries with placeholder syntax:\n\n  // database/sql - PostgreSQL style\n  db.Query(\"\
+    SELECT * FROM users WHERE id = $1\", userID)\n\n  // database/sql - MySQL style\n  db.Query(\"SELECT * FROM users WHERE\
+    \ id = ?\", userID)\n\n  // Prepared statements\n  stmt, err := db.Prepare(\"SELECT * FROM users WHERE name = $1\")\n\
+    \  row := stmt.QueryRow(userName)\n\n  // GORM safe usage\n  db.Where(\"name = ?\", userName).First(&user)\n  db.Where(&User{Name:\
+    \ userName}).First(&user)\n  db.Find(&users, \"id IN ?\", []int{1, 2, 3})\n\n  // sqlx named queries\n  sqlx.NamedExec(db,\
+    \ \"INSERT INTO users (name) VALUES (:name)\", map[string]interface{}{\"name\": userName})\n\n  // squirrel query builder\n\
+    \  sq.Select(\"*\").From(\"users\").Where(sq.Eq{\"id\": userID}).RunWith(db).Query()\n\nNever use fmt.Sprintf or string\
+    \ concatenation for SQL queries.\nUse ORM methods that accept structured inputs (maps, structs).\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://pkg.go.dev/database/sql
+  - https://gorm.io/docs/security.html
+  - https://jmoiron.github.io/sqlx/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    original_author: security-rules-team
+    min_go_version: '1.13'
+    applicable_frameworks:
+    - database/sql
+    - GORM
+    - sqlx
+    - pgx
+    - ent
+    - squirrel
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-002
+    - GO-INJ-004
+    - GO-AUTH-001
+    - GO-CRYPTO-003
+    escalation_chain: 'SQL injection may chain with GO-INJ-002 (command injection) if the database supports OS command execution,
+      and with GO-AUTH-001 if authentication bypass is the objective.
+
+      '
+    data_flow_dependencies:
+    - HTTP handler input parsing
+    - Middleware authentication checks
+    - Database connection pool configuration
+  detection_layer: 1
+- rule_id: GO-INJ-002
+  title: Command Injection via os/exec with User Input
+  description: 'Detects os/exec.Command with user-controlled input passed to shell interpreters or directly as command arguments.
+    Covers exec.Command, exec.CommandContext, syscall.Exec, and os.StartProcess patterns across common Go web frameworks (net/http,
+    gin, echo, chi, fiber).
+
+    '
+  language: go
+  category: injection
+  severity: Critical
+  confidence: 0.91
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - os-exec
+  - rce
+  - syscall
+  - process-spawn
+  patterns:
+  - type: regex
+    pattern: exec\.Command\s*\(\s*"(?:sh|bash|cmd|powershell|/bin/sh|/bin/bash)"[^)]*(?:r\.|c\.|ctx\.|request|param|input|user)
+  - type: regex
+    pattern: exec\.Command\s*\(\s*"(?:sh|bash)"[^)]*"-c"[^)]*(?:r\.|request|param|input|user|fmt\.Sprintf)
+  - type: regex
+    pattern: exec\.Command\s*\(\s*(?:r\.|c\.|ctx\.|request|param|input|user|cmd|command)\b
+  - type: regex
+    pattern: exec\.CommandContext\s*\([^,]*,\s*"(?:sh|bash)"[^)]*(?:r\.|request|param|input)
+  - type: regex
+    pattern: exec\.Command\s*\(\s*"(?:sh|bash|cmd|powershell|/bin/sh|/bin/bash)"[^)]*"-c"[^)]*\+\s*\w+
+    description: Shell command with argument built via string concatenation
+  - type: regex
+    pattern: exec\.Command\s*\(\s*fmt\.Sprintf\s*\(
+    description: Command name or arguments built with fmt.Sprintf
+  - type: regex
+    pattern: syscall\.Exec\s*\(\s*(?:r\.|c\.|ctx\.|request|param|input|user|cmd|command|path|file)\b
+    description: Direct syscall.Exec with user-controlled binary path
+  - type: regex
+    pattern: os\.StartProcess\s*\(\s*(?:r\.|c\.|ctx\.|request|param|input|user|cmd|command|path|file)\b
+    description: os.StartProcess with user-controlled process path
+  - type: regex
+    pattern: exec\.Command\s*\(\s*(?:filepath\.Join|path\.Join)\s*\([^)]*(?:r\.|c\.|ctx\.|request|param|input|user)
+    description: Command path built from user-controlled path segments
+  - type: regex
+    pattern: exec\.(?:Command|CommandContext)\s*\([^)]*(?:os\.Args|flag\.Arg)\s*\(
+    description: Command injection through CLI arguments that may be user-controlled
+  - type: regex
+    pattern: (?:cmd|command)\s*:?=\s*(?:r\.|c\.|ctx\.|request|param|input)[^;]*\n[^;]*exec\.Command\s*\(
+    description: Variable assigned from user input then passed to exec.Command
+  - type: regex
+    pattern: exec\.Command\s*\(\s*"(?:curl|wget|ping|nslookup|dig|traceroute|nmap)"[^)]*(?:r\.|c\.|ctx\.|request|param|input|user)
+    description: Network utility command with user-controlled arguments
+  anti_patterns:
+  - filepath.Clean
+  - regexp.MustCompile
+  - allowlist
+  - whitelist
+  - filepath.Base(
+  - filepath.Ext(
+  - path.Clean(
+  - shellescape.Quote
+  - shlex.Split
+  - strings.ContainsAny
+  - strings.ContainsRune
+  - validCommands[
+  - allowedCommands[
+  - commandMap[
+  - switch cmd {
+  - switch command {
+  - chi.URLParam
+  - gin.H{
+  - echo.Map{
+  - middleware.RateLimiter
+  - middleware.BasicAuth
+  context_awareness:
+    surrounding_context_patterns:
+    - import\s+"os/exec"
+    - import\s+"syscall"
+    - import\s+"os"
+    - exec\.Command\s*\(
+    - exec\.CommandContext\s*\(
+    - syscall\.Exec\s*\(
+    - os\.StartProcess\s*\(
+    taint_source_indicators:
+    - r\.URL\.Query\(\)
+    - r\.FormValue\s*\(
+    - r\.PostFormValue\s*\(
+    - r\.Header\.Get\s*\(
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    - ctx\.QueryParam\s*\(
+    - ctx\.Param\s*\(
+    - chi\.URLParam\s*\(
+    - json\.NewDecoder\s*\(r\.Body\)
+    - io\.ReadAll\s*\(r\.Body\)
+    - os\.Getenv\s*\(
+    - os\.Args\b
+    - flag\.String\s*\(
+    taint_sink_indicators:
+    - exec\.Command\s*\(
+    - exec\.CommandContext\s*\(
+    - syscall\.Exec\s*\(
+    - os\.StartProcess\s*\(
+    - \.Run\s*\(\)
+    - \.Output\s*\(\)
+    - \.CombinedOutput\s*\(\)
+    - \.Start\s*\(\)
+    sanitization_patterns:
+    - filepath\.Clean\s*\(
+    - filepath\.Base\s*\(
+    - regexp\.MustCompile\s*\(
+    - regexp\.MatchString\s*\(
+    - shellescape\.Quote\s*\(
+    - strconv\.Atoi\s*\(
+    - strconv\.ParseInt\s*\(
+    - strings\.ContainsAny\s*\(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * exploitability_score / 10
+    exploitability_score: 9.8
+    base_risk: Critical
+    environmental_modifier: Maximum risk if application runs with elevated privileges
+  exploit_scenario:
+    attack_example: 'A Go web handler accepts a hostname from the user and passes it to exec.Command("ping", "-c", "4", hostname).
+      An attacker supplies "8.8.8.8; cat /etc/passwd" or "8.8.8.8$(whoami)" as the hostname to execute arbitrary commands
+      on the server.
+
+      '
+    example_payload: 8.8.8.8; cat /etc/passwd
+    attacker_objective: 'Achieve remote code execution on the server to install backdoors, exfiltrate data, pivot to internal
+      networks, or establish persistent access via reverse shells.
+
+      '
+    attack_vector: Network / HTTP request parameters, headers, or body
+    exploit_complexity: Low
+  confidence_factors:
+    pattern_strength: 0.92
+    context_match: 0.88
+    proximity_to_user_input: 0.94
+    sanitization_absence: 0.9
+    false_positive_likelihood: Low when shell invocation with -c flag is present
+    false_negative_likelihood: Medium for indirect command construction via helper functions
+  impact: 'Remote code execution on the server. An attacker can inject shell
+
+    metacharacters to execute arbitrary OS commands, potentially leading
+
+    to complete system compromise, data exfiltration, ransomware deployment,
+
+    or lateral movement within the network.
+
+    '
+  remediation: "Pass command and arguments separately to exec.Command (never via shell -c):\n\n  // SAFE: Arguments are separate\
+    \ parameters\n  exec.Command(\"ls\", \"-la\", safeDir)\n\n  // UNSAFE: User input passed to shell\n  exec.Command(\"sh\"\
+    , \"-c\", userInput)\n\n  // SAFE: Validate input against strict allowlists\n  allowedCmds := map[string]bool{\"status\"\
+    : true, \"info\": true}\n  if !allowedCmds[userInput] {\n      return fmt.Errorf(\"command not allowed\")\n  }\n\n  //\
+    \ SAFE: Use Go standard library instead of shell commands\n  entries, err := os.ReadDir(dir)  // instead of exec.Command(\"\
+    ls\", dir)\n\n  // With gin framework - validate before use\n  func handler(c *gin.Context) {\n      hostname := c.Query(\"\
+    host\")\n      if !isValidHostname(hostname) {\n          c.JSON(400, gin.H{\"error\": \"invalid hostname\"})\n      \
+    \    return\n      }\n      cmd := exec.Command(\"ping\", \"-c\", \"4\", hostname)\n  }\n\n  // With echo framework\n\
+    \  func handler(c echo.Context) error {\n      name := c.Param(\"name\")\n      if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(name)\
+    \ {\n          return c.JSON(400, echo.Map{\"error\": \"invalid input\"})\n      }\n  }\n\nUse filepath.Clean and filepath.Base\
+    \ to sanitize path inputs.\nUse Go standard library functions instead of shell commands whenever possible.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://pkg.go.dev/os/exec
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    original_author: security-rules-team
+    min_go_version: '1.13'
+    applicable_frameworks:
+    - os/exec
+    - syscall
+    - net/http
+    - gin
+    - echo
+    - chi
+    - fiber
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-005
+    - GO-PATH-001
+    escalation_chain: 'Command injection is often the final stage of an exploit chain. It may be reached via SQL injection
+      (GO-INJ-001) through database command execution features, or via path traversal (GO-PATH-001) that allows overwriting
+      executable scripts.
+
+      '
+    data_flow_dependencies:
+    - HTTP handler input parsing
+    - Middleware authentication and authorization
+    - Input validation functions
+  detection_layer: 1
+- rule_id: GO-INJ-003
+  title: Template Injection via html/template or text/template
+  description: 'Detects Go template parsing with user-controlled template strings using text/template (which lacks auto-escaping)
+    or html/template with user-controlled template definitions. Covers direct Parse calls, template composition abuse, and
+    custom function map injection.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.86
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - template-injection
+  - ssti
+  - text-template
+  - html-template
+  - xss
+  patterns:
+  - type: regex
+    pattern: template\.New\s*\([^)]*\)\.Parse\s*\(\s*(?:r\.|c\.|request|param|input|user|data|body)\b
+  - type: regex
+    pattern: template\.Must\s*\(\s*template\.New\s*\([^)]*\)\.Parse\s*\(\s*(?:r\.|c\.|request|param|input|user)\b
+  - type: regex
+    pattern: '"text/template"'
+  - type: regex
+    pattern: template\.New\s*\([^)]*\)\.Parse\s*\(\s*fmt\.Sprintf\s*\(
+  - type: regex
+    pattern: template\.New\s*\([^)]*\)\.Funcs\s*\([^)]*\)\.Parse\s*\(\s*(?:r\.|c\.|request|param|input|user|data|body)\b
+    description: Template with custom FuncMap parsing user-controlled string
+  - type: regex
+    pattern: template\.New\s*\([^)]*\)\.Parse\s*\(\s*string\s*\([^)]*\)\s*\)
+    description: Template parsing a byte slice converted to string (possible user input)
+  - type: regex
+    pattern: \.Execute\s*\([^,]*,\s*(?:r\.|c\.|request|param|input|user|data|body)\b
+    description: Template execution with user-controlled data context
+  - type: regex
+    pattern: \.ExecuteTemplate\s*\([^,]*,\s*(?:r\.|c\.|request|param|input|user)\b
+    description: ExecuteTemplate with user-controlled template name selection
+  - type: regex
+    pattern: template\.(?:New|Must)\s*\([^)]*\)\.Parse\s*\(\s*(?:buf|buffer|content|tmpl|tpl|templateStr|templateString|templateBody)\b
+    description: Template parsing a variable that may hold user-controlled content
+  - type: regex
+    pattern: template\.HTML\s*\(\s*(?:r\.|c\.|request|param|input|user|data|body)\b
+    description: Unsafe template.HTML cast of user-controlled input bypassing escaping
+  - type: regex
+    pattern: template\.(?:JS|JSStr|CSS|URL)\s*\(\s*(?:r\.|c\.|request|param|input|user)\b
+    description: Unsafe template type cast (JS/CSS/URL) with user-controlled input
+  anti_patterns:
+  - '"html/template"'
+  - template.HTMLEscapeString
+  - ParseFiles
+  - ParseGlob
+  - template.HTMLEscaper
+  - template.JSEscaper
+  - template.URLQueryEscaper
+  - html.EscapeString
+  - url.QueryEscape
+  - url.PathEscape
+  - bluemonday
+  - sanitize
+  - .ParseFS(
+  - embed.FS
+  - gin.H{
+  - c.HTML(
+  - echo.Renderer
+  - chi.URLParam
+  - middleware.Logger
+  context_awareness:
+    surrounding_context_patterns:
+    - import\s+"text/template"
+    - import\s+"html/template"
+    - template\.New\s*\(
+    - template\.Must\s*\(
+    - template\.ParseFiles\s*\(
+    - \.Execute\s*\(
+    - \.ExecuteTemplate\s*\(
+    taint_source_indicators:
+    - r\.FormValue\s*\(
+    - r\.URL\.Query\(\)
+    - r\.PostFormValue\s*\(
+    - io\.ReadAll\s*\(r\.Body\)
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    - ctx\.QueryParam\s*\(
+    - ctx\.FormValue\s*\(
+    - json\.NewDecoder\s*\(r\.Body\)
+    - chi\.URLParam\s*\(
+    taint_sink_indicators:
+    - \.Parse\s*\(
+    - \.Execute\s*\(
+    - \.ExecuteTemplate\s*\(
+    - template\.HTML\s*\(
+    - template\.JS\s*\(
+    - template\.CSS\s*\(
+    - template\.URL\s*\(
+    sanitization_patterns:
+    - template\.HTMLEscapeString\s*\(
+    - html\.EscapeString\s*\(
+    - url\.QueryEscape\s*\(
+    - url\.PathEscape\s*\(
+    - bluemonday\.UGCPolicy
+    - bluemonday\.StrictPolicy
+    - template\.ParseFiles\s*\(
+    - template\.ParseGlob\s*\(
+    - template\.ParseFS\s*\(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * context_match
+    exploitability_score: 7.5
+    base_risk: High
+    environmental_modifier: Critical if text/template is used for web-facing output
+  exploit_scenario:
+    attack_example: 'A Go web application accepts a user-provided template string to customize an email or page layout. The
+      attacker injects {{.Password}} or Go template actions like {{printf "%s" .SecretKey}} to extract sensitive data from
+      the template execution context, or uses text/template to call arbitrary methods on passed objects.
+
+      '
+    example_payload: '{{printf "%s" .SecretKey}}'
+    attacker_objective: 'Extract sensitive data from template execution context, execute arbitrary methods on objects passed
+      to the template, or achieve cross-site scripting (XSS) when text/template is used for HTML.
+
+      '
+    attack_vector: Network / HTTP request parameters or stored user content
+    exploit_complexity: Medium
+  confidence_factors:
+    pattern_strength: 0.85
+    context_match: 0.8
+    proximity_to_user_input: 0.88
+    sanitization_absence: 0.85
+    false_positive_likelihood: Medium - text/template import alone does not confirm vulnerability
+    false_negative_likelihood: Medium for template strings built across multiple functions
+  impact: 'Server-side template injection in Go''s text/template package allows
+
+    arbitrary function calls and data access through template actions.
+
+    Using text/template instead of html/template also enables XSS.
+
+    In severe cases, template injection can lead to information disclosure
+
+    of internal application state, secrets, and configuration.
+
+    '
+  remediation: "Use html/template instead of text/template for web output:\n\n  // SAFE: html/template auto-escapes output\n\
+    \  import \"html/template\"\n  tmpl := template.Must(template.ParseFiles(\"page.html\"))\n  tmpl.Execute(w, data)\n\n\
+    \  // SAFE: Use ParseFiles/ParseGlob with pre-defined templates\n  tmpl := template.Must(template.ParseGlob(\"templates/*.html\"\
+    ))\n  tmpl.ExecuteTemplate(w, \"page.html\", data)\n\n  // SAFE: Embedded filesystem templates (Go 1.16+)\n  //go:embed\
+    \ templates/*\n  var templateFS embed.FS\n  tmpl := template.Must(template.ParseFS(templateFS, \"templates/*.html\"))\n\
+    \n  // UNSAFE: Never parse user-controlled strings as templates\n  tmpl := template.New(\"x\").Parse(userInput)  // VULNERABLE\n\
+    \n  // UNSAFE: template.HTML bypasses escaping\n  template.HTML(userInput)  // VULNERABLE to XSS\n\n  // With gin framework\n\
+    \  router.LoadHTMLGlob(\"templates/*\")  // SAFE: pre-loaded templates\n  c.HTML(http.StatusOK, \"page.html\", gin.H{\"\
+    name\": name})\n\n  // With echo framework\n  e.Renderer = &TemplateRenderer{\n      templates: template.Must(template.ParseGlob(\"\
+    templates/*.html\")),\n  }\n\nValidate and sanitize all data passed to template execution.\nUse bluemonday for HTML sanitization\
+    \ of user-provided content.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://pkg.go.dev/html/template
+  - https://pkg.go.dev/text/template
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/18-Testing_for_Server-side_Template_Injection
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: high
+    original_author: security-rules-team
+    min_go_version: '1.13'
+    applicable_frameworks:
+    - text/template
+    - html/template
+    - net/http
+    - gin
+    - echo
+    - chi
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-XSS-001
+    - GO-XSS-002
+    escalation_chain: 'Template injection via text/template can lead to XSS (GO-XSS-001) when used for web output. If the
+      template context includes database connections or exec functions, it can escalate to SQL injection (GO-INJ-001) or command
+      injection (GO-INJ-002).
+
+      '
+    data_flow_dependencies:
+    - HTTP handler input parsing
+    - Template rendering pipeline
+    - Data model population for template context
+  detection_layer: 1
+- rule_id: GO-INJ-004
+  title: LDAP Injection via Unsanitized Filter
+  description: 'Detects LDAP search filter construction with user-controlled input without proper escaping. Covers go-ldap,
+    ldap.v3, and custom LDAP filter string construction patterns.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.84
+  cwe: CWE-90
+  owasp: A03:2021-Injection
+  tags:
+  - ldap-injection
+  - directory-service
+  - authentication-bypass
+  - active-directory
+  patterns:
+  - type: regex
+    pattern: ldap\.NewSearchRequest\s*\([^)]*fmt\.Sprintf\s*\(\s*"\([^"]*%s
+  - type: regex
+    pattern: (?:filter|searchFilter)\s*:?=\s*fmt\.Sprintf\s*\(\s*"\([^"]*%s
+  - type: regex
+    pattern: (?:filter|searchFilter)\s*:?=\s*"\([^"]*"\s*\+\s*(?:r\.|c\.|request|param|input|user)
+  - type: regex
+    pattern: ldap\.NewSearchRequest\s*\([^)]*"[^"]*"\s*\+\s*(?:r\.|c\.|ctx\.|request|param|input|user)
+    description: LDAP search request with filter built via string concatenation
+  - type: regex
+    pattern: (?:filter|searchFilter|ldapFilter|query)\s*:?=\s*"\(&\([^"]*"\s*\+\s*\w+
+    description: Complex LDAP AND filter with concatenated user input
+  - type: regex
+    pattern: (?:filter|searchFilter)\s*:?=\s*"\(\|\([^"]*"\s*\+\s*\w+
+    description: LDAP OR filter with concatenated user input
+  - type: regex
+    pattern: fmt\.Sprintf\s*\(\s*"\(?(?:uid|cn|sAMAccountName|mail|memberOf|distinguishedName)=%s
+    description: Common LDAP attribute filters with Sprintf interpolation
+  - type: regex
+    pattern: \.Search\s*\(\s*ldap\.NewSearchRequest\s*\([^)]*(?:r\.|c\.|ctx\.|request|param|input|user)
+    description: LDAP Search call with user input flowing into search request
+  - type: regex
+    pattern: (?:baseDN|searchBase)\s*:?=\s*(?:r\.|c\.|ctx\.|request|param|input|user)
+    description: User-controlled LDAP base DN enabling search scope manipulation
+  - type: regex
+    pattern: ldap\.(?:Dial|DialTLS|DialURL)\s*\([^)]*(?:r\.|c\.|ctx\.|request|param|input|user)
+    description: User-controlled LDAP server address enabling LDAP connection hijacking
+  anti_patterns:
+  - ldap.EscapeFilter
+  - EscapeFilter
+  - ldap.EscapeDN
+  - EscapeValue
+  - regexp.MustCompile
+  - regexp.MatchString
+  - strings.ContainsAny
+  - strings.NewReplacer
+  - allowlist
+  - whitelist
+  - validateUsername
+  - validateInput
+  - isAlphanumeric
+  - chi.URLParam
+  - gin.Context
+  - echo.Context
+  - middleware.BasicAuth
+  - middleware.KeyAuth
+  context_awareness:
+    surrounding_context_patterns:
+    - import\s+"github\.com/go-ldap/ldap
+    - import\s+"gopkg\.in/ldap\.v
+    - ldap\.Dial\s*\(
+    - ldap\.DialTLS\s*\(
+    - ldap\.DialURL\s*\(
+    - ldap\.NewSearchRequest\s*\(
+    - \.Bind\s*\(
+    - \.Search\s*\(
+    taint_source_indicators:
+    - r\.FormValue\s*\(
+    - r\.URL\.Query\(\)
+    - r\.PostFormValue\s*\(
+    - r\.Header\.Get\s*\(
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    - ctx\.QueryParam\s*\(
+    - ctx\.FormValue\s*\(
+    - chi\.URLParam\s*\(
+    - json\.NewDecoder\s*\(r\.Body\)
+    taint_sink_indicators:
+    - ldap\.NewSearchRequest\s*\(
+    - \.Search\s*\(
+    - \.Bind\s*\(
+    - \.SimpleBind\s*\(
+    - \.Modify\s*\(
+    - \.Add\s*\(
+    - \.Del\s*\(
+    sanitization_patterns:
+    - ldap\.EscapeFilter\s*\(
+    - ldap\.EscapeDN\s*\(
+    - regexp\.MustCompile\s*\(
+    - regexp\.MatchString\s*\(
+    - strings\.NewReplacer\s*\(
+    - strconv\.Atoi\s*\(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_probability)
+    exploitability_score: 7.0
+    base_risk: High
+    environmental_modifier: Critical if LDAP is used for authentication or authorization decisions
+  exploit_scenario:
+    attack_example: 'A Go application authenticates users against Active Directory by searching for their account with an
+      LDAP filter built via fmt.Sprintf: fmt.Sprintf("(sAMAccountName=%s)", username). An attacker submits the username "admin)(|(cn=*"
+      to modify the filter logic and bypass authentication checks.
+
+      '
+    example_payload: admin)(|(cn=*)
+    attacker_objective: 'Bypass authentication, enumerate directory users and groups, extract sensitive attributes (email,
+      phone, manager), or escalate privileges by manipulating group membership queries.
+
+      '
+    attack_vector: Network / HTTP login forms, API authentication endpoints
+    exploit_complexity: Medium
+  confidence_factors:
+    pattern_strength: 0.84
+    context_match: 0.8
+    proximity_to_user_input: 0.88
+    sanitization_absence: 0.85
+    false_positive_likelihood: Low when fmt.Sprintf with %s is inside an LDAP filter context
+    false_negative_likelihood: Medium for filters constructed in separate utility functions
+  impact: 'LDAP injection enables authentication bypass, unauthorized data access,
+
+    and information disclosure from directory services. Attackers can
+
+    enumerate users, extract email addresses and organizational data,
+
+    bypass access controls based on group membership, and in some cases
+
+    modify directory entries.
+
+    '
+  remediation: "Use ldap.EscapeFilter() to escape user input in LDAP filters:\n\n  // SAFE: Properly escaped filter\n  filter\
+    \ := fmt.Sprintf(\"(uid=%s)\", ldap.EscapeFilter(userInput))\n\n  // SAFE: Escaped DN\n  dn := fmt.Sprintf(\"uid=%s,ou=users,dc=example,dc=com\"\
+    , ldap.EscapeDN(userInput))\n\n  // SAFE: Validate input against expected character classes\n  if !regexp.MustCompile(`^[a-zA-Z0-9._-]+$`).MatchString(username)\
+    \ {\n      return fmt.Errorf(\"invalid username format\")\n  }\n\n  // With gin framework\n  func loginHandler(c *gin.Context)\
+    \ {\n      username := c.PostForm(\"username\")\n      if !isValidUsername(username) {\n          c.JSON(400, gin.H{\"\
+    error\": \"invalid username\"})\n          return\n      }\n      filter := fmt.Sprintf(\"(sAMAccountName=%s)\", ldap.EscapeFilter(username))\n\
+    \  }\n\n  // With echo framework\n  func loginHandler(c echo.Context) error {\n      username := c.FormValue(\"username\"\
+    )\n      escapedUser := ldap.EscapeFilter(username)\n      filter := fmt.Sprintf(\"(uid=%s)\", escapedUser)\n  }\n\nValidate\
+    \ input against expected character classes before filter insertion.\nUse parameterized search functions when available.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/90.html
+  - https://owasp.org/www-community/attacks/LDAP_Injection
+  - https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html
+  - https://pkg.go.dev/github.com/go-ldap/ldap/v3
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    original_author: security-rules-team
+    min_go_version: '1.13'
+    applicable_frameworks:
+    - go-ldap/ldap
+    - gopkg.in/ldap.v3
+    - net/http
+    - gin
+    - echo
+    - chi
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-AUTH-001
+    - GO-AUTH-002
+    escalation_chain: 'LDAP injection commonly chains with authentication bypass (GO-AUTH-001). If combined with LDAP modification
+      capabilities, it can escalate to privilege escalation by adding users to administrative groups.
+
+      '
+    data_flow_dependencies:
+    - HTTP authentication handler
+    - LDAP connection pool management
+    - User input validation middleware
+  detection_layer: 1
+- rule_id: GO-INJ-005
+  title: Unsafe Reflect or Plugin Loading
+  description: 'Detects dynamic code loading via plugin.Open or unsafe reflect operations with user-controlled input. Covers
+    plugin loading, reflect-based method dispatch, dynamic type assertion, and unsafe pointer manipulation patterns that can
+    lead to arbitrary code execution.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.82
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  tags:
+  - code-injection
+  - plugin-loading
+  - reflect
+  - unsafe
+  - dynamic-dispatch
+  patterns:
+  - type: regex
+    pattern: plugin\.Open\s*\(\s*(?:r\.|c\.|request|param|input|user|path|file)\b
+  - type: regex
+    pattern: reflect\.(?:ValueOf|TypeOf)\s*\([^)]*\)\.(?:MethodByName|FieldByName)\s*\(\s*(?:r\.|request|param|input|user)
+  - type: regex
+    pattern: plugin\.Open\s*\(\s*fmt\.Sprintf
+  - type: regex
+    pattern: plugin\.Open\s*\(\s*(?:filepath\.Join|path\.Join)\s*\([^)]*(?:r\.|c\.|request|param|input|user)
+    description: Plugin loaded from a user-controlled path constructed via filepath.Join
+  - type: regex
+    pattern: reflect\.(?:ValueOf|TypeOf)\s*\([^)]*\)\.(?:MethodByName|FieldByName)\s*\(\s*fmt\.Sprintf
+    description: Reflect method/field lookup with Sprintf-constructed name
+  - type: regex
+    pattern: \.(?:MethodByName|FieldByName)\s*\(\s*(?:c\.|ctx\.|chi\.|gin\.|echo\.)
+    description: Reflect dispatch with framework context value as method/field name
+  - type: regex
+    pattern: reflect\.(?:ValueOf)\s*\([^)]*\)\.(?:Call|Method)\s*\([^)]*(?:r\.|c\.|request|param|input|user)
+    description: Reflect Call or Method index from user-controlled input
+  - type: regex
+    pattern: unsafe\.Pointer\s*\(\s*(?:r\.|c\.|request|param|input|user)
+    description: Unsafe pointer creation from user-controlled data
+  - type: regex
+    pattern: reflect\.NewAt\s*\([^,]*,\s*unsafe\.Pointer\s*\(
+    description: reflect.NewAt with unsafe.Pointer enabling arbitrary memory access
+  - type: regex
+    pattern: \.Lookup\s*\(\s*(?:r\.|c\.|ctx\.|request|param|input|user|name|funcName|symbolName)\b
+    description: Plugin symbol lookup with user-controlled symbol name
+  - type: regex
+    pattern: reflect\.MakeFunc\s*\([^)]*(?:r\.|c\.|request|param|input|user)
+    description: reflect.MakeFunc with user-controlled type or function definition
+  anti_patterns:
+  - filepath.Clean
+  - allowlist
+  - whitelist
+  - filepath.Base(
+  - filepath.Ext(
+  - path.Clean(
+  - validPlugins[
+  - allowedPlugins[
+  - pluginMap[
+  - allowedMethods[
+  - validMethods[
+  - methodMap[
+  - switch name {
+  - switch method {
+  - switch field {
+  - registeredPlugins
+  - pluginRegistry
+  - chi.URLParam
+  - gin.H{
+  - echo.Map{
+  - middleware.Recover
+  - middleware.Logger
+  context_awareness:
+    surrounding_context_patterns:
+    - import\s+"plugin"
+    - import\s+"reflect"
+    - import\s+"unsafe"
+    - plugin\.Open\s*\(
+    - reflect\.ValueOf\s*\(
+    - reflect\.TypeOf\s*\(
+    - unsafe\.Pointer\s*\(
+    - \.MethodByName\s*\(
+    - \.FieldByName\s*\(
+    taint_source_indicators:
+    - r\.FormValue\s*\(
+    - r\.URL\.Query\(\)
+    - r\.PostFormValue\s*\(
+    - r\.Header\.Get\s*\(
+    - c\.Query\s*\(
+    - c\.Param\s*\(
+    - c\.PostForm\s*\(
+    - ctx\.QueryParam\s*\(
+    - ctx\.Param\s*\(
+    - chi\.URLParam\s*\(
+    - json\.NewDecoder\s*\(r\.Body\)
+    - io\.ReadAll\s*\(r\.Body\)
+    - os\.Getenv\s*\(
+    taint_sink_indicators:
+    - plugin\.Open\s*\(
+    - \.Lookup\s*\(
+    - \.MethodByName\s*\(
+    - \.FieldByName\s*\(
+    - \.Call\s*\(
+    - reflect\.NewAt\s*\(
+    - reflect\.MakeFunc\s*\(
+    - unsafe\.Pointer\s*\(
+    sanitization_patterns:
+    - filepath\.Clean\s*\(
+    - filepath\.Base\s*\(
+    - filepath\.Ext\s*\(
+    - regexp\.MustCompile\s*\(
+    - regexp\.MatchString\s*\(
+    - allowedPlugins\[
+    - allowedMethods\[
+    - pluginMap\[
+    - methodMap\[
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * exploitability_score / 10
+    exploitability_score: 7.0
+    base_risk: High
+    environmental_modifier: Critical if application loads external plugins or uses reflect for dispatch
+  exploit_scenario:
+    attack_example: 'A Go web application provides a plugin system where administrators can load extensions. The plugin path
+      is partially derived from user input: plugin.Open(filepath.Join(pluginDir, userInput + ".so")). An attacker supplies
+      "../malicious" to load a crafted shared object from an unexpected directory, achieving arbitrary code execution. Alternatively,
+      a reflect-based API dispatcher uses MethodByName with user input, allowing invocation of unintended internal methods.
+
+      '
+    example_payload: ../../../tmp/malicious
+    attacker_objective: 'Execute arbitrary code by loading malicious plugins, invoke unintended methods via reflection to
+      bypass authorization, or access private struct fields to leak sensitive data.
+
+      '
+    attack_vector: Network / HTTP request parameters, configuration files
+    exploit_complexity: Medium
+  confidence_factors:
+    pattern_strength: 0.82
+    context_match: 0.78
+    proximity_to_user_input: 0.85
+    sanitization_absence: 0.8
+    false_positive_likelihood: Medium - plugin.Open with hardcoded paths is safe
+    false_negative_likelihood: High for indirect assignment chains from user input to reflect calls
+  impact: 'Dynamic plugin loading or reflection with user-controlled names can
+
+    execute arbitrary code or access unintended struct fields and methods.
+
+    Plugin injection leads to full remote code execution. Reflect-based
+
+    dispatch can bypass authorization by invoking admin-only methods,
+
+    and unsafe pointer manipulation can cause memory corruption or
+
+    information disclosure.
+
+    '
+  remediation: "Never load plugins based on user input:\n\n  // UNSAFE: User-controlled plugin path\n  p, err := plugin.Open(userInput)\
+    \  // VULNERABLE\n\n  // SAFE: Use a strict allowlist for permitted plugin paths\n  allowedPlugins := map[string]string{\n\
+    \      \"auth\":    \"/opt/plugins/auth.so\",\n      \"logging\": \"/opt/plugins/logging.so\",\n  }\n  pluginPath, ok\
+    \ := allowedPlugins[userInput]\n  if !ok {\n      return fmt.Errorf(\"unknown plugin: %s\", userInput)\n  }\n  p, err\
+    \ := plugin.Open(pluginPath)\n\n  // UNSAFE: Reflect dispatch with user input\n  reflect.ValueOf(svc).MethodByName(userInput).Call(nil)\
+    \  // VULNERABLE\n\n  // SAFE: Use explicit function dispatch maps instead of reflection\n  handlers := map[string]func()\
+    \ error{\n      \"create\": svc.Create,\n      \"delete\": svc.Delete,\n      \"list\":   svc.List,\n  }\n  handler, ok\
+    \ := handlers[userInput]\n  if !ok {\n      return fmt.Errorf(\"unknown action: %s\", userInput)\n  }\n  return handler()\n\
+    \n  // With gin framework\n  func pluginHandler(c *gin.Context) {\n      name := c.Param(\"plugin\")\n      if _, ok :=\
+    \ allowedPlugins[name]; !ok {\n          c.JSON(403, gin.H{\"error\": \"plugin not allowed\"})\n          return\n   \
+    \   }\n  }\n\n  // With echo framework\n  func actionHandler(c echo.Context) error {\n      action := c.Param(\"action\"\
+    )\n      handler, ok := actionMap[action]\n      if !ok {\n          return c.JSON(400, echo.Map{\"error\": \"invalid\
+    \ action\"})\n      }\n      return handler(c)\n  }\n\nAvoid reflect.MethodByName/FieldByName with user-controlled strings.\n\
+    Use filepath.Clean and filepath.Base to sanitize path inputs before any file operation.\nNever use unsafe.Pointer with\
+    \ data derived from user input.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/94.html
+  - https://owasp.org/Top10/A03_2021-Injection/
+  - https://pkg.go.dev/plugin
+  - https://pkg.go.dev/reflect
+  - https://pkg.go.dev/unsafe
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: high
+    original_author: security-rules-team
+    min_go_version: '1.13'
+    applicable_frameworks:
+    - plugin
+    - reflect
+    - unsafe
+    - net/http
+    - gin
+    - echo
+    - chi
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-002
+    - GO-PATH-001
+    - GO-AUTH-002
+    escalation_chain: 'Unsafe reflect or plugin loading can be reached via path traversal (GO-PATH-001) that allows placing
+      a malicious .so file, or via command injection (GO-INJ-002) that writes a plugin to disk. It directly escalates to remote
+      code execution.
+
+      '
+    data_flow_dependencies:
+    - HTTP handler input parsing
+    - Plugin directory filesystem permissions
+    - Reflect-based API dispatch registration
+  detection_layer: 1
+- rule_id: GO-INJ-006
+  title: XML External Entity (XXE) Injection
+  description: 'Detects XML parsing in Go using encoding/xml or third-party XML libraries where external entity processing
+    may lead to file disclosure or SSRF. Go''s encoding/xml does not support external entities by default but third-party
+    parsers (libxml2 bindings, etree) may be vulnerable.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-611
+  owasp: A05:2021-Security-Misconfiguration
+  tags:
+  - xxe
+  - xml-injection
+  - file-disclosure
+  - ssrf
+  - go
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: xml\.NewDecoder\s*\(\s*(?:r\.Body|req\.Body|request\.Body|body|reader)\b
+    description: xml.NewDecoder from HTTP request body
+  - type: regex
+    pattern: xml\.Unmarshal\s*\(\s*(?:body|data|input|content|payload)\b
+    description: xml.Unmarshal with user-controlled bytes
+  - type: regex
+    pattern: etree\.ReadFrom\s*\(\s*(?:r\.Body|req\.Body|body|reader)\b
+    description: etree XML parser from user input
+  - type: regex
+    pattern: xmlquery\.Parse\s*\(\s*(?:r\.Body|req\.Body|body|reader)\b
+    description: xmlquery parser with user-controlled reader
+  - type: regex
+    pattern: libxml2\.(?:Parse|Read)\w*\s*\([^)]*(?:r\.Body|body|input|data)\b
+    description: libxml2 Go bindings with user data
+  anti_patterns:
+  - encoding/xml
+  - xml.NewDecoder.*DisallowEntities
+  - sanitize
+  - json.Unmarshal
+  bypass_variants:
+  - description: DTD-based entity expansion
+    pattern: <!DOCTYPE.*<!ENTITY
+  - description: Parameter entity injection
+    pattern: <!ENTITY.*%.*SYSTEM
+  evasion_indicators:
+  - External entity via DTD
+  - Parameter entities
+  encoding_variants:
+  - type: utf16
+    pattern: \\xff\\xfe.*DOCTYPE
+  multi_function_chain_patterns:
+  - r.Body -> ioutil.ReadAll(r.Body) -> xml.Unmarshal(body)
+  - r.Body -> xml.NewDecoder(r.Body).Decode(&obj)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: File disclosure and SSRF via XML entities
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.Body, io.ReadAll(r.Body)
+    sink: xml.Unmarshal(), xml.NewDecoder().Decode()
+    through: Direct XML parsing of request body
+  impact: 'XXE enables reading local files, SSRF to internal services, and DoS
+
+    via entity expansion. Go''s stdlib is safe by default but third-party
+
+    XML libraries may be vulnerable.
+
+    '
+  remediation: 'Use Go''s encoding/xml which is safe by default. For third-party XML
+
+    libraries, disable external entity resolution. Prefer JSON over XML.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/611.html
+  - https://pkg.go.dev/encoding/xml
+  context_awareness:
+    surrounding_context_patterns:
+    - import "encoding/xml"
+    - etree
+    - xmlquery
+    - libxml2
+    taint_source_indicators:
+    - r.Body
+    - req.Body
+    - request.Body
+    - c.Request().Body
+    taint_sink_indicators:
+    - xml.Unmarshal(
+    - xml.NewDecoder(
+    - etree.ReadFrom(
+    - xmlquery.Parse(
+    sanitization_patterns:
+    - encoding/xml
+    - json.Unmarshal
+    - DisallowEntities
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * library_risk_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'A Go API using a third-party XML parser accepts XML uploads.
+
+      Attacker sends: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><data>&xxe;</data>
+
+      '
+    example_payload: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>
+    attacker_objective: Read local files or perform SSRF via XML entity resolution
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: medium
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-003
+- rule_id: GO-INJ-007
+  title: Server-Side Request Forgery (SSRF)
+  description: 'Detects SSRF where user-controlled URLs are passed to http.Get, http.Post, http.Client.Do, or similar HTTP
+    client functions enabling access to internal services and cloud metadata endpoints.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.89
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  tags:
+  - ssrf
+  - url-injection
+  - internal-access
+  - go
+  - net-http
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: http\.(?:Get|Post|Head|PostForm)\s*\(\s*(?:url|target|endpoint|addr|host|param|input|user)\b
+    description: http.Get/Post with user-controlled URL
+  - type: regex
+    pattern: http\.(?:Get|Post|Head)\s*\(\s*(?:r\.|req\.|request\.|c\.)(?:FormValue|URL\.Query|Param|QueryParam)\b
+    description: HTTP function with request parameter URL
+  - type: regex
+    pattern: (?:client|httpClient)\.(?:Do|Get|Post|Head)\s*\([^)]*(?:url|target|endpoint|param|input|user)\b
+    description: http.Client method with user-controlled URL
+  - type: regex
+    pattern: http\.NewRequest\s*\(\s*[^,]+,\s*(?:url|target|param|input|user)\b
+    description: http.NewRequest with user-controlled URL
+  - type: regex
+    pattern: fmt\.Sprintf\s*\(\s*"https?://[^"]*%s[^"]*"[^)]*(?:param|input|user|host|target)\b[^)]*\)[\s\S]{0,100}http\.
+    description: URL built via Sprintf with user input then used in HTTP call
+  anti_patterns:
+  - url.Parse
+  - ALLOWED_HOSTS
+  - isPrivateIP
+  - validateURL
+  - net.ParseIP
+  - allowlist
+  - blocklist
+  bypass_variants:
+  - description: DNS rebinding
+    pattern: net\.LookupHost.*(?:param|user)
+  - description: IP encoding confusion
+    pattern: 0x7f000001|2130706433
+  evasion_indicators:
+  - DNS rebinding
+  - Decimal/hex IP encoding
+  - URL parser differentials
+  encoding_variants:
+  - type: decimal_ip
+    pattern: '2130706433'
+  - type: octal_ip
+    pattern: 0177\\.0\\.0\\.1
+  multi_function_chain_patterns:
+  - r.FormValue('url') -> http.Get(url)
+  - c.QueryParam('target') -> http.NewRequest('GET', target, nil)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Access internal services and cloud metadata
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.FormValue(), c.QueryParam(), mux.Vars()
+    sink: http.Get(), http.Client.Do()
+    through: Direct URL construction from user input
+  impact: 'SSRF enables access to internal services, cloud metadata endpoints
+
+    (169.254.169.254), port scanning, and credential theft.
+
+    '
+  remediation: 'Validate URLs against an allowlist. Block private IP ranges.
+
+    Use net.ParseIP to validate IP addresses. Implement DNS resolution
+
+    checks to prevent rebinding attacks.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/918.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import "net/http"
+    - http.Client
+    - http.Get
+    - http.NewRequest
+    taint_source_indicators:
+    - r.FormValue(
+    - r.URL.Query(
+    - c.QueryParam(
+    - c.Param(
+    - mux.Vars(
+    taint_sink_indicators:
+    - http.Get(
+    - http.Post(
+    - http.Client.Do(
+    - http.NewRequest(
+    sanitization_patterns:
+    - url.Parse(
+    - ALLOWED_HOSTS
+    - isPrivateIP
+    - validateURL
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - url_validation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A proxy endpoint fetches user-provided URLs via http.Get(r.FormValue("url")).
+
+      Attacker sends url=http://169.254.169.254/latest/meta-data/ to access cloud metadata.
+
+      '
+    example_payload: http://169.254.169.254/latest/meta-data/iam/security-credentials/
+    attacker_objective: Access internal services and steal cloud credentials via SSRF
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-006
+- rule_id: GO-INJ-008
+  title: Path Traversal in File Operations
+  description: 'Detects path traversal where user-controlled file paths are passed to os.Open, os.Create, ioutil.ReadFile,
+    or http.ServeFile without proper sanitization via filepath.Clean or filepath.Base.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.91
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - directory-traversal
+  - file-access
+  - lfi
+  - go
+  detection_layer: 1
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: os\.(?:Open|OpenFile|Create|ReadFile|Stat|Remove)\s*\(\s*(?:r\.|req\.|c\.|param|input|user|filename|filepath|path)\b
+    description: os file operations with user-controlled path
+  - type: regex
+    pattern: ioutil\.(?:ReadFile|ReadDir|WriteFile)\s*\(\s*(?:param|input|user|filename|path)\b
+    description: ioutil file operations with user-controlled path
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*\w+\s*,\s*\w+\s*,\s*(?:param|input|filename|path|r\.)\b
+    description: http.ServeFile with user-controlled path
+  - type: regex
+    pattern: os\.(?:Open|ReadFile)\s*\(\s*fmt\.Sprintf\s*\(\s*"[^"]*%s[^"]*"\s*,\s*(?:param|input|user|filename)\b
+    description: File operation with Sprintf-constructed path
+  - type: regex
+    pattern: os\.(?:Open|ReadFile)\s*\(\s*(?:r\.FormValue|c\.Param|c\.QueryParam|mux\.Vars)\b
+    description: Direct file operation from request parameter
+  anti_patterns:
+  - filepath.Clean
+  - filepath.Base
+  - filepath.Join
+  - strings.Contains.*".."
+  - path.Clean
+  - http.Dir(
+  - http.FileServer
+  - allowlist
+  bypass_variants:
+  - description: Double-encoded traversal
+    pattern: '%252e%252e%252f'
+  - description: Null byte injection
+    pattern: '%00'
+  evasion_indicators:
+  - Double URL encoding
+  - Null byte truncation
+  - Unicode normalization
+  encoding_variants:
+  - type: double_encoding
+    pattern: '%252e%252e'
+  - type: utf8_overlong
+    pattern: '%c0%ae%c0%ae'
+  multi_function_chain_patterns:
+  - c.Param('file') -> os.Open(file)
+  - r.FormValue('path') -> ioutil.ReadFile(path)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Read arbitrary files including credentials and source code
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.FormValue(), c.Param(), mux.Vars()
+    sink: os.Open(), ioutil.ReadFile(), http.ServeFile()
+    through: Direct or Sprintf-constructed path
+  impact: 'Path traversal enables reading arbitrary files (/etc/passwd, app config,
+
+    credentials), writing/overwriting files, and potentially RCE via
+
+    cron jobs or service configuration files.
+
+    '
+  remediation: 'Use filepath.Base() to extract filename only. Use filepath.Clean() and
+
+    verify the result starts with the expected base directory. Use filepath.Join()
+
+    with a base directory and validate the resolved path stays within bounds.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://pkg.go.dev/path/filepath
+  context_awareness:
+    surrounding_context_patterns:
+    - import "os"
+    - import "io/ioutil"
+    - import "path/filepath"
+    - import "net/http"
+    taint_source_indicators:
+    - r.FormValue(
+    - c.Param(
+    - c.QueryParam(
+    - mux.Vars(
+    - r.URL.Query(
+    taint_sink_indicators:
+    - os.Open(
+    - os.ReadFile(
+    - ioutil.ReadFile(
+    - http.ServeFile(
+    - os.Create(
+    sanitization_patterns:
+    - filepath.Clean(
+    - filepath.Base(
+    - filepath.Join(
+    - strings.Contains.*".."
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - path_validation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A file download endpoint uses os.Open(c.Param("file")). Attacker sends
+
+      file=../../../etc/passwd to read system files via directory traversal.
+
+      '
+    example_payload: ../../../etc/passwd
+    attacker_objective: Read arbitrary server files including credentials and configs
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-002
+    - GO-INJ-005
+- rule_id: GO-INJ-009
+  title: Log Injection via Unsanitized User Input
+  description: 'Detects log injection where user-controlled input is written to log output without sanitization, enabling
+    log forging, SIEM evasion, and potential log-based injection attacks.
+
+    '
+  language: go
+  category: injection
+  severity: Medium
+  confidence: 0.84
+  cwe: CWE-117
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  tags:
+  - log-injection
+  - log-forging
+  - siem-evasion
+  - go
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: log\.(?:Print|Printf|Println|Fatal|Fatalf|Panic)\s*\([^)]*(?:r\.FormValue|c\.Param|c\.QueryParam|r\.URL\.Query)\b
+    description: stdlib log with raw request parameters
+  - type: regex
+    pattern: (?:logger|log)\.\w+\s*\(\s*"[^"]*"\s*,\s*(?:r\.FormValue|c\.Param|c\.QueryParam|request\.Form)\b
+    description: Logger with raw request parameter values
+  - type: regex
+    pattern: zap\.(?:String|Any|Error)\s*\(\s*"[^"]*"\s*,\s*(?:r\.FormValue|c\.Param|c\.QueryParam|input|user)\b
+    description: Zap logger with unsanitized user input
+  - type: regex
+    pattern: logrus\.\w+\s*\([^)]*(?:r\.FormValue|c\.Param|c\.QueryParam|input|user)\b
+    description: Logrus with unsanitized user input
+  - type: regex
+    pattern: fmt\.Fprintf\s*\(\s*(?:os\.Stderr|logFile|w)\s*,\s*"[^"]*%s[^"]*"\s*,\s*(?:r\.FormValue|c\.Param|input|user)\b
+    description: Fprintf to log destination with user input
+  anti_patterns:
+  - strings.ReplaceAll.*\n
+  - strings.ReplaceAll.*\r
+  - url.QueryEscape
+  - sanitizeLogInput
+  - html.EscapeString
+  bypass_variants:
+  - description: Newline injection for log forging
+    pattern: '%0a|%0d|\\n|\\r'
+  - description: ANSI escape code injection
+    pattern: \\x1b\\[
+  evasion_indicators:
+  - Newline injection
+  - ANSI escape sequences
+  - Log format confusion
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%0[aAdD]'
+  - type: unicode
+    pattern: \\u000[aAdD]
+  multi_function_chain_patterns:
+  - 'r.FormValue(''username'') -> log.Printf(''Login: %s'', username)'
+  - c.Param('id') -> logger.Info('Accessed resource', zap.String('id', id))
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Log forging for audit trail manipulation and SIEM evasion
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.FormValue(), c.Param()
+    sink: log.Printf(), zap.String(), logrus.Info()
+    through: Direct logging of user input
+  impact: 'Log injection enables log forging (fake log entries), SIEM evasion,
+
+    audit trail manipulation, and potential log-based injection if logs
+
+    are processed by other systems.
+
+    '
+  remediation: 'Sanitize log input by replacing newlines and control characters.
+
+    Use structured logging (zap, logrus) with typed fields. Never
+
+    log raw user input without sanitization.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/117.html
+  - https://owasp.org/www-community/attacks/Log_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - import "log"
+    - import "go.uber.org/zap"
+    - import "github.com/sirupsen/logrus"
+    taint_source_indicators:
+    - r.FormValue(
+    - c.Param(
+    - c.QueryParam(
+    - mux.Vars(
+    taint_sink_indicators:
+    - log.Printf(
+    - log.Println(
+    - zap.String(
+    - logrus.Info(
+    - fmt.Fprintf(
+    sanitization_patterns:
+    - strings.ReplaceAll.*\\n
+    - url.QueryEscape
+    - sanitizeLogInput
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * log_processing_risk
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'App logs login attempts: log.Printf("Login attempt: %s", r.FormValue("user")).
+
+      Attacker sends user=admin\nLogin successful: admin to forge a success entry.
+
+      '
+    example_payload: 'admin\nLogin successful: admin [APPROVED]'
+    attacker_objective: Forge log entries to hide attacks or create false audit trails
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: false
+    high_impact_flag: false
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-002
+- rule_id: GO-INJ-010
+  title: Open Redirect via User-Controlled URL
+  description: 'Detects open redirect vulnerabilities where user-controlled URLs are passed to http.Redirect or framework
+    redirect functions without validating the destination against an allowlist.
+
+    '
+  language: go
+  category: injection
+  severity: Medium
+  confidence: 0.87
+  cwe: CWE-601
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - open-redirect
+  - url-redirect
+  - phishing
+  - go
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: http\.Redirect\s*\(\s*\w+\s*,\s*\w+\s*,\s*(?:r\.FormValue|r\.URL\.Query|param|input|url|redirect|next|return|target)\b
+    description: http.Redirect with user-controlled URL
+  - type: regex
+    pattern: c\.Redirect\s*\(\s*\d+\s*,\s*(?:c\.Param|c\.QueryParam|c\.FormValue|param|url|redirect|next)\b
+    description: Gin/Echo redirect with user-controlled URL
+  - type: regex
+    pattern: w\.Header\(\)\.Set\s*\(\s*"Location"\s*,\s*(?:r\.FormValue|param|input|url|redirect|next)\b
+    description: Manual Location header from user input
+  - type: regex
+    pattern: http\.Redirect\s*\([^)]*fmt\.Sprintf\s*\(\s*"[^"]*%s[^"]*"\s*,\s*(?:r\.FormValue|param|input|user)\b
+    description: Redirect with Sprintf-constructed URL from user input
+  anti_patterns:
+  - url.Parse
+  - ALLOWED_DOMAINS
+  - isRelativeURL
+  - strings.HasPrefix.*/
+  - validateRedirect
+  - allowlist
+  bypass_variants:
+  - description: Protocol-relative URL
+    pattern: //evil\\.com
+  - description: JavaScript protocol
+    pattern: 'javascript:'
+  evasion_indicators:
+  - Protocol-relative URLs
+  - JavaScript URIs
+  - Data URIs
+  - URL encoding
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%2f%2f'
+  - type: backslash
+    pattern: /\\\\evil\\.com
+  multi_function_chain_patterns:
+  - r.FormValue('redirect') -> http.Redirect(w, r, redirect, 302)
+  - c.QueryParam('next') -> c.Redirect(302, next)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Phishing and credential theft via trusted domain redirect
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.FormValue(), c.QueryParam()
+    sink: http.Redirect(), c.Redirect()
+    through: Direct URL pass to redirect function
+  impact: 'Open redirect enables phishing attacks using the target domain''s
+
+    reputation, OAuth token theft via redirect_uri manipulation, and
+
+    SSRF when redirect follows are automatic.
+
+    '
+  remediation: 'Validate redirect URLs against an allowlist of domains. Only allow
+
+    relative redirects (starting with /). Use url.Parse to validate
+
+    the host before redirecting.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/601.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import "net/http"
+    - http.Redirect
+    - c.Redirect
+    taint_source_indicators:
+    - r.FormValue(
+    - r.URL.Query(
+    - c.QueryParam(
+    - c.Param(
+    taint_sink_indicators:
+    - http.Redirect(
+    - c.Redirect(
+    - w.Header().Set("Location"
+    sanitization_patterns:
+    - url.Parse(
+    - ALLOWED_DOMAINS
+    - isRelativeURL
+    - validateRedirect
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * redirect_exposure_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'Login page redirects via http.Redirect(w, r, r.FormValue("next"), 302).
+
+      Attacker crafts: /login?next=https://evil.com/steal-creds to phish users.
+
+      '
+    example_payload: https://evil.com/steal-credentials
+    attacker_objective: Redirect users to malicious site for credential theft
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: false
+    high_impact_flag: false
+    related_rules:
+    - GO-INJ-007
+    - GO-INJ-001
+- rule_id: GO-INJ-011
+  title: MongoDB NoSQL Injection
+  description: 'Detects NoSQL injection where user-controlled input is passed directly to MongoDB queries via the official
+    Go driver, enabling query operator injection and authentication bypass.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-943
+  owasp: A03:2021-Injection
+  tags:
+  - nosql-injection
+  - mongodb
+  - authentication-bypass
+  - go
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: \.Find(?:One)?\s*\(\s*ctx\s*,\s*bson\.(?:M|D)\s*\{[^}]*:\s*(?:r\.FormValue|c\.Param|c\.QueryParam|param|input|user)\b
+    description: MongoDB Find with user input in BSON filter
+  - type: regex
+    pattern: bson\.(?:M|D)\s*\{[^}]*"\$(?:where|regex|gt|ne|in|or)"[^}]*(?:r\.FormValue|param|input|user)\b
+    description: MongoDB operator with user-controlled value
+  - type: regex
+    pattern: \.(?:UpdateOne|DeleteOne|Aggregate)\s*\(\s*ctx\s*,\s*(?:filter|query)\b[\s\S]{0,100}(?:r\.FormValue|c\.Param|input|user)\b
+    description: MongoDB mutation with user-derived filter
+  - type: regex
+    pattern: json\.Unmarshal\s*\([^)]*(?:body|data)\b[^)]*\)[\s\S]{0,200}\.Find(?:One)?\s*\(\s*ctx\s*,\s*(?:filter|query)\b
+    description: JSON-unmarshaled body used as MongoDB filter
+  anti_patterns:
+  - primitive.ObjectIDFromHex
+  - bson.E{
+  - validate
+  - sanitize
+  - allowlist
+  bypass_variants:
+  - description: Operator injection via JSON body
+    pattern: '\\$(?:gt|ne|regex).*:'
+  - description: $where JavaScript injection
+    pattern: \\$where.*function
+  evasion_indicators:
+  - MongoDB operator injection via JSON
+  - $where JS execution
+  encoding_variants:
+  - type: unicode
+    pattern: \\u0024where
+  multi_function_chain_patterns:
+  - json.Unmarshal(body, &filter) -> collection.FindOne(ctx, filter)
+  - 'r.FormValue(''user'') -> bson.M{''username'': user} -> FindOne()'
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Authentication bypass via operator injection
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.Body, c.Bind()
+    sink: collection.FindOne(), collection.Find()
+    through: JSON unmarshal into BSON filter
+  impact: 'NoSQL injection enables authentication bypass, data exfiltration, and
+
+    server-side JavaScript execution via $where operator.
+
+    '
+  remediation: 'Validate input types strictly. Never pass raw JSON body as MongoDB filter.
+
+    Use explicit bson.M construction with validated values.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/943.html
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection
+  context_awareness:
+    surrounding_context_patterns:
+    - import "go.mongodb.org/mongo-driver"
+    - mongo.Collection
+    - bson.M
+    taint_source_indicators:
+    - r.Body
+    - c.Bind(
+    - c.ShouldBind(
+    - json.Unmarshal(
+    taint_sink_indicators:
+    - .FindOne(
+    - .Find(
+    - .Aggregate(
+    - .UpdateOne(
+    sanitization_patterns:
+    - primitive.ObjectIDFromHex(
+    - validate
+    - sanitize
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - validation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'Login endpoint unmarshals request body into MongoDB filter.
+
+      Attacker sends {"username":"admin","password":{"$ne":""}} to bypass auth.
+
+      '
+    example_payload: '{"username":"admin","password":{"$gt":""}}'
+    attacker_objective: Bypass authentication via MongoDB operator injection
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-003
+- rule_id: GO-INJ-012
+  title: HTTP Header / CRLF Injection
+  description: 'Detects CRLF injection via user-controlled values in HTTP response headers using w.Header().Set(), w.Header().Add(),
+    or framework header methods.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.86
+  cwe: CWE-113
+  owasp: A03:2021-Injection
+  tags:
+  - crlf-injection
+  - header-injection
+  - response-splitting
+  - go
+  detection_layer: 2
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: w\.Header\(\)\.(?:Set|Add)\s*\(\s*[^,]*,\s*(?:r\.FormValue|c\.Param|c\.QueryParam|param|input|user)\b
+    description: Response header set from user input
+  - type: regex
+    pattern: c\.(?:Header|SetHeader)\s*\(\s*[^,]*,\s*(?:c\.Param|c\.QueryParam|param|input|user)\b
+    description: Framework header method with user input
+  - type: regex
+    pattern: w\.Header\(\)\.Set\s*\(\s*"(?:Location|Content-Disposition|Set-Cookie)"[^,]*,\s*[^)]*(?:r\.FormValue|param|input|user)\b
+    description: Sensitive header with user-controlled value
+  anti_patterns:
+  - url.QueryEscape
+  - url.PathEscape
+  - strings.ReplaceAll.*\r
+  - strings.ReplaceAll.*\n
+  - textproto.TrimString
+  bypass_variants:
+  - description: URL-encoded CRLF
+    pattern: '%0[dD]%0[aA]'
+  evasion_indicators:
+  - URL-encoded CRLF
+  - Unicode newlines
+  encoding_variants:
+  - type: url_encoding
+    pattern: '%0[dD]%0[aA]'
+  multi_function_chain_patterns:
+  - r.FormValue('file') -> w.Header().Set('Content-Disposition', file)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Response splitting for XSS and session fixation
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.FormValue(), c.QueryParam()
+    sink: w.Header().Set()
+    through: Direct header value from user input
+  impact: 'CRLF injection enables HTTP response splitting, XSS, cache poisoning,
+
+    and session fixation via injected Set-Cookie headers.
+
+    '
+  remediation: 'Strip \\r and \\n from header values. Use url.QueryEscape() for
+
+    URL-based headers. Go 1.7+ net/http rejects headers with newlines.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/113.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import "net/http"
+    - w.Header()
+    - ResponseWriter
+    taint_source_indicators:
+    - r.FormValue(
+    - c.Param(
+    - c.QueryParam(
+    taint_sink_indicators:
+    - w.Header().Set(
+    - w.Header().Add(
+    - c.Header(
+    sanitization_patterns:
+    - url.QueryEscape(
+    - strings.ReplaceAll.*\\r
+    - textproto.TrimString
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_factor)
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'File download sets w.Header().Set("Content-Disposition", r.FormValue("name")).
+
+      Attacker injects name=file%0d%0aSet-Cookie:%20session=hijacked.
+
+      '
+    example_payload: 'file\r\nSet-Cookie: admin=true'
+    attacker_objective: Inject response headers for session fixation or XSS
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-010
+    - GO-INJ-001
+- rule_id: GO-INJ-013
+  title: Unsafe YAML Deserialization
+  description: 'Detects YAML unmarshaling of user-controlled data that may enable object instantiation attacks in Go applications
+    using gopkg.in/yaml.v2 or gopkg.in/yaml.v3 with custom unmarshalers.
+
+    '
+  language: go
+  category: injection
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - deserialization
+  - yaml
+  - go
+  - gopkg-yaml
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: yaml\.Unmarshal\s*\(\s*(?:body|data|input|content|payload|r\.Body)\b
+    description: yaml.Unmarshal with user-controlled data
+  - type: regex
+    pattern: yaml\.NewDecoder\s*\(\s*(?:r\.Body|req\.Body|body|reader)\b
+    description: yaml.NewDecoder from user-controlled reader
+  - type: regex
+    pattern: yaml\.Unmarshal\s*\(\s*(?:\[\]byte\s*\()?(?:r\.FormValue|c\.Param|input|user)\b
+    description: yaml.Unmarshal from request parameter
+  anti_patterns:
+  - json.Unmarshal
+  - validate
+  - yaml.Node
+  - KnownFields(true)
+  bypass_variants:
+  - description: YAML anchors for DoS
+    pattern: '&anchor.*\\*anchor'
+  evasion_indicators:
+  - YAML anchor expansion
+  - Custom UnmarshalYAML implementations
+  encoding_variants:
+  - type: base64
+    pattern: base64.*yaml\.Unmarshal
+  multi_function_chain_patterns:
+  - ioutil.ReadAll(r.Body) -> yaml.Unmarshal(body, &config)
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Object instantiation and DoS via YAML processing
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.Body, uploaded file
+    sink: yaml.Unmarshal()
+    through: Direct unmarshaling of user data
+  impact: 'YAML deserialization can cause DoS via anchor expansion. Custom
+
+    unmarshalers may enable object instantiation attacks.
+
+    '
+  remediation: 'Prefer JSON over YAML for API input. Use yaml.v3 with KnownFields(true)
+
+    to reject unexpected fields. Validate and size-limit input before parsing.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://pkg.go.dev/gopkg.in/yaml.v3
+  context_awareness:
+    surrounding_context_patterns:
+    - import "gopkg.in/yaml.v2"
+    - import "gopkg.in/yaml.v3"
+    - yaml.Unmarshal
+    taint_source_indicators:
+    - r.Body
+    - io.ReadAll(
+    - ioutil.ReadAll(
+    taint_sink_indicators:
+    - yaml.Unmarshal(
+    - yaml.NewDecoder(
+    sanitization_patterns:
+    - json.Unmarshal
+    - KnownFields(true)
+    - validate
+  severity_scoring:
+    severity_weight: 6
+    risk_score_formula_hint: severity_weight * confidence * custom_unmarshaler_risk
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'Config API accepts YAML via yaml.Unmarshal(body, &config). Attacker sends
+
+      YAML with deeply nested anchors causing exponential memory expansion (billion laughs).
+
+      '
+    example_payload: 'a: &a [*a, *a, *a, *a, *a]'
+    attacker_objective: Cause DoS or exploit custom unmarshalers
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: medium
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - GO-INJ-006
+    - GO-INJ-003
+- rule_id: GO-INJ-014
+  title: GraphQL Injection via Query Construction
+  description: 'Detects GraphQL query construction with user-controlled input via string concatenation or Sprintf, enabling
+    query manipulation, introspection abuse, and resource exhaustion.
+
+    '
+  language: go
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-943
+  owasp: A03:2021-Injection
+  tags:
+  - graphql-injection
+  - query-manipulation
+  - introspection
+  - go
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: fmt\.Sprintf\s*\(\s*"[^"]*(?:query|mutation)\s*\{[^"]*%s[^"]*"[^)]*(?:r\.FormValue|c\.Param|param|input|user)\b
+    description: GraphQL query built via Sprintf with user input
+  - type: regex
+    pattern: '"(?:query|mutation)\s*\{[^"]*"\s*\+\s*(?:r\.FormValue|c\.Param|param|input|user)\b'
+    description: GraphQL query via string concatenation
+  - type: regex
+    pattern: graphql\.Do\s*\([^)]*Params\s*\{[^}]*Query:\s*(?:r\.FormValue|param|query|input)\b
+    description: graphql-go Do with user-controlled query
+  - type: regex
+    pattern: \.Query\s*\(\s*ctx\s*,\s*(?:r\.FormValue|param|input|query|user)\b
+    description: GraphQL query execution with user-controlled string
+  anti_patterns:
+  - graphql.Variables
+  - query complexity
+  - depth limit
+  - persisted queries
+  - allowedQueries
+  bypass_variants:
+  - description: GraphQL batch attack
+    pattern: \\[\\{.*query.*\\},\\{.*query
+  - description: Introspection query
+    pattern: __schema|__type
+  evasion_indicators:
+  - Query batching
+  - Introspection abuse
+  - Alias-based DoS
+  encoding_variants:
+  - type: unicode
+    pattern: \\u007b.*\\u007d
+  multi_function_chain_patterns:
+  - 'r.FormValue(''query'') -> graphql.Do(ctx, Params{Query: query})'
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Data exfiltration and DoS via query manipulation
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.Body, r.FormValue()
+    sink: graphql.Do(), schema.Query()
+    through: User-controlled query string
+  impact: 'GraphQL injection enables unauthorized data access, introspection-based
+
+    schema enumeration, and DoS via deeply nested or aliased queries.
+
+    '
+  remediation: 'Use parameterized GraphQL variables. Implement query complexity limits
+
+    and max depth. Disable introspection in production. Use persisted queries.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/943.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import "github.com/graphql-go/graphql"
+    - graphql.NewSchema
+    - graphql.Do
+    taint_source_indicators:
+    - r.Body
+    - r.FormValue(
+    - c.Bind(
+    - json.Unmarshal(
+    taint_sink_indicators:
+    - graphql.Do(
+    - .Query(
+    - schema.Exec(
+    sanitization_patterns:
+    - graphql.Variables
+    - complexity
+    - depth limit
+    - persisted queries
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - query_protection_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'GraphQL endpoint accepts raw query string. Attacker sends deeply nested
+
+      query with aliases to cause resource exhaustion or extract sensitive data.
+
+      '
+    example_payload: '{__schema{types{name fields{name type{name}}}}}'
+    attacker_objective: Extract schema via introspection or cause DoS via complex queries
+  confidence_factors:
+    pattern_strength: medium
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-011
+- rule_id: GO-INJ-015
+  title: ReDoS via User-Controlled Regex Pattern
+  description: 'Detects regex compilation or matching with user-controlled patterns that may cause catastrophic backtracking.
+    Go''s regexp uses RE2 which is safe from backtracking, but regexp/syntax and third-party PCRE bindings are vulnerable.
+
+    '
+  language: go
+  category: injection
+  severity: Medium
+  confidence: 0.83
+  cwe: CWE-1333
+  owasp: A03:2021-Injection
+  tags:
+  - redos
+  - regex-injection
+  - dos
+  - go
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: regexp\.(?:Compile|MustCompile|Match)\s*\(\s*(?:r\.FormValue|c\.Param|c\.QueryParam|param|input|user|pattern|search)\b
+    description: regexp.Compile with user-controlled pattern
+  - type: regex
+    pattern: regexp\.(?:Compile|MustCompile)\s*\(\s*fmt\.Sprintf\s*\([^)]*(?:r\.FormValue|param|input|user)\b
+    description: regexp.Compile with Sprintf user input
+  - type: regex
+    pattern: pcre\.(?:Compile|MustCompile)\s*\(\s*(?:param|input|user|pattern|search)\b
+    description: PCRE compile with user-controlled pattern (vulnerable to backtracking)
+  - type: regex
+    pattern: (?:go-pcre|pcre2)\.Compile\s*\(\s*(?:r\.FormValue|param|input|user|pattern)\b
+    description: Third-party PCRE bindings with user pattern
+  anti_patterns:
+  - regexp.QuoteMeta
+  - regexp/syntax
+  - timeout
+  - context.WithTimeout
+  - allowedPatterns
+  bypass_variants:
+  - description: Catastrophic backtracking pattern
+    pattern: \\(a\\+\\)\\+
+  - description: Nested quantifiers
+    pattern: \\([^)]*[+*]\\)[+*]
+  evasion_indicators:
+  - User-controlled regex with nested quantifiers
+  - PCRE-specific features
+  encoding_variants:
+  - type: unicode
+    pattern: \\u005b.*\\u005d
+  multi_function_chain_patterns:
+  - r.FormValue('pattern') -> regexp.Compile(pattern) -> pattern.FindAll()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: CPU exhaustion via regex backtracking
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: false
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.FormValue(), c.QueryParam()
+    sink: regexp.Compile(), pcre.Compile()
+    through: Direct parameter to regex compilation
+  impact: 'ReDoS causes CPU exhaustion making the service unresponsive. Go''s stdlib
+
+    regexp (RE2) is immune to backtracking but PCRE bindings are vulnerable.
+
+    '
+  remediation: 'Use Go''s stdlib regexp (RE2-based, immune to backtracking). Escape user
+
+    input with regexp.QuoteMeta(). If PCRE is needed, use context.WithTimeout.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/1333.html
+  - https://pkg.go.dev/regexp
+  context_awareness:
+    surrounding_context_patterns:
+    - import "regexp"
+    - import pcre
+    - go-pcre
+    taint_source_indicators:
+    - r.FormValue(
+    - c.QueryParam(
+    - c.Param(
+    taint_sink_indicators:
+    - regexp.Compile(
+    - regexp.MustCompile(
+    - pcre.Compile(
+    sanitization_patterns:
+    - regexp.QuoteMeta(
+    - context.WithTimeout
+    - allowedPatterns
+  severity_scoring:
+    severity_weight: 5
+    risk_score_formula_hint: severity_weight * confidence * pcre_usage_factor
+    exploitability_score: Medium
+  exploit_scenario:
+    attack_example: 'Search API compiles user pattern: regexp.Compile(r.FormValue("q")).
+
+      With Go stdlib this is safe (RE2), but with PCRE bindings attacker
+
+      sends q=(a+)+$ to cause catastrophic backtracking.
+
+      '
+    example_payload: (a+)+$
+    attacker_objective: Cause DoS via regex CPU exhaustion
+  confidence_factors:
+    pattern_strength: medium
+    context_match: medium
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - GO-INJ-001
+    - GO-INJ-009

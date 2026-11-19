@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "secureai.fullname" . }}-api
+  labels:
+    {{- include "secureai.apiLabels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.api.enabled }}
+  replicas: {{ .Values.api.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "secureai.apiSelectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "secureai.apiSelectorLabels" . | nindent 8 }}
+      {{- with .Values.api.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          # ── Probes ──────────────────────────────────────────
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # ── Resources ───────────────────────────────────────
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          # ── Security context (container level) ──────────────
+          securityContext:
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          # ── Environment ─────────────────────────────────────
+          envFrom:
+            - configMapRef:
+                name: {{ include "secureai.configMapName" . }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "secureai.secretName" . }}
+                  key: DATABASE_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "secureai.secretName" . }}
+                  key: JWT_SECRET
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "secureai.secretName" . }}
+                  key: ENCRYPTION_KEY
+            - name: PPLX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "secureai.secretName" . }}
+                  key: PPLX_API_KEY
+                  optional: true
+            {{- if .Values.redis.enabled }}
+            - name: QUEUE_BACKEND
+              value: "redis"
+            - name: QUEUE_REDIS_URL
+              value: {{ .Values.redis.url | quote }}
+            {{- end }}
+            {{- range .Values.api.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          # ── Volumes ─────────────────────────────────────────
+          volumeMounts:
+            - name: scan-temp
+              mountPath: /tmp/scans
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: scan-temp
+          emptyDir:
+            sizeLimit: {{ .Values.scanTemp.sizeLimit }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+      # ── Scheduling ────────────────────────────────────────
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "secureai.apiSelectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+        {{- with .Values.api.affinity }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

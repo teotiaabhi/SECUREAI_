@@ -1,0 +1,69 @@
+# ==============================================================================
+# Test:     positive_05_no_limits
+# Expected: TRIGGER rule DEVOPS-YAML-007 (Missing resource limits)
+# Category: DevOps
+# Language: YAML (Kubernetes)
+# ==============================================================================
+# Description: Kubernetes Deployment where containers have no resources.limits
+# defined. Without resource limits a single pod can consume all node CPU and
+# memory, causing starvation of other workloads and potential node failure.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-processor
+  namespace: data-pipeline
+  labels:
+    app: data-processor
+    team: data-engineering
+    environment: production
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: data-processor
+  template:
+    metadata:
+      labels:
+        app: data-processor
+        version: "3.1.0"
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: data-processor-sa
+      containers:
+        - name: processor
+          image: registry.internal.io/data/processor:3.1.0
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          env:
+            - name: KAFKA_BROKERS
+              value: "kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092"
+            - name: CONSUMER_GROUP
+              value: "data-processor-prod"
+            - name: BATCH_SIZE
+              value: "500"
+            - name: DB_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: processor-db-creds
+                  key: url
+          # VULNERABLE: No resources block at all - no requests or limits
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5

@@ -1,0 +1,195 @@
+rules:
+- rule_id: SSRF-PHP-001
+  title: SSRF via file_get_contents/curl with User URL
+  description: 'Detects PHP HTTP requests with user-controlled URLs using file_get_contents, cURL (curl_setopt), fopen, SoapClient,
+    and Guzzle HTTP client. Covers direct superglobal injection and variable-based URL parameters.
+
+    '
+  language: php
+  category: ssrf
+  severity: High
+  confidence: 0.91
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  tags:
+  - ssrf
+  - file-get-contents
+  - curl
+  - guzzle
+  - soapclient
+  - cloud-metadata
+  patterns:
+  - type: regex
+    pattern: file_get_contents\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[
+  - type: regex
+    pattern: curl_setopt\s*\([^,]*,\s*CURLOPT_URL\s*,\s*\$(?:_GET|_POST|_REQUEST|url|input|target)\b
+  - type: regex
+    pattern: fopen\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[
+  - type: regex
+    pattern: file_get_contents\s*\(\s*\$\w*(?:url|uri|target|link|endpoint)\b
+  - type: regex
+    pattern: new\s+SoapClient\s*\(\s*\$(?:_GET|_POST|_REQUEST|url|input|target)\b
+    description: SoapClient instantiated with user-controlled WSDL URL
+  - type: regex
+    pattern: new\s+GuzzleHttp\\Client.*->(?:get|post|put|delete|request)\s*\(\s*\$(?:_GET|_POST|_REQUEST|url|input|target)\b
+    description: Guzzle HTTP client with user-controlled URL
+  - type: regex
+    pattern: \$(?:client|guzzle|http)\s*->\s*(?:get|post|put|delete|request)\s*\(\s*\$(?:_GET|_POST|_REQUEST|url|input|target|uri|endpoint)\b
+    description: HTTP client object method with user-controlled URL variable
+  - type: regex
+    pattern: simplexml_load_file\s*\(\s*\$(?:_GET|_POST|_REQUEST|url|input|target)\b
+    description: simplexml_load_file with user-controlled URL (SSRF + XXE)
+  - type: regex
+    pattern: copy\s*\(\s*\$(?:_GET|_POST|_REQUEST)\[.*\]\s*,
+    description: PHP copy() with user-controlled source URL
+  - type: regex
+    pattern: getimagesize\s*\(\s*\$(?:_GET|_POST|_REQUEST|url|input|target)\b
+    description: getimagesize() with user-controlled URL for image validation bypass
+  anti_patterns:
+  - filter_var.*FILTER_VALIDATE_URL
+  - parse_url
+  - allowlist
+  - allowed_hosts
+  - ALLOWED_DOMAINS
+  - in_array.*allowed
+  - preg_match.*https?://
+  - FILTER_FLAG_NO_PRIV_RANGE
+  - FILTER_FLAG_NO_RES_RANGE
+  - gethostbyname.*filter_var.*FILTER_VALIDATE_IP
+  - isAllowedUrl
+  - validateUrl
+  - checkUrl
+  - wp_safe_remote_get
+  context_awareness:
+    surrounding_context_patterns:
+    - function\s+\w+\s*\(.*\$request
+    - Route::(?:get|post|put|delete)\(
+    - public\s+function\s+\w+\s*\(\s*Request\s+\$request
+    - class\s+\w+Controller
+    - \$app->(?:get|post|put|delete)\(
+    - \$_SERVER\['REQUEST_METHOD'\]
+    - <\?php
+    taint_source_indicators:
+    - \$_GET\[
+    - \$_POST\[
+    - \$_REQUEST\[
+    - \$_SERVER\['HTTP_
+    - \$_COOKIE\[
+    - \$request->(?:input|get|post|query|all)\(
+    - \$request->getParameter\(
+    - file_get_contents\('php://input'\)
+    - json_decode\(.*\$_
+    - \$argv
+    taint_sink_indicators:
+    - file_get_contents\s*\(
+    - curl_setopt\s*\(
+    - fopen\s*\(
+    - readfile\s*\(
+    - new SoapClient\s*\(
+    - simplexml_load_file\s*\(
+    - copy\s*\(
+    - getimagesize\s*\(
+    - GuzzleHttp.*->(?:get|post|request)\s*\(
+    - \$client->(?:get|post|request)\s*\(
+    sanitization_patterns:
+    - filter_var.*FILTER_VALIDATE_URL
+    - parse_url\(.*\)\['host'\]
+    - in_array.*allowed_hosts
+    - gethostbyname.*filter_var
+    - FILTER_FLAG_NO_PRIV_RANGE
+    - FILTER_FLAG_NO_RES_RANGE
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1.0 + exploitability_score) / 2
+    exploitability_score: 0.94
+  exploit_scenario:
+    attack_example: 'A PHP application has a URL preview feature: GET /preview.php?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+      The script uses file_get_contents($_GET[''url'']) to fetch the content. The attacker receives the IAM role name, then
+      follows up with a second request to get the full credentials JSON. With those credentials the attacker can access any
+      AWS service the instance role permits.
+
+      '
+    example_payload: http://169.254.169.254/latest/meta-data/iam/security-credentials/
+    attacker_objective: 'Exfiltrate cloud IAM credentials, read internal configuration files via file:// wrapper, access internal
+      databases (MySQL, Redis, Memcached) on localhost, exploit PHP stream wrappers (php://filter, data://) for additional
+      file-read or code-execution primitives, or perform internal network port scanning.
+
+      '
+    secondary_payloads:
+    - http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+    - http://169.254.169.254/metadata/instance?api-version=2021-02-01
+    - file:///etc/passwd
+    - php://filter/convert.base64-encode/resource=/var/www/html/config.php
+    - dict://127.0.0.1:11211/stats
+    - gopher://127.0.0.1:3306/_
+    - http://127.0.0.1:6379/INFO
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.92
+    proximity_to_user_input: 0.95
+    sanitization_absence: 0.91
+    scoring_notes: 'PHP SSRF patterns have the highest confidence because PHP superglobals ($_GET, $_POST, $_REQUEST) provide
+      unambiguous taint sources. Confidence is maximal when file_get_contents or curl_setopt directly references a superglobal.
+      Confidence decreases when filter_var with FILTER_VALIDATE_URL and FILTER_FLAG_NO_PRIV_RANGE are applied before the request.
+
+      '
+  impact: 'SSRF in PHP enabling internal service access and cloud metadata theft.
+
+    PHP''s stream wrapper support (file://, php://, data://, gopher://, dict://)
+
+    significantly amplifies SSRF impact beyond HTTP, enabling local file reads,
+
+    arbitrary protocol interaction, and potential remote code execution via
+
+    deserialization chains.
+
+    '
+  remediation: "- Validate URLs with parse_url() and check host against allowlist\n- Block private IPs using filter_var with\
+    \ FILTER_FLAG_NO_PRIV_RANGE\n  and FILTER_FLAG_NO_RES_RANGE\n- Set allow_url_fopen = Off if not needed in php.ini\n- Use\
+    \ CURLOPT_PROTOCOLS to restrict to CURLPROTO_HTTP | CURLPROTO_HTTPS only\n- Block dangerous PHP stream wrappers: disable_functions\
+    \ and\n  stream_wrapper_unregister for gopher, dict, php, data, glob, phar\n- Resolve hostname with gethostbyname() and\
+    \ validate the returned IP\n  with filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE |\n  FILTER_FLAG_NO_RES_RANGE)\
+    \ before making the request\n- Disable CURLOPT_FOLLOWLOCATION or implement a custom redirect handler\n  that validates\
+    \ each redirect destination\n- AWS: Enforce IMDSv2 by requiring token-based metadata access. With\n  IMDSv2, a PUT request\
+    \ with X-aws-ec2-metadata-token-ttl-seconds header\n  is needed to get a session token first. file_get_contents cannot\
+    \ send\n  PUT requests with custom headers by default, so IMDSv2 effectively\n  blocks this class of SSRF. Configure via:\n\
+    \  aws ec2 modify-instance-metadata-options --instance-id <id>\n  --http-tokens required --http-put-response-hop-limit\
+    \ 1\n- GCP: Require Metadata-Flavor: Google header on metadata requests\n- Azure: Restrict IMDS access; use Managed Identity\
+    \ with minimal permissions\n- Deploy network egress filtering that blocks outbound connections to\n  RFC-1918, link-local\
+    \ (169.254.0.0/16), and loopback (127.0.0.0/8) ranges\n- WordPress: Use wp_safe_remote_get() / wp_safe_remote_post() which\
+    \ validate\n  URLs and block private IPs by default\n- Use CURLOPT_REDIR_PROTOCOLS to restrict redirect protocols as well\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/918.html
+  - https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/
+  - https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+    author: security-rules-team
+    created: '2024-06-01'
+    changelog:
+    - 2.0.0 — Added context awareness, exploit scenarios, confidence factors, IMDSv2 guidance
+    - 1.0.0 — Initial rule with core pattern set
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - SSRF-JS-001
+    - SSRF-PY-001
+    - SSRF-JAVA-001
+    - SSRF-GO-001
+    - REDIRECT-PHP-001
+    - PATHTRAVERSAL-PHP-001
+    - XXE-PHP-001
+    - LFI-PHP-001
+    dependency_note: 'PHP SSRF is especially dangerous due to stream wrapper support. When an SSRF finding is identified,
+      also check LFI (Local File Inclusion) and XXE rules because PHP''s file_get_contents and simplexml_load_file can exploit
+      all three vulnerability classes through the same code path. Additionally check for phar:// deserialization if file upload
+      is present.
+
+      '
+  detection_layer: 1

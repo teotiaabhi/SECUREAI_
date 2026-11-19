@@ -1,0 +1,13 @@
+# Rule Validation Test Framework - Dependencies
+# Install: pip install -r requirements.txt
+
+# Core dependencies
+PyYAML>=6.0,<7.0
+
+# Testing
+pytest>=7.0,<9.0
+pytest-html>=4.0,<5.0
+pytest-xdist>=3.0,<4.0
+
+# Optional: Coverage reporting
+# pytest-cov>=4.0,<6.0

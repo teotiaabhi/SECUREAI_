@@ -1,0 +1,194 @@
+rules:
+- rule_id: PLSQL-AUTH-001
+  title: Missing Access Control on Package
+  description: 'Detects packages without ACCESSIBLE BY clause.
+
+    '
+  language: plsql
+  category: auth
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - plsql
+  - package
+  - access-control
+  patterns:
+  - type: regex
+    pattern: CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGE\s+\w+
+  anti_patterns:
+  - ACCESSIBLE BY
+  - AUTHID CURRENT_USER
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: PLSQL-AUTH-002
+  title: Grant on Sensitive System Privilege
+  description: 'Detects granting of dangerous system privileges.
+
+    '
+  language: plsql
+  category: auth
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - plsql
+  - grant
+  - privilege
+  patterns:
+  - type: regex
+    pattern: GRANT\s+(?:DBA|ALTER\s+SYSTEM|CREATE\s+ANY|DROP\s+ANY|EXECUTE\s+ANY)\b
+  - type: regex
+    pattern: GRANT\s+ALL\s+PRIVILEGES
+  anti_patterns:
+  - REVOKE
+  - -- audit
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: PLSQL-CRYPTO-001
+  title: Deprecated DBMS_OBFUSCATION
+  description: 'Detects usage of deprecated DBMS_OBFUSCATION_TOOLKIT.
+
+    '
+  language: plsql
+  category: crypto
+  severity: High
+  confidence: 0.92
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - plsql
+  - crypto
+  - deprecated
+  patterns:
+  - type: regex
+    pattern: DBMS_OBFUSCATION_TOOLKIT\.
+  anti_patterns:
+  - DBMS_CRYPTO
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: PLSQL-CRYPTO-002
+  title: Weak DBMS_CRYPTO Algorithm
+  description: 'Detects weak encryption algorithms in DBMS_CRYPTO.
+
+    '
+  language: plsql
+  category: crypto
+  severity: High
+  confidence: 0.9
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - plsql
+  - crypto
+  - weak-algorithm
+  patterns:
+  - type: regex
+    pattern: DBMS_CRYPTO\.(?:DES_CBC_NONE|DES3_CBC_NONE|ENCRYPT_DES)\b
+  anti_patterns:
+  - ENCRYPT_AES256
+  - ENCRYPT_AES128
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: PLSQL-SEC-001
+  title: UTL_TCP Network Access
+  description: 'Detects uncontrolled network connections via UTL_TCP.
+
+    '
+  language: plsql
+  category: ssrf
+  severity: High
+  confidence: 0.85
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  detection_layer: 1
+  tags:
+  - plsql
+  - utl_tcp
+  - network
+  patterns:
+  - type: regex
+    pattern: UTL_TCP\.OPEN_CONNECTION\s*\(
+  anti_patterns:
+  - ACL
+  - DBMS_NETWORK_ACL
+  impact: Server-side request forgery enables access to internal resources and cloud metadata
+  remediation: Validate and allowlist URLs, block private IP ranges and cloud metadata endpoints
+- rule_id: PLSQL-SEC-002
+  title: UTL_SMTP Email Injection
+  description: 'Detects potential email injection via UTL_SMTP.
+
+    '
+  language: plsql
+  category: injection
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-93
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - plsql
+  - utl_smtp
+  - injection
+  patterns:
+  - type: regex
+    pattern: UTL_SMTP\.(?:WRITE_DATA|RCPT)\s*\(
+  anti_patterns:
+  - REPLACE
+  - REGEXP_REPLACE
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: PLSQL-SEC-003
+  title: Autonomous Transaction Information Leak
+  description: 'Detects autonomous transactions that may bypass audit controls.
+
+    '
+  language: plsql
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - plsql
+  - autonomous-transaction
+  - audit
+  patterns:
+  - type: regex
+    pattern: PRAGMA\s+AUTONOMOUS_TRANSACTION
+  anti_patterns:
+  - audit
+  - log
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: PLSQL-SEC-004
+  title: Dynamic DDL Execution
+  description: 'Detects dynamic DDL statements that could alter schema.
+
+    '
+  language: plsql
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - plsql
+  - ddl
+  - dynamic
+  patterns:
+  - type: regex
+    pattern: EXECUTE\s+IMMEDIATE\s+.*(?:CREATE|DROP|ALTER|GRANT|TRUNCATE)\b
+  anti_patterns:
+  - DBMS_ASSERT
+  - ENQUOTE_NAME
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding

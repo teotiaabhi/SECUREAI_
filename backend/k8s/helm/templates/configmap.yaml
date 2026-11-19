@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "secureai.configMapName" . }}
+  labels:
+    {{- include "secureai.labels" . | nindent 4 }}
+data:
+  APP_NAME: "SecureAI Code Analyzer"
+  API_PREFIX: "/api/v1"
+  LOG_FORMAT: "json"
+  RATE_LIMIT: {{ .Values.api.env.RATE_LIMIT | default "100/minute" | quote }}
+  DEBUG: {{ .Values.api.env.DEBUG | default "false" | quote }}
+  WORKER_MODE: {{ .Values.api.env.WORKER_MODE | default "embedded" | quote }}
+  QUEUE_BACKEND: {{ .Values.api.env.QUEUE_BACKEND | default "memory" | quote }}
+  SCAN_TEMP_DIR: "/tmp/scans"
+  MAX_CONCURRENT_SCANS_PER_USER: "3"
+  MAX_GLOBAL_CONCURRENT_SCANS: "20"
+  GRACEFUL_SHUTDOWN_TIMEOUT: "30"
+  CLEANUP_INTERVAL_HOURS: "6"
+  AUDIT_CHAIN_ENABLED: "true"
+  GDPR_DELETION_ENABLED: "true"
+  {{- if .Values.redis.enabled }}
+  QUEUE_REDIS_URL: {{ .Values.redis.url | quote }}
+  {{- end }}

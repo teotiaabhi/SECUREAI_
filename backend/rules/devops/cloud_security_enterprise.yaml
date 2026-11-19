@@ -1,0 +1,278 @@
+# ============================================================================
+# Enterprise Cloud Security Rules
+# Ruleset Version: 4.0.0
+# Generated: 2026-03-05
+# Coverage: AWS IAM, S3, Kubernetes RBAC, Docker Socket Exposure
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # AWS IAM PRIVILEGE ESCALATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CLOUD-IAM-001"
+    title: "AWS IAM Policy Allows Privilege Escalation"
+    description: >
+      Detects IAM policies granting actions that enable privilege escalation:
+      iam:CreatePolicyVersion, iam:AttachUserPolicy, iam:PutUserPolicy,
+      sts:AssumeRole with wildcards, iam:PassRole + lambda:CreateFunction, etc.
+    language: all
+    category: devops
+    severity: critical
+    confidence: 0.90
+    cwe: CWE-269
+    owasp: "A01:2021-Broken Access Control"
+    tags: [aws, iam, privilege-escalation, cloud, terraform]
+    detection_layer: 2
+    attack_surface_type: "cloud"
+    vulnerability_family: "cloud-iam-escalation"
+    patterns:
+      - type: regex
+        pattern: '"Action"\s*:\s*\[?\s*"iam:\*"\s*\]?'
+        description: "IAM wildcard action — full IAM control"
+      - type: regex
+        pattern: '"Action"\s*:\s*\[?[^\]]{0,500}(?:"iam:(?:CreatePolicyVersion|SetDefaultPolicyVersion|AttachUserPolicy|AttachGroupPolicy|AttachRolePolicy|PutUserPolicy|PutGroupPolicy|PutRolePolicy|CreateLoginProfile|UpdateLoginProfile|AddUserToGroup|UpdateAssumeRolePolicy|PassRole)")'
+        description: "IAM action enabling privilege escalation"
+      - type: regex
+        pattern: '"Action"\s*:\s*\[?[^\]]{0,300}"sts:AssumeRole"[^\]]{0,100}\]?[^}]{0,200}"Resource"\s*:\s*"\*"'
+        description: "sts:AssumeRole on all resources"
+      - type: regex
+        pattern: '(?:actions|effect)\s*=\s*\[?[^]]{0,300}(?:"iam:PassRole"|"lambda:CreateFunction"|"lambda:InvokeFunction")'
+        description: "Terraform IAM PassRole + Lambda (escalation vector)"
+    anti_patterns:
+      - '"Effect": "Deny"'
+      - '"Condition"'
+      - '"StringEquals"'
+      - '"ArnLike"'
+      - "effect = \"Deny\""
+      - "condition {"
+    remediation: >
+      Follow least privilege: scope IAM actions to specific resources.
+      Never use iam:* or sts:AssumeRole with Resource: *.
+      Add Condition blocks to restrict iam:PassRole to specific roles.
+      Use AWS Access Analyzer to validate policy scope.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["TF-SEC-005", "CLOUD-IAM-002"]
+      high_impact_flag: true
+
+  - rule_id: "CLOUD-IAM-002"
+    title: "AWS IAM User/Role With Administrative Access"
+    language: all
+    category: devops
+    severity: high
+    confidence: 0.88
+    cwe: CWE-269
+    owasp: "A01:2021-Broken Access Control"
+    tags: [aws, iam, admin-access, cloud]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "cloud-iam-escalation"
+    patterns:
+      - type: regex
+        pattern: '"Action"\s*:\s*"\*"\s*,\s*"Resource"\s*:\s*"\*"'
+        description: "IAM policy with Action:* Resource:* (full admin)"
+      - type: regex
+        pattern: 'arn:aws:iam::aws:policy/AdministratorAccess\b'
+        description: "AWS managed AdministratorAccess policy attached"
+      - type: regex
+        pattern: 'arn:aws:iam::aws:policy/PowerUserAccess\b'
+        description: "AWS managed PowerUserAccess policy (near-admin)"
+    anti_patterns:
+      - '"Effect": "Deny"'
+      - "# break-glass"
+      - "# emergency"
+      - "Condition"
+    remediation: >
+      Replace AdministratorAccess with scoped policies.
+      Use AWS Organizations SCPs to establish permission boundaries.
+      Implement break-glass procedures for emergency admin access.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # S3 BUCKET EXPOSURE
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CLOUD-S3-001"
+    title: "S3 Bucket Public Access Enabled"
+    language: all
+    category: devops
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-284
+    owasp: "A01:2021-Broken Access Control"
+    tags: [aws, s3, public-access, data-exposure, cloud]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "cloud-storage-exposure"
+    patterns:
+      - type: regex
+        pattern: '(?:acl|ACL)\s*[:=]\s*[''"](?:public-read|public-read-write|authenticated-read)[''"]'
+        description: "S3 bucket with public ACL"
+      - type: regex
+        pattern: 'block_public_acls\s*=\s*false\b'
+        description: "S3 public access block disabled (Terraform)"
+      - type: regex
+        pattern: 'block_public_policy\s*=\s*false\b'
+        description: "S3 public policy block disabled (Terraform)"
+      - type: regex
+        pattern: 'restrict_public_buckets\s*=\s*false\b'
+        description: "S3 restrict public buckets disabled"
+      - type: regex
+        pattern: 'ignore_public_acls\s*=\s*false\b'
+        description: "S3 ignore public ACLs disabled"
+      - type: regex
+        pattern: '"Principal"\s*:\s*"\*"[^}]{0,300}"s3:'
+        description: "S3 bucket policy with Principal:* (public)"
+    anti_patterns:
+      - "block_public_acls = true"
+      - "block_public_policy = true"
+      - "restrict_public_buckets = true"
+      - "CloudFront"
+      - "website_configuration"
+      - "# public-intended"
+    remediation: >
+      Enable S3 Block Public Access at account level.
+      Use aws_s3_bucket_public_access_block with all four settings = true.
+      Use CloudFront + OAI/OAC for public web content.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # KUBERNETES RBAC MISCONFIGURATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CLOUD-K8S-001"
+    title: "Kubernetes RBAC ClusterRole With Wildcard Permissions"
+    language: yaml
+    category: devops
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-269
+    owasp: "A01:2021-Broken Access Control"
+    tags: [kubernetes, rbac, cluster-admin, privilege-escalation]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "k8s-rbac-misconfiguration"
+    patterns:
+      - type: regex
+        pattern: 'kind:\s*ClusterRole\b[^-]{0,500}(?:verbs:\s*\[?\s*[''"]\*[''"]|resources:\s*\[?\s*[''"]\*[''"])'
+        description: "ClusterRole with wildcard verbs or resources"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'kind:\s*ClusterRoleBinding\b[^-]{0,500}roleRef:[^-]{0,200}name:\s*[''"]?cluster-admin[''"]?'
+        description: "ClusterRoleBinding to cluster-admin role"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'kind:\s*(?:Cluster)?Role\b[^-]{0,500}resources:\s*\[?[^\]]{0,100}(?:secrets|pods/exec|configmaps)[^\]]{0,50}\]?[^-]{0,200}verbs:\s*\[?[^\]]{0,100}(?:get|list|\*)'
+        description: "Role with access to secrets or pod exec"
+        flags: [DOTALL]
+    anti_patterns:
+      - "namespace:"
+      - "resourceNames:"
+      - "# system"
+      - "kube-system"
+    remediation: >
+      Never use wildcard (*) verbs or resources in ClusterRoles.
+      Use namespace-scoped Roles instead of ClusterRoles where possible.
+      Restrict secrets access to specific service accounts.
+      Use RBAC audit tools: kubectl auth can-i --list.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  - rule_id: "CLOUD-K8S-002"
+    title: "Kubernetes Pod Security — Privileged Container"
+    language: yaml
+    category: devops
+    severity: critical
+    confidence: 0.93
+    cwe: CWE-250
+    owasp: "A05:2021-Security Misconfiguration"
+    tags: [kubernetes, container, privileged, security-context]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "k8s-security"
+    patterns:
+      - type: regex
+        pattern: 'privileged\s*:\s*true\b'
+        description: "Privileged container — full host access"
+      - type: regex
+        pattern: 'hostPID\s*:\s*true\b'
+        description: "Container sharing host PID namespace"
+      - type: regex
+        pattern: 'hostNetwork\s*:\s*true\b'
+        description: "Container sharing host network namespace"
+      - type: regex
+        pattern: 'hostIPC\s*:\s*true\b'
+        description: "Container sharing host IPC namespace"
+      - type: regex
+        pattern: 'allowPrivilegeEscalation\s*:\s*true\b'
+        description: "Container allows privilege escalation"
+    anti_patterns:
+      - "# required for"
+      - "kube-system"
+      - "kube-proxy"
+      - "calico"
+      - "flannel"
+      - "istio"
+    remediation: >
+      Set securityContext.privileged=false, allowPrivilegeEscalation=false.
+      Use Pod Security Standards (restricted profile).
+      Drop all capabilities: capabilities.drop=["ALL"].
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # DOCKER SOCKET EXPOSURE
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "CLOUD-DOCKER-001"
+    title: "Docker Socket Mounted in Container"
+    description: >
+      Detects containers with the Docker socket (/var/run/docker.sock) mounted,
+      enabling container escape via the Docker API.
+    language: all
+    category: devops
+    severity: critical
+    confidence: 0.95
+    cwe: CWE-250
+    owasp: "A05:2021-Security Misconfiguration"
+    tags: [docker, container-escape, socket, privilege-escalation]
+    detection_layer: 1
+    attack_surface_type: "cloud"
+    vulnerability_family: "container-escape"
+    patterns:
+      - type: regex
+        pattern: '/var/run/docker\.sock\b'
+        description: "Docker socket path (mounted or referenced)"
+      - type: regex
+        pattern: 'docker\.sock\s*:\s*/var/run/docker\.sock'
+        description: "Docker socket volume mount in compose"
+      - type: regex
+        pattern: 'hostPath:[^}]{0,200}path:\s*[''"]?/var/run/docker\.sock'
+        description: "Kubernetes hostPath mount of docker socket"
+        flags: [DOTALL]
+    anti_patterns:
+      - "# CI runner"
+      - "# build-only"
+      - "dind"
+      - "docker-in-docker"
+    remediation: >
+      Never mount Docker socket in application containers.
+      Use rootless Docker or Podman for container builds.
+      For CI/CD, use Docker-in-Docker (dind) with TLS.
+      Use Kubernetes Pod Security Standards to block hostPath mounts.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["CLOUD-K8S-002"]
+      high_impact_flag: true

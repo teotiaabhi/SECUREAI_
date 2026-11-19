@@ -1,0 +1,554 @@
+# ============================================================================
+# Enterprise Authentication & Authorization Attack Rules
+# Ruleset Version: 4.0.0
+# Generated: 2026-03-05
+# Coverage: JWT, OAuth, SAML, Sessions, IDOR, Privilege Escalation
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # JWT SIGNATURE BYPASS
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "AUTH-JWT-001"
+    title: "JWT Algorithm None Attack / Signature Bypass"
+    description: >
+      Detects JWT implementations vulnerable to the "alg:none" attack where
+      the algorithm is taken from the token header without validation,
+      allowing attackers to forge tokens without a valid signature.
+    language: all
+    category: auth
+    severity: critical
+    confidence: 0.94
+    cwe: CWE-347
+    owasp: "A02:2021-Cryptographic Failures"
+    tags: [jwt, algorithm-none, token-bypass, authentication]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "jwt-bypass"
+    patterns:
+      - type: regex
+        pattern: 'jwt\.decode\s*\([^)]{0,200}algorithms\s*=\s*\[?\s*[''"]none[''"]'
+        description: "JWT decode allowing 'none' algorithm"
+      - type: regex
+        pattern: 'jwt\.decode\s*\([^)]{0,200}(?:verify|options)\s*[=:{][^)]{0,100}(?:False|false|verify_signature.*false)'
+        description: "JWT decode with signature verification disabled"
+      - type: regex
+        pattern: 'jwt\.decode\s*\([^)]{0,200}algorithms\s*=\s*(?:header\[|token_header|jwt_header|alg_from_header)'
+        description: "JWT algorithm taken from untrusted token header"
+      - type: regex
+        pattern: '(?:JwtParser|Jwts)\.parser(?:Builder)?\s*\(\s*\)[^.]{0,100}\.(?:parse|parseClaimsJws)\s*\('
+        description: "Java JWT parser without signing key configuration"
+      - type: regex
+        pattern: 'jose\.(?:jwt|jws)\.decode\s*\([^)]{0,200}algorithms\s*=\s*\[\s*\]'
+        description: "python-jose decode with empty algorithm list"
+    anti_patterns:
+      - "algorithms=['HS256']"
+      - "algorithms=['RS256']"
+      - "algorithms=['ES256']"
+      - "setSigningKey("
+      - "verify=True"
+      - "options={'verify_signature': True}"
+      - "require=['exp']"
+    remediation: >
+      Always specify allowed algorithms explicitly: jwt.decode(token, key, algorithms=['RS256']).
+      Never accept the algorithm from the token header.
+      Always verify signatures — never set verify=False.
+      Use asymmetric algorithms (RS256, ES256) for public-facing APIs.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["AUTH-JWT-002", "AUTH-JWT-003"]
+      high_impact_flag: true
+    exploit_scenario:
+      attack_example: >
+        Application uses jwt.decode(token, key, algorithms=token_header['alg']).
+        Attacker crafts token with {"alg":"none"} header and unsigned payload,
+        gaining arbitrary claims (admin role, any user ID).
+      example_payload: 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.'
+      attacker_objective: "Authentication bypass and privilege escalation via forged JWT"
+
+  - rule_id: "AUTH-JWT-002"
+    title: "JWT Algorithm Confusion (RS256 → HS256)"
+    description: >
+      Detects JWT configurations vulnerable to algorithm confusion where
+      the public key (RS256) can be used as an HMAC secret (HS256),
+      allowing attackers to forge tokens using the publicly available key.
+    language: all
+    category: auth
+    severity: critical
+    confidence: 0.88
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic Failures"
+    tags: [jwt, algorithm-confusion, rsa-hmac, authentication]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "jwt-bypass"
+    patterns:
+      - type: regex
+        pattern: 'jwt\.decode\s*\([^)]{0,200}algorithms\s*=\s*\[[^]]{0,200}(?:HS256|HS384|HS512)[^]]{0,50}(?:RS256|RS384|RS512)'
+        description: "JWT decode allowing both HMAC and RSA algorithms"
+      - type: regex
+        pattern: 'jwt\.decode\s*\([^)]{0,200}algorithms\s*=\s*\[[^]]{0,200}(?:RS256|RS384|RS512)[^]]{0,50}(?:HS256|HS384|HS512)'
+        description: "JWT decode allowing both RSA and HMAC algorithms (reverse order)"
+      - type: regex
+        pattern: '(?:algorithms|accepted_algorithms)\s*[:=]\s*\[[^]]{0,300}(?:HS|RS|ES|PS)\d{3}[^]]{0,100}(?:HS|RS|ES|PS)\d{3}'
+        description: "Mixed algorithm families in accepted list"
+    anti_patterns:
+      - "algorithms=['RS256']"
+      - "algorithms=['ES256']"
+      - "algorithms=['HS256']"
+    remediation: >
+      Accept only ONE algorithm family. Never mix HMAC and RSA algorithms.
+      Use algorithms=['RS256'] (asymmetric) or algorithms=['HS256'] (symmetric).
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["AUTH-JWT-001"]
+
+  - rule_id: "AUTH-JWT-003"
+    title: "JWT Secret/Key Weakness"
+    description: >
+      Detects JWT signing with weak, hardcoded, or default secrets.
+    language: all
+    category: auth
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic Failures"
+    tags: [jwt, weak-secret, hardcoded-key, authentication]
+    detection_layer: 1
+    attack_surface_type: "authentication"
+    vulnerability_family: "jwt-bypass"
+    patterns:
+      - type: regex
+        pattern: 'jwt\.(?:encode|sign)\s*\([^)]{0,200}(?:secret|key)\s*[:=]\s*[''"](?:secret|password|key|changeme|test|admin|default|12345|jwt_secret)[''"]'
+        description: "JWT signed with weak/default secret"
+      - type: regex
+        pattern: '(?:JWT_SECRET|SECRET_KEY|SIGNING_KEY)\s*[:=]\s*[''"](?:.{1,15})[''"]'
+        description: "Short JWT secret (<=15 chars) — brute-forceable"
+      - type: regex
+        pattern: 'jwt\.sign\s*\(\s*\{[^}]{0,200}\}\s*,\s*[''"][^''"]{1,15}[''"]'
+        description: "jsonwebtoken sign with short inline secret"
+    anti_patterns:
+      - "os.environ"
+      - "process.env"
+      - "getenv("
+      - "config."
+      - "vault."
+      - "aws_secretsmanager"
+    remediation: >
+      Use environment variables or secret managers for JWT secrets.
+      Secret must be >=256 bits (32+ chars) for HS256.
+      Prefer RS256/ES256 with properly managed key pairs.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # OAUTH MISCONFIGURATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "AUTH-OAUTH-001"
+    title: "OAuth Open Redirect / Authorization Code Interception"
+    description: >
+      Detects OAuth implementations vulnerable to redirect_uri manipulation,
+      allowing attackers to intercept authorization codes or tokens.
+    language: all
+    category: auth
+    severity: high
+    confidence: 0.88
+    cwe: CWE-601
+    owasp: "A01:2021-Broken Access Control"
+    tags: [oauth, open-redirect, authorization-code, token-theft]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "oauth-misconfiguration"
+    patterns:
+      - type: regex
+        pattern: 'redirect_uri\s*[:=]\s*(?:req\.|request\.|params\.|args\.)'
+        description: "OAuth redirect_uri from user input"
+      - type: regex
+        pattern: 'redirect_uri\s*[:=]\s*[''"]https?://\*'
+        description: "OAuth redirect_uri with wildcard"
+      - type: regex
+        pattern: '(?:callback|redirect)(?:_?url|_?uri)\s*[:=]\s*(?:req\.|request\.|params\.)'
+        description: "OAuth callback URL from user input"
+      - type: regex
+        pattern: '\.redirect\s*\(\s*(?:req\.query|req\.body|request\.GET)\.(?:redirect_uri|callback|return_url)\s*\)'
+        description: "Redirect to user-controlled OAuth callback"
+    anti_patterns:
+      - "ALLOWED_REDIRECT_URIS"
+      - "REDIRECT_URI_WHITELIST"
+      - "validate_redirect_uri"
+      - "is_safe_url"
+      - "url_has_allowed_host"
+    remediation: >
+      Always validate redirect_uri against a strict allowlist of pre-registered URIs.
+      Use exact string matching — never pattern/wildcard matching.
+      Store allowed redirect URIs in OAuth client configuration.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+  - rule_id: "AUTH-OAUTH-002"
+    title: "OAuth State Parameter Missing (CSRF)"
+    language: all
+    category: auth
+    severity: high
+    confidence: 0.85
+    cwe: CWE-352
+    owasp: "A01:2021-Broken Access Control"
+    tags: [oauth, csrf, state-parameter, authentication]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "oauth-misconfiguration"
+    patterns:
+      - type: regex
+        pattern: '(?:authorize_url|authorization_endpoint|auth_url)\s*[:=][^;]{0,300}(?:client_id)[^;]{0,300}(?!state\s*=)'
+        description: "OAuth authorize URL without state parameter"
+      - type: regex
+        pattern: '(?:oauth|oidc|auth)\.(?:authorize|login)\s*\([^)]{0,300}(?!.*state\b)'
+        description: "OAuth authorize call without state"
+    anti_patterns:
+      - "state="
+      - "generate_state"
+      - "csrf_token"
+      - "nonce="
+    remediation: >
+      Always include a cryptographically random state parameter in OAuth requests.
+      Validate the state parameter in the callback to prevent CSRF.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # SAML VALIDATION BYPASS
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "AUTH-SAML-001"
+    title: "SAML Signature Validation Bypass"
+    description: >
+      Detects SAML implementations that skip or improperly validate XML
+      signatures on SAML assertions, enabling authentication bypass.
+    language: all
+    category: auth
+    severity: critical
+    confidence: 0.92
+    cwe: CWE-347
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [saml, signature-bypass, xml-signature, sso, authentication]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "saml-bypass"
+    patterns:
+      - type: regex
+        pattern: '(?:wantAssertionsSigned|wantMessagesSigned|wantNameIdEncrypted)\s*[:=]\s*(?:false|False|FALSE)\b'
+        description: "SAML signature validation disabled"
+      - type: regex
+        pattern: '(?:validate_signature|verify_signature|check_signature)\s*[:=]\s*(?:false|False|FALSE)\b'
+        description: "SAML signature verification disabled"
+      - type: regex
+        pattern: 'OneLogin_Saml2_Settings[^;]{0,300}strict\s*[:=]\s*(?:false|False)\b'
+        description: "python3-saml strict mode disabled"
+      - type: regex
+        pattern: 'saml2\.config[^;]{0,200}(?:allow_unsolicited|want_assertions_signed)\s*[:=]\s*(?:True|true|False|false)\b'
+        description: "pysaml2 config with signature validation setting"
+      - type: regex
+        pattern: '\.setWantAssertionsSigned\s*\(\s*false\s*\)'
+        description: "Java SAML wantAssertionsSigned=false"
+    anti_patterns:
+      - "wantAssertionsSigned=true"
+      - "wantAssertionsSigned: true"
+      - "validate_signature=True"
+      - "strict=True"
+    remediation: >
+      Always enable SAML signature validation: wantAssertionsSigned=true.
+      Use strict mode in SAML libraries.
+      Verify both the SAML Response and the Assertion signatures.
+      Validate the SAML Assertion's audience restriction.
+    severity_scoring:
+      severity_weight: 10
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      high_impact_flag: true
+
+  # ══════════════════════════════════════════════════════════════════════
+  # SESSION FIXATION / REPLAY
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "AUTH-SESS-001"
+    title: "Session Fixation — No Regeneration After Login"
+    description: >
+      Detects authentication flows that don't regenerate the session ID
+      after successful login, enabling session fixation attacks.
+    language: all
+    category: auth
+    severity: high
+    confidence: 0.85
+    cwe: CWE-384
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [session-fixation, session-management, authentication]
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    vulnerability_family: "session-fixation"
+    patterns:
+      - type: regex
+        pattern: '(?:login|authenticate|sign_in)\s*\([^)]*\)\s*:[^}]{0,500}(?:session\[|request\.session\[)[^}]{0,200}(?!session\.regenerate|session_regenerate|cycle_session|flush\(\)|create\(\))'
+        description: "Login function sets session data without regenerating session ID"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'session\.(?:set|put|setAttribute)\s*\([^)]{0,100}(?:user|auth|login|role|admin)\b[^;]{0,300}(?!session\.(?:regenerate|invalidate|migrate|create))'
+        description: "Session user data set without regeneration"
+        flags: [DOTALL]
+    anti_patterns:
+      - "session.regenerate"
+      - "session.cycle"
+      - "session_regenerate_id"
+      - "request.session.flush()"
+      - "request.session.create()"
+      - "session.invalidate()"
+      - "req.session.regenerate"
+      - "changeSessionId()"
+    remediation: >
+      Regenerate the session ID immediately after authentication:
+      Python/Django: request.session.cycle_key()
+      Python/Flask: session.regenerate()
+      Java: request.changeSessionId()
+      Node/Express: req.session.regenerate(callback)
+      PHP: session_regenerate_id(true)
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  - rule_id: "AUTH-SESS-002"
+    title: "Session Cookie Security Flags Missing"
+    language: all
+    category: auth
+    severity: medium
+    confidence: 0.90
+    cwe: CWE-614
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [session-cookie, httponly, secure, samesite]
+    detection_layer: 1
+    attack_surface_type: "web"
+    vulnerability_family: "session-management"
+    patterns:
+      - type: regex
+        pattern: 'SESSION_COOKIE_SECURE\s*[:=]\s*(?:False|false)\b'
+        description: "Django session cookie Secure flag disabled"
+      - type: regex
+        pattern: 'SESSION_COOKIE_HTTPONLY\s*[:=]\s*(?:False|false)\b'
+        description: "Django session cookie HttpOnly flag disabled"
+      - type: regex
+        pattern: 'session\s*[:=]\s*\{[^}]{0,300}(?:secure\s*:\s*false|httpOnly\s*:\s*false)\b'
+        description: "Express session config with security flags disabled"
+      - type: regex
+        pattern: 'set_cookie\s*\([^)]{0,300}(?:httponly\s*=\s*False|secure\s*=\s*False)'
+        description: "Flask/Python cookie without security flags"
+    anti_patterns:
+      - "secure: true"
+      - "httpOnly: true"
+      - "SESSION_COOKIE_SECURE = True"
+      - "SESSION_COOKIE_HTTPONLY = True"
+    remediation: >
+      Set all session cookies with: Secure=true, HttpOnly=true, SameSite=Strict or Lax.
+    severity_scoring:
+      severity_weight: 5
+      exploitability_score: "Low"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # IDOR — INSECURE DIRECT OBJECT REFERENCE
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "AUTH-IDOR-001"
+    title: "Insecure Direct Object Reference — Missing Ownership Check"
+    description: >
+      Detects API endpoints that access resources by user-supplied ID without
+      verifying the current user's ownership/authorization to that resource.
+    language: all
+    category: auth
+    severity: high
+    confidence: 0.82
+    cwe: CWE-639
+    owasp: "A01:2021-Broken Access Control"
+    tags: [idor, broken-access-control, authorization, bola]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "idor"
+    patterns:
+      - type: regex
+        pattern: '(?:get|delete|put|patch)\s*\(\s*[''"]/?(?:api/)?(?:users?|accounts?|orders?|profiles?|documents?)/\s*:?\s*(?:id|userId|accountId|orderId)'
+        description: "REST endpoint with resource ID parameter (potential IDOR)"
+      - type: regex
+        pattern: '\.(?:get_object_or_404|get|filter)\s*\(\s*(?:pk|id)\s*=\s*(?:request\.|kwargs\[|self\.kwargs\[)[^)]{0,100}\)(?!.*(?:user\s*=|owner\s*=|created_by\s*=))'
+        description: "Django query by ID without ownership filter"
+        flags: [DOTALL]
+      - type: regex
+        pattern: '\.findById\s*\(\s*(?:req\.params|req\.query|req\.body)\.(?:id|userId)\s*\)(?!.*(?:\.where|\.filter|user_id))'
+        description: "Database findById from request without ownership check"
+        flags: [DOTALL]
+    anti_patterns:
+      - "user=request.user"
+      - "owner=request.user"
+      - "created_by=request.user"
+      - ".filter(user_id="
+      - "@permission_required"
+      - "@has_permission"
+      - "IsOwner"
+      - "check_object_permissions"
+      - "authorize("
+    remediation: >
+      Always include an ownership check in queries:
+      Django: MyModel.objects.filter(pk=id, user=request.user)
+      Express: Model.find({_id: id, userId: req.user.id})
+      Use object-level permission checks (DRF: check_object_permissions).
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["AUTH-IDOR-002"]
+      requires_ai_validation: true
+
+  - rule_id: "AUTH-IDOR-002"
+    title: "Mass Assignment / Over-Posting Leading to Privilege Escalation"
+    language: all
+    category: auth
+    severity: high
+    confidence: 0.88
+    cwe: CWE-915
+    owasp: "A01:2021-Broken Access Control"
+    tags: [mass-assignment, over-posting, privilege-escalation]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "idor"
+    patterns:
+      - type: regex
+        pattern: '\.(?:update|create)\s*\(\s*\*\*(?:request\.(?:data|json|POST)|kwargs)\b'
+        description: "Django/Python model update with unpacked request data"
+      - type: regex
+        pattern: '\.(?:findOneAndUpdate|updateOne)\s*\([^)]{0,100}\{\s*\$set\s*:\s*req\.body\s*\}'
+        description: "MongoDB update with entire request body"
+      - type: regex
+        pattern: 'Object\.assign\s*\(\s*(?:user|model|entity)\s*,\s*req\.body\s*\)'
+        description: "Object.assign merging entire request body into model"
+      - type: regex
+        pattern: '\.(?:update_attributes|assign_attributes)\s*\(\s*params\[:[a-z_]+\]\s*\)'
+        description: "Rails mass assignment from params"
+    anti_patterns:
+      - "permit("
+      - "strong_parameters"
+      - "serializer_class"
+      - "fields ="
+      - "exclude ="
+      - "readonly_fields"
+      - "pick("
+      - "allowedFields"
+      - "@JsonIgnoreProperties"
+    remediation: >
+      Use allowlists for assignable fields. Django: use serializer with explicit fields.
+      Rails: use strong_parameters with permit().
+      Node: pick only allowed fields from req.body.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # RACE CONDITIONS / TOCTOU
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "AUTH-RACE-001"
+    title: "Race Condition in Financial / State-Changing Operation"
+    description: >
+      Detects state-changing operations (balance updates, inventory changes,
+      vote counting) without proper locking or atomic operations,
+      enabling race condition exploitation for double-spending or duplicate actions.
+    language: all
+    category: auth
+    severity: high
+    confidence: 0.80
+    cwe: CWE-362
+    owasp: "A04:2021-Insecure Design"
+    tags: [race-condition, toctou, double-spend, business-logic]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "race-condition"
+    patterns:
+      - type: regex
+        pattern: '(?:balance|credits?|points?|inventory|stock|quantity|votes?|count)\s*=\s*(?:balance|credits?|points?|inventory|stock|quantity|votes?|count)\s*[-+]'
+        description: "Non-atomic balance/inventory update (read-modify-write)"
+      - type: regex
+        pattern: '\.(?:balance|credits|points|stock)\s*[+-]=\s*(?:amount|quantity|value|price)\b'
+        description: "Augmented assignment on financial field without lock"
+      - type: regex
+        pattern: 'if\s+(?:balance|stock|inventory|quantity)\s*>=?\s*(?:amount|quantity|price)[^;]{0,300}(?:balance|stock|inventory)\s*[-=]'
+        description: "TOCTOU: check-then-modify without atomicity"
+        flags: [DOTALL]
+    anti_patterns:
+      - "select_for_update"
+      - "FOR UPDATE"
+      - "LOCK IN SHARE MODE"
+      - "@Transactional"
+      - "with transaction.atomic"
+      - "F("
+      - "$inc"
+      - "atomic"
+      - "Lock("
+      - "Mutex"
+      - "synchronized"
+      - "compareAndSet"
+    remediation: >
+      Use database-level atomic operations:
+      Django: MyModel.objects.filter(pk=id).update(balance=F('balance') - amount) 
+      SQL: UPDATE accounts SET balance = balance - ? WHERE id = ? AND balance >= ?
+      MongoDB: {$inc: {balance: -amount}}
+      Use SELECT ... FOR UPDATE for check-then-modify patterns.
+      Wrap in transaction with proper isolation level.
+    severity_scoring:
+      severity_weight: 8
+      exploitability_score: "Medium"
+    cross_rule_intelligence:
+      related_rules: ["AUTH-RACE-002"]
+      requires_ai_validation: true
+
+  - rule_id: "AUTH-RACE-002"
+    title: "TOCTOU File Operation"
+    description: >
+      Detects time-of-check-to-time-of-use vulnerabilities where a file's
+      existence/permissions are checked separately from the file operation.
+    language: all
+    category: auth
+    severity: medium
+    confidence: 0.82
+    cwe: CWE-367
+    owasp: "A04:2021-Insecure Design"
+    tags: [toctou, race-condition, file-operation]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "race-condition"
+    patterns:
+      - type: regex
+        pattern: '(?:os\.path\.exists|Path\([^)]*\)\.exists|File\.exists|Files\.exists)\s*\([^)]*\)[^;]{0,200}(?:open\(|os\.remove|os\.unlink|shutil\.)'
+        description: "Check file exists then operate — TOCTOU window"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'if\s+os\.access\s*\([^)]*\)\s*:[^;]{0,200}(?:open\(|os\.remove|shutil\.)'
+        description: "os.access check followed by file operation"
+        flags: [DOTALL]
+    anti_patterns:
+      - "try:"
+      - "except FileNotFoundError"
+      - "except OSError"
+      - "with open("
+      - "os.O_CREAT | os.O_EXCL"
+    remediation: >
+      Use EAFP (Easier to Ask Forgiveness than Permission):
+      try/except instead of check-then-act.
+      Use os.open() with O_CREAT | O_EXCL for atomic file creation.
+      Use tempfile.mkstemp() for secure temporary files.
+    severity_scoring:
+      severity_weight: 6
+      exploitability_score: "Medium"

@@ -1,0 +1,1359 @@
+# ============================================================================
+# SSRF Detection Rules - Java
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Server-Side Request Forgery (CWE-918)
+# Language: Java
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # SSRF-JAVA-001: HttpURLConnection with user-controlled URL
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JAVA-001"
+    title: "HttpURLConnection with User-Controlled URL"
+    description: >
+      Detects usage of Java's built-in HttpURLConnection and HttpsURLConnection
+      where the target URL is derived from user-controlled input such as
+      servlet request parameters, HTTP headers, or request body fields.
+      HttpURLConnection is the standard Java HTTP client and follows redirects
+      by default (up to 20), making it particularly susceptible to redirect-based
+      SSRF attacks.
+    language: java
+    category: ssrf
+    severity: High
+    confidence: 0.92
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - java
+      - httpurlconnection
+      - user-input
+      - servlet
+      - url-connection
+      - jdk-http
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*(?:request\.getParameter|req\.getParameter|request\.getHeader|params\.get)\s*\('
+        description: "URL constructed from servlet request parameter"
+      - type: regex
+        pattern: '(?:URL|URI)\s+\w+\s*=\s*new\s+(?:URL|URI)\s*\(\s*(?:url|uri|endpoint|target|dest|link|href)\s*\)[\s\S]{0,300}\.openConnection\s*\('
+        description: "URL variable opened as connection, likely user-controlled"
+      - type: regex
+        pattern: '\(\s*HttpURLConnection\s*\)\s*new\s+URL\s*\(\s*(?:request\.getParameter|url|uri|endpoint|target)'
+        description: "HttpURLConnection cast from URL with user-controlled input"
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*(?:url|uri|endpoint|target)\s*\)\s*\.\s*openConnection\s*\(\s*\)'
+        description: "URL.openConnection() with variable named url/endpoint"
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*request\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\([^)]*\)\s*\)'
+        description: "URL constructed directly from HttpServletRequest method"
+      - type: regex
+        pattern: 'String\s+(?:url|uri|endpoint|target)\s*=\s*request\s*\.\s*getParameter\s*\([^)]+\)\s*;[\s\S]{0,300}new\s+URL\s*\(\s*(?:url|uri|endpoint|target)\s*\)'
+        description: "Request parameter assigned to variable then used as URL"
+      - type: regex
+        pattern: 'HttpsURLConnection\s+\w+\s*=\s*\(\s*HttpsURLConnection\s*\)\s*new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "HttpsURLConnection cast from user-controlled URL"
+      - type: regex
+        pattern: 'URLConnection\s+\w+\s*=\s*new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.getParameter)\s*[\.\)]'
+        description: "URLConnection with user-controlled URL"
+    anti_patterns:
+      - 'new\s+URL\s*\(\s*"https?://(?:api\.|www\.)[a-zA-Z0-9]+\.'
+      - 'new\s+URL\s*\(\s*(?:API_URL|BASE_URL|SERVICE_URL|Constants\.)'
+      - 'new\s+URL\s*\(\s*(?:System\.getenv|System\.getProperty|config\.get)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+(?:org\.junit|org\.mockito|org\.assertj)'
+      - 'when\s*\(\s*\w+\.\w+\s*\)\s*\.\s*thenReturn'
+      - 'verify\s*\(\s*\w+\s*\)\.\w+'
+      - 'Mockito\.\w+'
+      - 'mock\s*\(\s*\w+\.class\s*\)'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - '@WebMvcTest'
+      - 'new\s+URL\s*\(\s*"file:/'
+      - 'new\s+URL\s*\(\s*"jar:'
+    bypass_variants:
+      - description: "Default redirect following (HttpURLConnection follows 30x by default)"
+        pattern: '\.setInstanceFollowRedirects\s*\(\s*true\s*\)'
+      - description: "Decimal IP encoding to bypass string filters"
+        pattern: 'new\s+URL\s*\(\s*"https?://\d{8,10}'
+      - description: "IPv6 mapped address to bypass IPv4 filters"
+        pattern: 'new\s+URL\s*\(\s*"https?://\[::ffff:\d+\.\d+\.\d+\.\d+'
+      - description: "URL with credentials section (user@host)"
+        pattern: 'new\s+URL\s*\(\s*"https?://[^@]+@(?:169\.254|127\.|10\.|192\.168)'
+      - description: "Protocol handler abuse via custom URLStreamHandler"
+        pattern: 'new\s+URL\s*\(\s*(?:null|ctx)\s*,\s*(?:url|uri|endpoint)\s*,\s*new\s+\w+Handler'
+    evasion_indicators:
+      - "Default redirect following in HttpURLConnection"
+      - "Custom URLStreamHandler for protocol manipulation"
+      - "IP address encoding (decimal, octal, hex)"
+      - "IPv6 mapped IPv4 address"
+      - "Credentials in URL for parser confusion"
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: 'new\s+URL\s*\(\s*"https?://\d{8,10}'
+      - type: "hex_ip"
+        pattern: 'new\s+URL\s*\(\s*"https?://0x[0-9a-fA-F]{8}'
+      - type: "url_encoding"
+        pattern: 'URLEncoder\.encode\s*\(.*(?:url|uri|endpoint)'
+      - type: "unicode_encoding"
+        pattern: 'new\s+URL\s*\(.*\\u[0-9A-Fa-f]{4}'
+    multi_function_chain_patterns:
+      - "request.getParameter('url') -> new URL(url) -> url.openConnection() -> read()"
+      - "request.getHeader('X-Target') -> URI.create(target) -> HttpURLConnection"
+      - "@RequestParam url -> new URL(url).openConnection() -> getInputStream()"
+      - "servlet -> getParameter -> URL construction -> connection -> response"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "HttpURLConnection follows redirects by default, amplifying SSRF impact"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('url')"
+        sink: "new URL(url).openConnection()"
+        through: "direct parameter to URL construction"
+      - source: "request.getHeader('X-Callback-Url')"
+        sink: "(HttpURLConnection) new URL(callbackUrl).openConnection()"
+        through: "HTTP header to URL connection"
+      - source: "@RequestParam String target"
+        sink: "new URL(target).openConnection().getInputStream()"
+        through: "Spring MVC parameter binding"
+    impact: |
+      - Access to internal services via server-side HTTP requests.
+      - Cloud metadata credential theft from 169.254.169.254.
+      - Internal network scanning and service discovery.
+      - Data exfiltration from internal APIs and databases.
+      - Redirect-based SSRF amplification (follows up to 20 redirects by default).
+    remediation: |
+      1. Validate URLs and resolved IPs before making connections:
+         ```java
+         import java.net.*;
+
+         public class SafeURLFetcher {
+             private static final Set<String> ALLOWED_PROTOCOLS = Set.of("http", "https");
+
+             public static HttpURLConnection safeConnect(String userUrl)
+                     throws IOException, URISyntaxException {
+                 URL url = new URL(userUrl);
+
+                 if (!ALLOWED_PROTOCOLS.contains(url.getProtocol())) {
+                     throw new SecurityException("Protocol not allowed: " + url.getProtocol());
+                 }
+
+                 InetAddress addr = InetAddress.getByName(url.getHost());
+                 if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                         || addr.isSiteLocalAddress() || addr.isAnyLocalAddress()) {
+                     throw new SecurityException("Internal IP not allowed: " + addr);
+                 }
+
+                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                 conn.setInstanceFollowRedirects(false);
+                 conn.setConnectTimeout(5000);
+                 conn.setReadTimeout(5000);
+                 return conn;
+             }
+         }
+         ```
+      2. Disable automatic redirect following with setInstanceFollowRedirects(false).
+      3. Set strict connect and read timeouts.
+      4. Use an allowlist of permitted hostnames.
+      5. Deploy a network-level egress proxy for outbound HTTP requests.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/net/HttpURLConnection.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'class\s+\w+(?:Servlet|Controller|Handler|Resource)\s'
+        - 'protected\s+void\s+doGet\s*\('
+        - 'protected\s+void\s+doPost\s*\('
+        - '@(?:GetMapping|PostMapping|RequestMapping)\s*\('
+        - 'public\s+\w+\s+\w+\s*\(\s*HttpServletRequest'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - 'request\.getHeader\s*\('
+        - 'request\.getQueryString\s*\('
+        - '@RequestParam\s+'
+        - '@PathVariable\s+'
+        - '@RequestBody\s+'
+      taint_sink_indicators:
+        - 'new\s+URL\s*\('
+        - '\.openConnection\s*\('
+        - '\.openStream\s*\('
+        - 'URI\.create\s*\('
+      sanitization_patterns:
+        - 'isAllowedHost\s*\('
+        - 'validateUrl\s*\('
+        - 'ALLOWED_HOSTS\.'
+        - 'isInternalIP\s*\('
+        - 'isSiteLocalAddress\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + redirect_amplification)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Java servlet provides a URL content preview:
+
+        protected void doGet(HttpServletRequest request, HttpServletResponse response) {
+            String url = request.getParameter("url");
+            URL targetUrl = new URL(url);
+            HttpURLConnection conn = (HttpURLConnection) targetUrl.openConnection();
+            InputStream is = conn.getInputStream();
+            // ... return content to user
+        }
+
+        Attacker sends: GET /preview?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+        The server fetches and returns AWS IAM credentials.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Access internal services and cloud metadata via SSRF"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JAVA-002"
+        - "SSRF-JAVA-003"
+        - "SSRF-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JAVA-002: Apache HttpClient SSRF
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JAVA-002"
+    title: "Apache HttpClient with User-Controlled URL"
+    description: >
+      Detects usage of Apache HttpClient (both legacy 4.x and modern 5.x)
+      where the target URL comes from user-controlled input. Apache HttpClient
+      is the most widely used HTTP library in Java enterprise applications.
+      It supports connection pooling, cookies, redirect handling, and
+      authentication, all of which can be leveraged in sophisticated SSRF
+      attacks if the request target is user-controlled.
+    language: java
+    category: ssrf
+    severity: High
+    confidence: 0.91
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - java
+      - apache-httpclient
+      - user-input
+      - enterprise
+      - http-client
+      - connection-pool
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Http(?:Get|Post|Put|Delete|Patch|Head|Options)\s*\(\s*(?:url|uri|endpoint|target|dest|request\.getParameter|req\.getParameter)'
+        description: "Apache HttpClient request with user-controlled URL"
+      - type: regex
+        pattern: 'HttpClients\s*\.\s*createDefault\s*\(\s*\)[\s\S]{0,500}\.execute\s*\(\s*new\s+Http(?:Get|Post)\s*\(\s*(?:url|uri|endpoint|target)'
+        description: "Default HttpClient executing request with user URL"
+      - type: regex
+        pattern: 'CloseableHttpClient\s+\w+[\s\S]{0,300}\.execute\s*\(\s*new\s+Http(?:Get|Post|Put|Delete)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "CloseableHttpClient executing request with user-controlled URL"
+      - type: regex
+        pattern: 'HttpRequest\s*\.\s*new(?:Builder|Get|Post)\s*\(\s*(?:URI\.create\s*\(\s*)?(?:url|uri|endpoint|target|request\.)'
+        description: "Java 11+ HttpRequest with user-controlled URI"
+      - type: regex
+        pattern: 'httpClient\s*\.\s*(?:execute|send)\s*\(\s*(?:new\s+Http(?:Get|Post)\s*\(\s*)?(?:url|uri|endpoint|target|request\.)'
+        description: "HttpClient execute/send with user-controlled URL"
+      - type: regex
+        pattern: 'RequestBuilder\s*\.\s*(?:get|post|put|delete|create)\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Apache RequestBuilder with user-controlled URL"
+      - type: regex
+        pattern: 'new\s+HttpGet\s*\(\s*(?:URI\.create\s*\(|new\s+URI\s*\()\s*(?:url|uri|endpoint|target|request\.getParameter)'
+        description: "HttpGet with URI.create from user input"
+      - type: regex
+        pattern: 'HttpRequest\s*\.\s*newBuilder\s*\(\s*\)[\s\S]{0,200}\.uri\s*\(\s*URI\.create\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Java 11+ HttpRequest builder with user-controlled URI"
+    anti_patterns:
+      - 'new\s+HttpGet\s*\(\s*"https?://(?:api\.|www\.)[a-zA-Z0-9]+'
+      - 'new\s+HttpGet\s*\(\s*(?:API_URL|BASE_URL|Constants\.)'
+      - 'new\s+HttpGet\s*\(\s*(?:config|properties|settings)\.\w+'
+      - 'new\s+HttpGet\s*\(\s*System\.getenv\s*\('
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito|assertj|hamcrest)'
+      - 'when\s*\(\s*\w+\.\w+\s*\)\s*\.\s*thenReturn'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'WireMock\.\w+'
+      - 'stubFor\s*\('
+      - 'MockRestServiceServer'
+      - '@WebMvcTest'
+    bypass_variants:
+      - description: "Redirect following default behavior in Apache HttpClient"
+        pattern: '\.setRedirectStrategy\s*\(\s*new\s+(?:Lax|Default)RedirectStrategy'
+      - description: "Custom redirect handler allowing cross-protocol redirects"
+        pattern: '\.setRedirectHandler\s*\(\s*new\s+\w+'
+      - description: "Custom RoutePlanner for connection routing manipulation"
+        pattern: '\.setRoutePlanner\s*\(\s*new\s+\w+'
+      - description: "Proxy configuration enabling internal network access"
+        pattern: '\.setProxy\s*\(\s*new\s+HttpHost\s*\(\s*(?:url|uri|target|request\.)'
+      - description: "SSL/TLS verification disabled enabling MitM"
+        pattern: '(?:NoopHostnameVerifier|TrustAllStrategy|AcceptAllSSL|SSLContext.*TrustAll)'
+    evasion_indicators:
+      - "Default redirect following behavior"
+      - "Custom RoutePlanner for connection manipulation"
+      - "Proxy chaining to reach internal services"
+      - "SSL verification bypass for internal access"
+      - "Custom DNS resolver in connection manager"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'new\s+HttpGet\s*\(.*URLEncoder\.encode'
+      - type: "uri_builder"
+        pattern: 'URIBuilder\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+      - type: "string_concat"
+        pattern: 'new\s+HttpGet\s*\(\s*(?:url|uri)\s*\+\s*(?:request\.|params\.)'
+    multi_function_chain_patterns:
+      - "request.getParameter('url') -> new HttpGet(url) -> httpClient.execute(httpGet)"
+      - "@RequestParam url -> URI.create(url) -> HttpRequest.newBuilder().uri(uri)"
+      - "servlet -> getParameter -> HttpPost(url) -> CloseableHttpClient.execute()"
+      - "REST controller -> @RequestBody -> RequestBuilder.get(url) -> execute()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Apache HttpClient connection pooling can amplify SSRF for mass internal scanning"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('url')"
+        sink: "httpClient.execute(new HttpGet(url))"
+        through: "servlet parameter to Apache HttpClient request"
+      - source: "@RequestParam String endpoint"
+        sink: "client.send(HttpRequest.newBuilder().uri(URI.create(endpoint)).build())"
+        through: "Spring MVC parameter binding to Java 11 HttpClient"
+      - source: "requestBody.getTargetUrl()"
+        sink: "httpClient.execute(new HttpPost(targetUrl))"
+        through: "deserialized request body to HTTP request"
+    impact: |
+      - Server-side requests to internal services via enterprise HTTP client.
+      - Cloud metadata credential theft.
+      - Internal network scanning with connection pooling efficiency.
+      - Data exfiltration from microservices and internal APIs.
+      - Amplified SSRF via connection reuse and redirect following.
+    remediation: |
+      1. Validate URLs and disable automatic redirects:
+         ```java
+         import org.apache.http.impl.client.*;
+         import java.net.*;
+
+         public class SafeHttpClient {
+             public static CloseableHttpResponse safeFetch(String userUrl)
+                     throws IOException {
+                 URL url = new URL(userUrl);
+                 InetAddress addr = InetAddress.getByName(url.getHost());
+
+                 if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                         || addr.isSiteLocalAddress()) {
+                     throw new SecurityException("Internal address blocked");
+                 }
+
+                 CloseableHttpClient client = HttpClients.custom()
+                     .disableRedirectHandling()
+                     .setDefaultRequestConfig(RequestConfig.custom()
+                         .setConnectTimeout(5000)
+                         .setSocketTimeout(5000)
+                         .build())
+                     .build();
+
+                 return client.execute(new HttpGet(userUrl));
+             }
+         }
+         ```
+      2. Disable redirect following with disableRedirectHandling().
+      3. Validate resolved IPs against internal ranges before connecting.
+      4. Use connection timeout limits.
+      5. Deploy network-level egress controls.
+    references:
+      - "https://hc.apache.org/httpcomponents-client-5.2.x/"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'class\s+\w+(?:Service|Controller|Handler|Client)\s'
+        - '@(?:Service|Component|Controller|RestController)'
+        - 'import\s+org\.apache\.http'
+        - 'import\s+java\.net\.http'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - 'new\s+Http(?:Get|Post|Put|Delete)\s*\('
+        - '\.execute\s*\('
+        - '\.send\s*\('
+        - 'RequestBuilder\.\w+\s*\('
+      sanitization_patterns:
+        - 'validateUrl\s*\('
+        - 'isAllowedHost\s*\('
+        - 'ALLOWED_HOSTS'
+        - 'isSiteLocalAddress\s*\('
+        - 'isLoopbackAddress\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + connection_pool_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot service proxies requests using Apache HttpClient:
+
+        @PostMapping("/api/fetch")
+        public ResponseEntity<String> fetch(@RequestParam String url) {
+            HttpGet request = new HttpGet(url);
+            CloseableHttpResponse response = httpClient.execute(request);
+            String body = EntityUtils.toString(response.getEntity());
+            return ResponseEntity.ok(body);
+        }
+
+        Attacker sends: POST /api/fetch?url=http://169.254.169.254/latest/meta-data/
+        The server fetches cloud metadata and returns it in the response.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Exploit Apache HttpClient for SSRF to internal services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JAVA-001"
+        - "SSRF-JAVA-003"
+        - "SSRF-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JAVA-003: Spring RestTemplate/WebClient SSRF
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JAVA-003"
+    title: "Spring RestTemplate/WebClient with User-Controlled URL"
+    description: >
+      Detects usage of Spring Framework's RestTemplate and WebClient where
+      the target URL is derived from user-controlled input. RestTemplate is
+      the synchronous HTTP client in Spring, while WebClient is the reactive
+      alternative. Both are heavily used in Spring Boot microservices and
+      accepting user-controlled URLs enables SSRF attacks that can target
+      other microservices, service discovery endpoints, and cloud metadata.
+    language: java
+    category: ssrf
+    severity: High
+    confidence: 0.93
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - java
+      - spring
+      - resttemplate
+      - webclient
+      - microservices
+      - spring-boot
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'restTemplate\s*\.\s*(?:getForObject|getForEntity|postForObject|postForEntity|exchange|execute)\s*\(\s*(?:url|uri|endpoint|target|request\.getParameter)'
+        description: "RestTemplate method with user-controlled URL"
+      - type: regex
+        pattern: 'WebClient\s*\.\s*create\s*\(\s*(?:url|uri|endpoint|target|request\.getParameter)\s*\)'
+        description: "WebClient.create with user-controlled base URL"
+      - type: regex
+        pattern: 'webClient\s*\.\s*(?:get|post|put|delete|patch|method)\s*\(\s*\)[\s\S]{0,200}\.uri\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "WebClient request builder with user-controlled URI"
+      - type: regex
+        pattern: 'restTemplate\s*\.\s*(?:getForObject|getForEntity|exchange)\s*\(\s*(?:request\.getParameter|req\.getParameter|params\.get)\s*\('
+        description: "RestTemplate with direct servlet request parameter"
+      - type: regex
+        pattern: 'UriComponentsBuilder\s*\.\s*fromUriString\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Spring UriComponentsBuilder from user-controlled string"
+      - type: regex
+        pattern: '(?:restTemplate|webClient)\s*\.\s*\w+\s*\([^)]*(?:"https?://".*?\+.*?(?:request\.|params\.|url|uri|endpoint)|f".*?\{(?:url|uri|endpoint))'
+        description: "HTTP client with string concatenation or formatting containing user input"
+      - type: regex
+        pattern: 'WebClient\s*\.\s*builder\s*\(\s*\)[\s\S]{0,300}\.baseUrl\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "WebClient builder with user-controlled base URL"
+      - type: regex
+        pattern: 'restTemplate\s*\.\s*exchange\s*\(\s*(?:URI\.create\s*\(\s*)?(?:url|uri|endpoint|target)\s*,'
+        description: "RestTemplate exchange with URI from user input"
+    anti_patterns:
+      - 'restTemplate\s*\.\s*getForObject\s*\(\s*"https?://(?:api\.|www\.)'
+      - 'WebClient\s*\.\s*create\s*\(\s*"https?://(?:api\.|www\.)'
+      - 'restTemplate\s*\.\s*\w+\s*\(\s*(?:API_URL|BASE_URL|SERVICE_URL|Constants\.)'
+      - 'webClient\s*\.\s*\w+\s*\(\s*\)\.uri\s*\(\s*"/'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - '@WebMvcTest'
+      - 'MockRestServiceServer'
+      - 'WebTestClient'
+      - 'Mockito\.\w+'
+      - '@Value\s*\(\s*"\$\{.*\.url\}'
+      - 'application\.(?:properties|yml)'
+    bypass_variants:
+      - description: "RestTemplate following 30x redirects by default"
+        pattern: 'restTemplate\s*\.\s*(?:getForObject|getForEntity|exchange)\s*\([^)]*(?:url|uri|endpoint|target)'
+      - description: "WebClient following redirects via ExchangeStrategies"
+        pattern: 'WebClient\.builder\s*\(\s*\)[\s\S]{0,500}(?:followRedirect|maxRedirects)'
+      - description: "UriComponentsBuilder with user-controlled scheme/host"
+        pattern: 'UriComponentsBuilder\s*\.\s*newInstance\s*\(\s*\)[\s\S]{0,200}\.(?:scheme|host)\s*\(\s*(?:request\.|url|uri)'
+      - description: "Service discovery URL manipulation"
+        pattern: '(?:eureka|consul|nacos)\s*\.?\s*(?:getInstances|discover)\s*\(\s*(?:serviceName|request\.)'
+    evasion_indicators:
+      - "Default redirect following in RestTemplate"
+      - "Service discovery endpoint manipulation"
+      - "UriComponentsBuilder with user-controlled components"
+      - "WebClient's reactive chain making detection harder"
+      - "Microservice URL template injection"
+    encoding_variants:
+      - type: "uri_template"
+        pattern: 'restTemplate\.\w+\s*\(\s*"https?://\{.*?\}"'
+      - type: "uri_encoding"
+        pattern: 'UriUtils\.encode\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+      - type: "path_template"
+        pattern: 'restTemplate\.\w+\s*\([^)]*\+\s*(?:url|uri|endpoint|target)'
+    multi_function_chain_patterns:
+      - "@RequestParam url -> restTemplate.getForObject(url, String.class)"
+      - "@RequestBody dto -> dto.getEndpoint() -> webClient.get().uri(endpoint)"
+      - "request.getParameter -> UriComponentsBuilder -> restTemplate.exchange()"
+      - "Spring controller -> user input -> WebClient.create(url).get().retrieve()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Spring HTTP clients in microservices enable inter-service SSRF and service mesh abuse"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "@RequestParam String url"
+        sink: "restTemplate.getForObject(url, String.class)"
+        through: "Spring MVC parameter binding to RestTemplate"
+      - source: "@RequestBody ProxyRequest body"
+        sink: "webClient.get().uri(body.getEndpoint()).retrieve()"
+        through: "request body deserialization to WebClient"
+      - source: "request.getParameter('target')"
+        sink: "restTemplate.exchange(target, HttpMethod.GET, ...)"
+        through: "servlet parameter to RestTemplate exchange"
+    impact: |
+      - SSRF to internal microservices and service mesh endpoints.
+      - Cloud metadata credential theft from metadata endpoints.
+      - Access to service discovery (Eureka, Consul) and configuration servers.
+      - Data exfiltration from internal REST APIs.
+      - Kubernetes API server access from within the cluster.
+    remediation: |
+      1. Validate URLs and implement a custom ClientHttpRequestInterceptor:
+         ```java
+         import org.springframework.http.client.ClientHttpRequestInterceptor;
+         import java.net.InetAddress;
+
+         public class SSRFProtectionInterceptor implements ClientHttpRequestInterceptor {
+             @Override
+             public ClientHttpResponse intercept(HttpRequest request,
+                     byte[] body, ClientHttpRequestExecution execution)
+                     throws IOException {
+                 URI uri = request.getURI();
+                 InetAddress addr = InetAddress.getByName(uri.getHost());
+
+                 if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                         || addr.isSiteLocalAddress()) {
+                     throw new SecurityException("SSRF blocked: " + uri.getHost());
+                 }
+
+                 return execution.execute(request, body);
+             }
+         }
+
+         @Bean
+         public RestTemplate restTemplate() {
+             RestTemplate rt = new RestTemplate();
+             rt.setInterceptors(List.of(new SSRFProtectionInterceptor()));
+             return rt;
+         }
+         ```
+      2. Use interceptors/filters for centralized URL validation.
+      3. Disable automatic redirect following.
+      4. Implement hostname allowlisting for outbound requests.
+      5. Use network policies in Kubernetes to restrict egress.
+    references:
+      - "https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/RestTemplate.html"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@(?:RestController|Controller)'
+        - '@(?:GetMapping|PostMapping|RequestMapping|PutMapping|DeleteMapping)'
+        - 'class\s+\w+(?:Controller|Service|Client)\s'
+        - '@Service'
+        - '@Component'
+      taint_source_indicators:
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - '@PathVariable\s+'
+        - 'request\.getParameter\s*\('
+        - '@RequestHeader\s+'
+      taint_sink_indicators:
+        - 'restTemplate\.\w+\s*\('
+        - 'webClient\.\w+\s*\('
+        - 'WebClient\.create\s*\('
+        - 'UriComponentsBuilder\.\w+\s*\('
+      sanitization_patterns:
+        - 'validateUrl\s*\('
+        - 'SSRFProtection'
+        - 'isAllowedHost\s*\('
+        - 'ALLOWED_HOSTS'
+        - 'isSiteLocalAddress\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + microservice_exposure)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot microservice provides a URL checking endpoint:
+
+        @RestController
+        public class ProxyController {
+            @Autowired
+            private RestTemplate restTemplate;
+
+            @GetMapping("/api/check")
+            public ResponseEntity<String> checkUrl(@RequestParam String url) {
+                String result = restTemplate.getForObject(url, String.class);
+                return ResponseEntity.ok(result);
+            }
+        }
+
+        Attacker sends: GET /api/check?url=http://eureka-server:8761/eureka/apps
+        This reveals all registered microservices in the service registry,
+        enabling targeted attacks against internal services.
+      example_payload: "http://config-server:8888/application/default"
+      attacker_objective: "Access internal microservices and service infrastructure via Spring HTTP client"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JAVA-001"
+        - "SSRF-JAVA-002"
+        - "SSRF-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JAVA-004: URL.openStream with user-controlled input
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JAVA-004"
+    title: "URL.openStream() with User-Controlled Input"
+    description: >
+      Detects usage of Java's URL.openStream() method where the URL is
+      constructed from user-controlled input. URL.openStream() is a
+      convenience method equivalent to openConnection().getInputStream()
+      and is often used for simple content fetching without explicit
+      connection management. It follows redirects by default and supports
+      multiple protocols (http, https, file, ftp, jar), making it a
+      high-risk SSRF vector.
+    language: java
+    category: ssrf
+    severity: High
+    confidence: 0.91
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - java
+      - url-openstream
+      - user-input
+      - file-protocol
+      - multi-protocol
+      - stream
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.getParameter|req\.getParameter)\s*[\.\)][\s\S]{0,50}\.openStream\s*\(\s*\)'
+        description: "URL.openStream() with user-controlled URL"
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*(?:request\.getParameter|req\.getParameter)\s*\([^)]+\)\s*\)\s*\.\s*openStream\s*\('
+        description: "URL from servlet request parameter directly opening stream"
+      - type: regex
+        pattern: '(?:InputStream|BufferedReader|InputStreamReader)\s+\w+\s*=\s*(?:new\s+\w+\s*\(\s*)?new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.)\s*[\.\)]'
+        description: "Stream reader wrapping URL with user input"
+      - type: regex
+        pattern: 'IOUtils\s*\.\s*(?:toString|toByteArray|copy)\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Apache IOUtils reading from user-controlled URL"
+      - type: regex
+        pattern: 'Resources\s*\.\s*(?:toString|toByteArray|asCharSource)\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.)'
+        description: "Guava Resources reading from user-controlled URL"
+      - type: regex
+        pattern: 'Scanner\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|endpoint|target|request\.getParameter)\s*[\.\)][\s\S]{0,50}\.openStream\s*\(\s*\)\s*\)'
+        description: "Scanner wrapping URL.openStream with user input"
+      - type: regex
+        pattern: 'String\s+\w+\s*=\s*request\.getParameter\s*\([^)]+\)\s*;[\s\S]{0,200}new\s+URL\s*\(\s*\w+\s*\)\s*\.\s*openStream'
+        description: "Parameter stored in variable then used for openStream"
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*(?:url|uri|endpoint|target)\s*\)\s*\.\s*(?:openStream|getContent|openConnection\s*\(\s*\)\s*\.\s*getInputStream)\s*\('
+        description: "URL.openStream, getContent, or getInputStream with user URL"
+    anti_patterns:
+      - 'new\s+URL\s*\(\s*"https?://(?:api\.|www\.)[a-zA-Z0-9]+'
+      - 'new\s+URL\s*\(\s*"file:/'
+      - 'new\s+URL\s*\(\s*"jar:'
+      - 'new\s+URL\s*\(\s*(?:Constants\.|API_|BASE_|SERVICE_)'
+      - 'getClass\s*\(\s*\)\s*\.\s*getResource\s*\('
+      - 'ClassLoader\s*\.\s*getResource\s*\('
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'Thread\.currentThread\s*\(\s*\)\s*\.\s*getContextClassLoader'
+      - 'getResourceAsStream\s*\('
+      - 'ClassPathResource\s*\('
+    bypass_variants:
+      - description: "file:// protocol for local file reading"
+        pattern: 'new\s+URL\s*\(\s*"file:///'
+      - description: "jar:// protocol for remote JAR loading"
+        pattern: 'new\s+URL\s*\(\s*"jar:https?://'
+      - description: "Redirect chain following by default"
+        pattern: 'new\s+URL\s*\(\s*(?:url|uri|endpoint|target)\s*\)\s*\.\s*openStream'
+      - description: "FTP protocol for data exfiltration"
+        pattern: 'new\s+URL\s*\(\s*"ftp://'
+      - description: "Custom URLStreamHandler for protocol extension"
+        pattern: 'new\s+URL\s*\(\s*null\s*,\s*(?:url|uri)\s*,\s*new\s+\w+Handler'
+    evasion_indicators:
+      - "Multi-protocol support (file, ftp, jar, http, https)"
+      - "Default redirect following"
+      - "JAR URL protocol for remote code loading"
+      - "Classpath resource confusion"
+      - "Custom URLStreamHandler registration"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'new\s+URL\s*\(.*?URLEncoder\.encode'
+      - type: "decimal_ip"
+        pattern: 'new\s+URL\s*\(\s*"https?://\d{8,10}'
+      - type: "file_protocol"
+        pattern: 'new\s+URL\s*\(\s*"file://(?:%2[fF]){2}'
+    multi_function_chain_patterns:
+      - "request.getParameter('url') -> new URL(url).openStream() -> BufferedReader"
+      - "@RequestParam url -> new URL(url).openStream() -> IOUtils.toString()"
+      - "servlet -> getParameter -> URL construction -> openStream -> response"
+      - "user input -> URL -> openStream -> Scanner -> string processing"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "URL.openStream() multi-protocol support enables file read and network SSRF"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('url')"
+        sink: "new URL(url).openStream()"
+        through: "direct parameter to URL.openStream"
+      - source: "@RequestParam String imageUrl"
+        sink: "IOUtils.toByteArray(new URL(imageUrl).openStream())"
+        through: "image URL parameter to stream reading"
+      - source: "request.getHeader('X-Fetch-Url')"
+        sink: "new URL(fetchUrl).openStream()"
+        through: "HTTP header to URL stream"
+    impact: |
+      - Local file reading via file:// protocol (e.g., /etc/passwd, application.properties).
+      - Remote JAR loading via jar:// protocol potentially leading to RCE.
+      - Cloud metadata credential theft via http:// to 169.254.169.254.
+      - Internal service access and data exfiltration.
+      - FTP-based data exfiltration to attacker-controlled servers.
+    remediation: |
+      1. Validate protocol and IP before calling openStream:
+         ```java
+         public static InputStream safeOpenStream(String userUrl) throws IOException {
+             URL url = new URL(userUrl);
+
+             // Restrict to HTTP/HTTPS only
+             if (!"http".equals(url.getProtocol()) && !"https".equals(url.getProtocol())) {
+                 throw new SecurityException("Protocol not allowed: " + url.getProtocol());
+             }
+
+             // Resolve and validate IP
+             InetAddress addr = InetAddress.getByName(url.getHost());
+             if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                     || addr.isSiteLocalAddress()) {
+                 throw new SecurityException("Internal address blocked");
+             }
+
+             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+             conn.setInstanceFollowRedirects(false);
+             conn.setConnectTimeout(5000);
+             conn.setReadTimeout(5000);
+             return conn.getInputStream();
+         }
+         ```
+      2. Block file://, jar://, ftp://, and other non-HTTP protocols.
+      3. Use HttpURLConnection instead for explicit connection control.
+      4. Validate resolved IP addresses against internal ranges.
+      5. Disable redirect following.
+    references:
+      - "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/net/URL.html#openStream()"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'class\s+\w+(?:Servlet|Controller|Handler|Service)\s'
+        - 'protected\s+void\s+do(?:Get|Post)\s*\('
+        - '@(?:GetMapping|PostMapping|RequestMapping)'
+        - 'import\s+java\.net\.URL'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - '\.openStream\s*\('
+        - '\.getContent\s*\('
+        - '\.openConnection\s*\(\s*\)\s*\.\s*getInputStream'
+        - 'new\s+URL\s*\('
+      sanitization_patterns:
+        - 'validateUrl\s*\('
+        - 'isAllowedProtocol\s*\('
+        - 'ALLOWED_PROTOCOLS'
+        - 'isSiteLocalAddress\s*\('
+        - 'isLoopbackAddress\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + multi_protocol_risk)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Java service reads remote content for processing:
+
+        @GetMapping("/api/import")
+        public String importData(@RequestParam String url) throws Exception {
+            InputStream is = new URL(url).openStream();
+            return IOUtils.toString(is, StandardCharsets.UTF_8);
+        }
+
+        An attacker reads local files:
+        GET /api/import?url=file:///etc/passwd
+
+        Or accesses cloud metadata:
+        GET /api/import?url=http://169.254.169.254/latest/user-data
+      example_payload: "file:///etc/passwd"
+      attacker_objective: "Read local files or access internal services via URL.openStream()"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JAVA-001"
+        - "SSRF-JAVA-005"
+        - "SSRF-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JAVA-005: ImageIO.read URL SSRF
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JAVA-005"
+    title: "ImageIO.read with User-Controlled URL"
+    description: >
+      Detects usage of Java's ImageIO.read(URL) where the URL is derived
+      from user-controlled input. ImageIO.read() accepts a URL parameter
+      and fetches the resource before attempting to decode it as an image.
+      Even if the resource is not a valid image, the HTTP request is still
+      made, making this a viable SSRF vector. This pattern commonly appears
+      in image processing, thumbnail generation, and avatar upload features.
+    language: java
+    category: ssrf
+    severity: High
+    confidence: 0.89
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - java
+      - imageio
+      - image-processing
+      - user-input
+      - media
+      - thumbnail
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'ImageIO\s*\.\s*read\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|imageUrl|imgUrl|src|source|request\.getParameter|req\.getParameter)'
+        description: "ImageIO.read with URL constructed from user input"
+      - type: regex
+        pattern: 'ImageIO\s*\.\s*read\s*\(\s*(?:url|uri|imageUrl|imgUrl|source)\s*\)'
+        description: "ImageIO.read with user-controlled URL variable"
+      - type: regex
+        pattern: 'BufferedImage\s+\w+\s*=\s*ImageIO\s*\.\s*read\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|imageUrl|request\.)'
+        description: "BufferedImage loaded from user-controlled URL"
+      - type: regex
+        pattern: '(?:Thumbnails|Thumbnailator)\s*\.\s*of\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|imageUrl|request\.)'
+        description: "Thumbnailator library with user-controlled URL"
+      - type: regex
+        pattern: 'ImageIO\s*\.\s*(?:read|createImageInputStream)\s*\(\s*new\s+URL\s*\(\s*request\s*\.\s*getParameter'
+        description: "ImageIO reading from servlet request parameter URL"
+      - type: regex
+        pattern: 'String\s+(?:imageUrl|imgUrl|avatarUrl|photoUrl)\s*=\s*request\s*\.\s*getParameter\s*\([^)]+\)\s*;[\s\S]{0,200}ImageIO\s*\.\s*read'
+        description: "Image URL from request parameter used shortly after in ImageIO"
+      - type: regex
+        pattern: '(?:Graphics2D|BufferedImage|Image)\s*[\s\S]{0,300}ImageIO\s*\.\s*read\s*\(\s*new\s+URL\s*\(\s*(?:url|uri|imageUrl|request\.)'
+        description: "Image processing context with user-controlled URL source"
+      - type: regex
+        pattern: '(?:PDFBox|iText|JasperReports|POI)\s*[\s\S]{0,500}new\s+URL\s*\(\s*(?:url|uri|imageUrl|request\.)'
+        description: "Document processing library loading image from user URL"
+    anti_patterns:
+      - 'ImageIO\s*\.\s*read\s*\(\s*new\s+File\s*\('
+      - 'ImageIO\s*\.\s*read\s*\(\s*(?:getClass|ClassLoader)\s*\.\s*getResource'
+      - 'ImageIO\s*\.\s*read\s*\(\s*new\s+URL\s*\(\s*"https?://(?:static\.|cdn\.|assets\.)'
+      - 'ImageIO\s*\.\s*read\s*\(\s*new\s+ByteArrayInputStream'
+      - 'ImageIO\s*\.\s*read\s*\(\s*(?:inputStream|is|stream)\s*\)'
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - 'Mockito\.\w+'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'ImageIO\s*\.\s*read\s*\(\s*(?:RESOURCE|CLASSPATH|CONFIG)'
+      - 'getResourceAsStream\s*\('
+      - 'ClassPathResource\s*\('
+      - 'ImageIO\s*\.\s*write\s*\('
+    bypass_variants:
+      - description: "Redirect to internal URL via 302 (ImageIO follows redirects)"
+        pattern: 'ImageIO\s*\.\s*read\s*\(\s*new\s+URL\s*\(\s*(?:url|imageUrl|request)'
+      - description: "SVG with external entity reference (XXE via image)"
+        pattern: '(?:svg|image/svg)[\s\S]{0,200}(?:url|uri|imageUrl|request\.)'
+      - description: "ImageIO plugin loading remote resources"
+        pattern: 'ImageIO\s*\.\s*(?:getImageReadersByFormatName|createImageInputStream)\s*\('
+      - description: "EXIF data containing URLs for secondary fetches"
+        pattern: '(?:Metadata|EXIF|IPTC|XMP)[\s\S]{0,200}(?:url|uri|source|reference)'
+    evasion_indicators:
+      - "302 redirect from image URL to internal resource"
+      - "SVG with embedded external references"
+      - "Image format exploits (ImageTragick-style)"
+      - "EXIF metadata with embedded URLs"
+      - "Progressive image loading fetching additional resources"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: 'ImageIO\.read\s*\(\s*new\s+URL\s*\(.*?%(?:25)?(?:30|31|32)'
+      - type: "data_uri"
+        pattern: 'ImageIO\.read\s*\(.*?"data:image/'
+      - type: "base64_url"
+        pattern: 'ImageIO\.read\s*\(.*?(?:Base64|decode)\s*\('
+    multi_function_chain_patterns:
+      - "request.getParameter('imageUrl') -> new URL(imageUrl) -> ImageIO.read(url)"
+      - "@RequestParam imageUrl -> ImageIO.read(new URL(imageUrl)) -> resize -> save"
+      - "user input -> avatar URL -> ImageIO.read(url) -> thumbnail generation"
+      - "webhook payload -> image URL -> ImageIO.read -> processing pipeline"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "Image processing SSRF enables blind requests to internal services"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('imageUrl')"
+        sink: "ImageIO.read(new URL(imageUrl))"
+        through: "direct parameter to ImageIO.read"
+      - source: "@RequestParam String avatarUrl"
+        sink: "ImageIO.read(new URL(avatarUrl))"
+        through: "avatar upload URL to image processing"
+      - source: "profileDto.getPhotoUrl()"
+        sink: "ImageIO.read(new URL(photoUrl))"
+        through: "profile update DTO to image loading"
+    impact: |
+      - Blind SSRF via image loading to internal services.
+      - Cloud metadata access through image URL pointing to metadata endpoint.
+      - Internal port scanning via response timing analysis.
+      - Potential for ImageTragick-style exploits if ImageMagick is used.
+      - Information leakage via error messages about failed image parsing.
+    remediation: |
+      1. Download the image content separately with URL validation, then pass bytes to ImageIO:
+         ```java
+         public static BufferedImage safeImageRead(String imageUrl) throws IOException {
+             URL url = new URL(imageUrl);
+
+             if (!"https".equals(url.getProtocol())) {
+                 throw new SecurityException("Only HTTPS allowed");
+             }
+
+             InetAddress addr = InetAddress.getByName(url.getHost());
+             if (addr.isSiteLocalAddress() || addr.isLoopbackAddress()
+                     || addr.isLinkLocalAddress()) {
+                 throw new SecurityException("Internal address blocked");
+             }
+
+             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+             conn.setInstanceFollowRedirects(false);
+             conn.setConnectTimeout(5000);
+             conn.setReadTimeout(5000);
+
+             String contentType = conn.getContentType();
+             if (!contentType.startsWith("image/")) {
+                 throw new SecurityException("Not an image content type");
+             }
+
+             byte[] data = conn.getInputStream().readAllBytes();
+             return ImageIO.read(new ByteArrayInputStream(data));
+         }
+         ```
+      2. Validate content type before processing.
+      3. Use ByteArrayInputStream instead of URL for ImageIO.read().
+      4. Set size limits on downloaded images.
+      5. Disable SVG processing or sanitize SVG content.
+    references:
+      - "https://docs.oracle.com/en/java/javase/17/docs/api/java.desktop/javax/imageio/ImageIO.html"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://imagetragick.com/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+javax\.imageio\.ImageIO'
+        - 'class\s+\w+(?:Image|Media|Avatar|Photo|Thumbnail)'
+        - '@(?:PostMapping|PutMapping|RequestMapping)'
+        - 'BufferedImage\s+'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\(\s*"(?:image|img|avatar|photo|media)(?:Url|URL|Uri|URI)?"'
+        - '@RequestParam\s+String\s+(?:image|img|avatar|photo)(?:Url)?'
+        - 'dto\.get(?:Image|Avatar|Photo)Url\s*\('
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - 'ImageIO\.read\s*\(\s*new\s+URL'
+        - 'ImageIO\.createImageInputStream\s*\('
+        - 'Thumbnails\.of\s*\(\s*new\s+URL'
+        - 'new\s+URL\s*\(.*\)\.openStream'
+      sanitization_patterns:
+        - 'validateImageUrl\s*\('
+        - 'isAllowedImageHost\s*\('
+        - 'contentType\.startsWith\s*\(\s*"image/'
+        - 'IMAGE_ALLOWED_HOSTS'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + blind_ssrf_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A profile service allows users to set avatars via URL:
+
+        @PostMapping("/api/profile/avatar")
+        public void updateAvatar(@RequestParam String imageUrl) {
+            BufferedImage image = ImageIO.read(new URL(imageUrl));
+            // ... resize and save avatar
+        }
+
+        An attacker sets their avatar URL to:
+        POST /api/profile/avatar?imageUrl=http://169.254.169.254/latest/meta-data/
+
+        Even though the response is not a valid image, the HTTP request is made
+        and the response is received. Error messages may leak information.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Perform blind SSRF via image processing endpoint"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JAVA-001"
+        - "SSRF-JAVA-004"
+        - "SSRF-JAVA-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JAVA-006: Cloud Metadata Endpoint Access
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JAVA-006"
+    title: "Cloud Metadata Endpoint Access in Java"
+    description: >
+      Detects Java code patterns that access cloud provider metadata endpoints,
+      either directly or through user-controlled URL parameters. Cloud metadata
+      services at 169.254.169.254 (AWS, GCP), 169.254.170.2 (ECS), and
+      100.100.100.200 (Alibaba) expose temporary IAM credentials, instance
+      identity, and configuration data. This is the highest-impact SSRF
+      target in cloud-hosted Java applications.
+    language: java
+    category: ssrf
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - java
+      - cloud-metadata
+      - aws
+      - gcp
+      - azure
+      - iam
+      - credential-theft
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*"https?://169\.254\.169\.254'
+        description: "URL object constructed with metadata IP"
+      - type: regex
+        pattern: 'new\s+(?:HttpGet|HttpPost)\s*\(\s*"https?://169\.254\.169\.254'
+        description: "Apache HttpClient request to metadata IP"
+      - type: regex
+        pattern: '(?:restTemplate|webClient)\s*\.?\s*\w+\s*\(\s*"https?://169\.254\.169\.254'
+        description: "Spring HTTP client accessing metadata endpoint"
+      - type: regex
+        pattern: 'URI\s*\.\s*create\s*\(\s*"https?://169\.254\.169\.254'
+        description: "URI.create with metadata IP"
+      - type: regex
+        pattern: '"https?://metadata\.google\.internal/computeMetadata/'
+        description: "GCP metadata endpoint URL in code"
+      - type: regex
+        pattern: '"Metadata-Flavor"\s*,\s*"Google"'
+        description: "GCP metadata request header value"
+      - type: regex
+        pattern: '(?:169\.254\.169\.254|metadata\.google\.internal|169\.254\.170\.2|100\.100\.100\.200)(?:/latest/|/computeMetadata/|/metadata/)'
+        description: "Cloud metadata path patterns"
+      - type: regex
+        pattern: '"X-aws-ec2-metadata-token"'
+        description: "AWS IMDSv2 token header in Java code"
+    anti_patterns:
+      - '@Test'
+      - 'class\s+\w+Test\s'
+      - 'import\s+org\.(?:junit|mockito)'
+      - '(?:mock|stub|when|verify|Mockito)\s*[\.\(]'
+      - '@SpringBootTest'
+      - '@MockBean'
+      - 'WireMock\.'
+      - '(?://|/\*)\s*(?:TODO|FIXME|test|mock|example)'
+      - 'BLOCKED.*169\.254'
+      - 'DENY.*169\.254'
+      - 'import\s+(?:com\.amazonaws|software\.amazon\.awssdk)'
+      - 'AmazonEC2Client'
+      - 'Ec2MetadataClient'
+      - 'com\.google\.cloud\.'
+      - 'com\.azure\.'
+    bypass_variants:
+      - description: "Decimal IP encoding (2852039166 = 169.254.169.254)"
+        pattern: 'new\s+URL\s*\(\s*"https?://2852039166'
+      - description: "Hex IP encoding (0xa9fea9fe)"
+        pattern: 'new\s+URL\s*\(\s*"https?://0xa9fea9fe'
+      - description: "Octal IP encoding"
+        pattern: 'new\s+URL\s*\(\s*"https?://0251\.0376\.0251\.0376'
+      - description: "IPv6 mapped address"
+        pattern: 'new\s+URL\s*\(\s*"https?://\[::ffff:169\.254\.169\.254\]'
+      - description: "Redirect to metadata via 302 response"
+        pattern: '\.setInstanceFollowRedirects\s*\(\s*true\s*\)[\s\S]{0,500}169\.254'
+    evasion_indicators:
+      - "Decimal/octal/hex IP encoding"
+      - "IPv6 mapped IPv4 address"
+      - "HTTP redirect chain to metadata"
+      - "DNS CNAME to metadata IP"
+      - "URL shortener redirect"
+      - "Server-side PDF/image rendering to metadata"
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: '(?:new\s+URL|URI\.create)\s*\(\s*"https?://285203916[0-9]'
+      - type: "hex_ip"
+        pattern: '(?:new\s+URL|URI\.create)\s*\(\s*"https?://0x[aA]9[fF][eE][aA]9[fF][eE]'
+      - type: "octal_ip"
+        pattern: '(?:new\s+URL|URI\.create)\s*\(\s*"https?://0+251\.0+376'
+      - type: "ipv6_mapped"
+        pattern: '(?:new\s+URL|URI\.create)\s*\(\s*"https?://\[::ffff:(?:169\.254|a9fe)'
+    multi_function_chain_patterns:
+      - "user URL -> SSRF -> metadata credential extraction -> AWS API calls"
+      - "image URL -> ImageIO.read -> redirect to metadata -> credential leak"
+      - "webhook URL -> HttpClient -> redirect to metadata -> token theft"
+      - "PDF generation -> URL reference -> metadata access -> credential exposure"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cloud metadata access yields IAM credentials for full cloud infrastructure compromise"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.getParameter('url')"
+        sink: "new URL('http://169.254.169.254/...').openStream()"
+        through: "URL validation bypass allowing metadata IP"
+      - source: "@RequestParam String imageUrl"
+        sink: "ImageIO.read(new URL(imageUrl))"
+        through: "image URL redirect to metadata endpoint"
+      - source: "requestBody.getWebhookUrl()"
+        sink: "httpClient.execute(new HttpGet(webhookUrl))"
+        through: "webhook URL redirect to metadata"
+    impact: |
+      - Theft of AWS IAM temporary security credentials.
+      - Theft of GCP service account OAuth2 tokens.
+      - Theft of Azure Managed Identity tokens.
+      - Access to instance user-data containing application secrets.
+      - Full cloud account compromise through stolen credentials.
+      - Lateral movement to databases, storage, and compute services.
+    remediation: |
+      1. Block metadata endpoints at application and network level:
+         ```java
+         import java.net.*;
+         import java.util.Set;
+
+         public class MetadataBlocker {
+             private static final Set<String> METADATA_IPS = Set.of(
+                 "169.254.169.254", "169.254.170.2",
+                 "100.100.100.200", "fd00:ec2::254"
+             );
+             private static final Set<String> METADATA_HOSTS = Set.of(
+                 "metadata.google.internal", "metadata.azure.com"
+             );
+
+             public static void blockMetadata(String urlString) throws Exception {
+                 URL url = new URL(urlString);
+                 String host = url.getHost();
+
+                 if (METADATA_IPS.contains(host) || METADATA_HOSTS.contains(host)) {
+                     throw new SecurityException("Metadata endpoint blocked");
+                 }
+
+                 InetAddress addr = InetAddress.getByName(host);
+                 if (METADATA_IPS.contains(addr.getHostAddress())) {
+                     throw new SecurityException("DNS resolves to metadata IP");
+                 }
+                 if (addr.isLinkLocalAddress()) {
+                     throw new SecurityException("Link-local address blocked");
+                 }
+             }
+         }
+         ```
+      2. Enable IMDSv2 on all AWS EC2 instances.
+      3. Deploy iptables/nftables rules blocking metadata access from containers.
+      4. Use Kubernetes network policies to restrict egress to metadata.
+      5. Implement VPC firewall rules blocking link-local access.
+    references:
+      - "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+      - "https://cloud.google.com/compute/docs/metadata/overview"
+      - "https://docs.microsoft.com/en-us/azure/virtual-machines/instance-metadata-service"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'class\s+\w+(?:Controller|Service|Handler)\s'
+        - '@(?:RestController|Controller|Service)'
+        - 'import\s+java\.net\.'
+        - 'import\s+org\.apache\.http'
+      taint_source_indicators:
+        - 'request\.getParameter\s*\('
+        - '@RequestParam\s+'
+        - '@RequestBody\s+'
+        - 'request\.getHeader\s*\('
+      taint_sink_indicators:
+        - 'new\s+URL\s*\('
+        - 'URI\.create\s*\('
+        - 'new\s+HttpGet\s*\('
+        - 'restTemplate\.\w+\s*\('
+        - 'webClient\.\w+\s*\('
+      sanitization_patterns:
+        - 'blockMetadata\s*\('
+        - 'METADATA.*(?:BLOCK|DENY)'
+        - 'isMetadataIP\s*\('
+        - 'isLinkLocalAddress\s*\('
+        - 'BLOCKED_IPS.*169\.254'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * cloud_exposure_multiplier"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot application accepts a URL for content fetching:
+
+        @GetMapping("/api/fetch")
+        public String fetchUrl(@RequestParam String url) {
+            return restTemplate.getForObject(url, String.class);
+        }
+
+        Attacker requests:
+        GET /api/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+        Server returns IAM role name. Attacker then fetches:
+        GET /api/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-Admin
+
+        Returns JSON with AccessKeyId, SecretAccessKey, and Token.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-Admin"
+      attacker_objective: "Steal cloud IAM credentials for full infrastructure compromise"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JAVA-001"
+        - "SSRF-JAVA-002"
+        - "SSRF-JAVA-003"
+        - "SSRF-JAVA-004"
+        - "SSRF-JAVA-005"

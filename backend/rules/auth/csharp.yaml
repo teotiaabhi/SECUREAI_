@@ -1,0 +1,1156 @@
+rules:
+- rule_id: AUTH-CS-001
+  title: Hardcoded Credentials in C# Source
+  description: 'Detects hardcoded API keys, passwords, tokens, and connection strings in C# source code including const declarations,
+    string assignments, and inline authentication values used in HttpClient and service configurations.
+
+    '
+  language: csharp
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - hardcoded-credentials
+  - api-keys
+  - secrets
+  - csharp
+  - aspnet
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: (?:password|Password|PASSWORD)\s*=\s*"[^"]{4,}"
+    description: Hardcoded password assignment
+  - pattern: (?:apiKey|ApiKey|API_KEY|api_key)\s*=\s*"[^"]{8,}"
+    description: Hardcoded API key assignment
+  - pattern: const\s+string\s+\w*(?:Key|Secret|Token|Password|Credential)\w*\s*=\s*"[^"]{6,}"
+    description: Const string with hardcoded credential
+  - pattern: ConnectionString\s*=\s*"[^"]*(?:Password|Pwd)\s*=\s*[^;"]+
+    description: Hardcoded password in connection string
+  - pattern: new\s+NetworkCredential\s*\(\s*"[^"]+"\s*,\s*"[^"]+"\s*\)
+    description: Hardcoded NetworkCredential constructor
+  anti_patterns:
+  - pattern: Configuration\[|IConfiguration|GetValue<|GetSection
+    description: Configuration provider usage
+  - pattern: Environment\.GetEnvironmentVariable
+    description: Environment variable usage
+  - pattern: UserSecrets|SecretManager|KeyVault
+    description: Secrets manager usage
+  - pattern: \.Tests?\.|TestMethod|TestFixture|\[Fact\]|\[Theory\]
+    description: Test file context
+  - pattern: placeholder|example|changeme|TODO
+    description: Placeholder values
+  bypass_variants:
+  - variant: Credential in appsettings.json committed to repo
+    description: Configuration file with secrets in source control
+  - variant: Base64-encoded credential in const
+    description: Obfuscated constant credential
+  evasion_indicators:
+  - Credential in static readonly field
+  - String concatenation to avoid detection
+  - Encoded credential in resource file
+  encoding_variants:
+  - String literal assignment
+  - Const or static readonly declaration
+  multi_function_chain_patterns:
+  - const apiKey = 'hardcoded' -> HttpClient -> DefaultRequestHeaders.Add('Authorization')
+  - password = 'hardcoded' -> SqlConnection -> Open()
+  privilege_context_flags:
+  - Database authentication
+  - API service credentials
+  business_logic_indicator:
+  - HttpClient configuration
+  - Database connection setup
+  probable_taint_paths:
+  - source: Hardcoded string literal
+    sink: HttpClient Authorization header or SqlConnection
+    through: Direct credential usage
+  impact: 'Hardcoded credentials in C# assemblies can be extracted through IL decompilation (ILSpy, dnSpy). This provides
+    direct access to databases, APIs, and authenticated endpoints.
+
+    '
+  remediation: 'Use ASP.NET Core Configuration with User Secrets for development, Azure Key Vault or AWS Secrets Manager for
+    production. Never commit credentials to appsettings.json in source control.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets
+  context_awareness:
+    surrounding_context_patterns:
+    - using System.Net
+    - HttpClient
+    - SqlConnection
+    taint_source_indicators:
+    - String literal
+    - Const declaration
+    taint_sink_indicators:
+    - HttpClient
+    - SqlConnection
+    - NetworkCredential
+    sanitization_patterns:
+    - Configuration[
+    - Environment.GetEnvironmentVariable
+    - KeyVault
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: production connection string
+      modifier: '+0.5'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker decompiles .NET assembly with ILSpy. 2. Finds const ApiKey = "sk-prod-abc123..." in IL. 3.
+    Uses extracted credentials for unauthorized access.
+
+    '
+  confidence_factors:
+    increases:
+    - Long string in credential variable
+    - Const with Key/Secret name
+    decreases:
+    - Test file
+    - Placeholder value
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-002
+    - AUTH-CS-009
+    dependency_chain: Hardcoded credentials enable direct authentication bypass
+    combined_risk_increase: Critical when combined with exposed endpoints
+- rule_id: AUTH-CS-002
+  title: JWT Validation Skip in ASP.NET
+  description: 'Detects insecure JWT handling in ASP.NET Core including disabled signature validation, missing issuer/audience
+    checks, weak signing keys, and algorithm confusion vulnerabilities.
+
+    '
+  language: csharp
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-287
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - jwt
+  - authentication-bypass
+  - token-validation
+  - aspnet-core
+  - csharp
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: ValidateIssuerSigningKey\s*=\s*false
+    description: JWT signature validation disabled
+  - pattern: ValidateIssuer\s*=\s*false
+    description: JWT issuer validation disabled
+  - pattern: ValidateAudience\s*=\s*false
+    description: JWT audience validation disabled
+  - pattern: ValidateLifetime\s*=\s*false
+    description: JWT expiration validation disabled
+  - pattern: RequireExpirationTime\s*=\s*false
+    description: JWT expiration requirement disabled
+  - pattern: new\s+SymmetricSecurityKey\s*\(\s*Encoding\.\w+\.GetBytes\s*\(\s*"[^"]{1,31}"\s*\)
+    description: JWT signed with weak short key
+  anti_patterns:
+  - pattern: ValidateIssuerSigningKey\s*=\s*true
+    description: Signature validation enabled
+  - pattern: RequireHttpsMetadata\s*=\s*true
+    description: HTTPS metadata required
+  - pattern: IssuerSigningKey.*RSA|ECDsa
+    description: Asymmetric key usage
+  bypass_variants:
+  - variant: Algorithm none attack via header manipulation
+    description: JWT alg:none bypass
+  - variant: HMAC/RSA confusion attack
+    description: Algorithm substitution attack
+  evasion_indicators:
+  - Multiple validation flags disabled
+  - Custom TokenValidationParameters override
+  - Manual JWT parsing without library
+  encoding_variants:
+  - TokenValidationParameters configuration
+  - JwtBearerOptions setup
+  multi_function_chain_patterns:
+  - AddJwtBearer -> TokenValidationParameters { ValidateIssuerSigningKey = false }
+  - JwtSecurityTokenHandler -> ValidateToken with loose parameters
+  privilege_context_flags:
+  - API authentication
+  - User authorization
+  business_logic_indicator:
+  - Startup.cs / Program.cs authentication config
+  - API controller authorization
+  probable_taint_paths:
+  - source: JWT token from Authorization header
+    sink: TokenValidationParameters
+    through: JwtBearerAuthentication middleware
+  impact: 'Disabled JWT validation allows attackers to forge authentication tokens, impersonate any user, escalate privileges,
+    and access protected API endpoints.
+
+    '
+  remediation: 'Enable all JWT validation parameters. Use strong signing keys (256+ bits). Validate issuer, audience, and
+    lifetime. Use asymmetric keys (RSA/ECDSA) for production.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/287.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/authentication/jwt
+  context_awareness:
+    surrounding_context_patterns:
+    - AddJwtBearer
+    - TokenValidationParameters
+    - JwtSecurityTokenHandler
+    taint_source_indicators:
+    - Authorization header
+    - Bearer token
+    taint_sink_indicators:
+    - ValidateToken
+    - TokenValidationParameters
+    sanitization_patterns:
+    - ValidateIssuerSigningKey = true
+    - ValidateIssuer = true
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: signature validation disabled
+      modifier: '+0.5'
+    - condition: development environment only
+      modifier: '-3.0'
+  exploit_scenario: '1. API uses JWT auth with ValidateIssuerSigningKey = false. 2. Attacker crafts JWT with alg:none and
+    admin claims. 3. Server accepts forged token and grants admin access.
+
+    '
+  confidence_factors:
+    increases:
+    - Multiple validation flags disabled
+    - Weak signing key
+    decreases:
+    - Development-only configuration
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-001
+    - AUTH-CS-009
+    dependency_chain: JWT bypass enables full authentication bypass
+    combined_risk_increase: Maximum when combined with privilege escalation paths
+- rule_id: AUTH-CS-003
+  title: Weak Password Hashing in C#
+  description: 'Detects use of weak hashing algorithms (MD5, SHA1, SHA256 without salting) for password storage instead of
+    proper password hashing functions like BCrypt, Argon2, or ASP.NET Identity''s PasswordHasher.
+
+    '
+  language: csharp
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-916
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - weak-hashing
+  - password-storage
+  - md5
+  - sha1
+  - csharp
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: MD5\.(?:Create|HashData)\s*\([^)]*(?:password|Password|pwd)\b
+    description: MD5 hashing of password
+  - pattern: SHA1\.(?:Create|HashData)\s*\([^)]*(?:password|Password|pwd)\b
+    description: SHA1 hashing of password
+  - pattern: SHA256\.(?:Create|HashData)\s*\([^)]*(?:password|Password|pwd)\b
+    description: SHA256 hashing of password without proper KDF
+  - pattern: HashAlgorithm\.Create\s*\(\s*"(?:MD5|SHA1|SHA256)"\s*\)
+    description: HashAlgorithm.Create with weak algorithm for passwords
+  - pattern: FormsAuthentication\.HashPasswordForStoringInConfigFile
+    description: Legacy ASP.NET password hashing
+  anti_patterns:
+  - pattern: PasswordHasher|Rfc2898DeriveBytes|BCrypt|Argon2
+    description: Proper password hashing
+  - pattern: KeyDerivation\.Pbkdf2
+    description: ASP.NET Core key derivation
+  - pattern: file integrity|checksum|HMAC
+    description: Non-password hashing context
+  bypass_variants:
+  - variant: Custom hash with single iteration
+    description: Homebrew password hashing
+  - variant: Salted MD5/SHA1
+    description: Weak algorithm with salt
+  evasion_indicators:
+  - Custom password hashing utility
+  - Single iteration PBKDF2
+  encoding_variants:
+  - Direct hash computation
+  - Hash via ComputeHash method
+  multi_function_chain_patterns:
+  - password -> Encoding.UTF8.GetBytes() -> MD5.Create().ComputeHash() -> stored
+  privilege_context_flags:
+  - User registration
+  - Password change
+  business_logic_indicator:
+  - User account management
+  - Authentication flow
+  probable_taint_paths:
+  - source: User password input
+    sink: Database storage
+    through: Weak hash function
+  impact: 'Weak password hashing enables offline brute-force and rainbow table attacks. MD5/SHA1 passwords can be cracked
+    in seconds with modern hardware.
+
+    '
+  remediation: 'Use ASP.NET Identity PasswordHasher (PBKDF2) or BCrypt.Net: var hasher = new PasswordHasher<User>(); var hash
+    = hasher.HashPassword(user, password); var result = hasher.VerifyHashedPassword(user, hash, input);
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/916.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - MD5.Create
+    - SHA1.Create
+    - ComputeHash
+    - password
+    taint_source_indicators:
+    - User password
+    - Registration form
+    taint_sink_indicators:
+    - ComputeHash
+    - HashData
+    - database insert
+    sanitization_patterns:
+    - PasswordHasher
+    - Rfc2898DeriveBytes
+    - BCrypt
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: MD5 without salt
+      modifier: '+1.0'
+    - condition: SHA256 with salt
+      modifier: '-1.0'
+  exploit_scenario: '1. Database breach exposes MD5-hashed passwords. 2. Attacker uses hashcat with GPU to crack passwords
+    at billions/sec. 3. Credential stuffing attack on other services with cracked passwords.
+
+    '
+  confidence_factors:
+    increases:
+    - Password variable name in hash input
+    - Database storage context
+    decreases:
+    - File integrity check context
+    - HMAC usage
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-001
+    - AUTH-CS-008
+    dependency_chain: Weak hashing enables credential theft after data breach
+    combined_risk_increase: Critical with SQL injection enabling database access
+- rule_id: AUTH-CS-004
+  title: Missing Authentication on Controller/Action
+  description: 'Detects ASP.NET Core controllers or actions that handle sensitive operations without [Authorize] attribute
+    while other controllers in the same project use authentication.
+
+    '
+  language: csharp
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-306
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - missing-auth
+  - authorization
+  - aspnet-core
+  - controller
+  - csharp
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - pattern: \[AllowAnonymous\]\s*(?:\[.*?\]\s*){0,5}(?:public\s+(?:async\s+)?(?:IActionResult|ActionResult|Task<))[^}]*(?:Delete|Remove|Update|Create|Admin|Manage)
+    description: AllowAnonymous on sensitive action
+  - pattern: public\s+class\s+\w*(?:Admin|Management|Settings)\w*Controller\s*:[^{]*\{(?:(?!\[Authorize\])[\s\S])*?public\s+(?:async\s+)?(?:IActionResult|ActionResult)
+    description: Admin controller without Authorize attribute
+  - pattern: \[HttpDelete\]\s*(?:\[.*?\]\s*){0,5}\[AllowAnonymous\]
+    description: AllowAnonymous on DELETE endpoint
+  - pattern: \[HttpPost\]\s*(?:\[.*?\]\s*){0,5}\[AllowAnonymous\]\s*(?:\[.*?\]\s*){0,5}public\s+(?:async\s+)?(?:IActionResult|ActionResult)[^}]*(?:password|Password|credential|role|permission)
+    description: AllowAnonymous on password/role management endpoint
+  anti_patterns:
+  - pattern: \[Authorize\]
+    description: Authorization attribute present
+  - pattern: RequireAuthorization
+    description: Endpoint authorization configured
+  - pattern: Login|Register|ForgotPassword|ResetPassword
+    description: Public authentication endpoints
+  bypass_variants:
+  - variant: Authorization check in action body instead of attribute
+    description: Manual auth check may be incomplete
+  evasion_indicators:
+  - AllowAnonymous overriding global Authorize
+  - Missing policy on specific actions
+  encoding_variants:
+  - Attribute-based authorization
+  multi_function_chain_patterns:
+  - '[AllowAnonymous] -> Delete action -> database modification'
+  privilege_context_flags:
+  - Administrative actions
+  - Data modification endpoints
+  business_logic_indicator:
+  - CRUD operations
+  - User management
+  probable_taint_paths:
+  - source: Unauthenticated HTTP request
+    sink: Database modification
+    through: AllowAnonymous controller action
+  impact: 'Missing authentication allows unauthenticated users to perform sensitive operations including data modification,
+    deletion, and privilege escalation.
+
+    '
+  remediation: 'Apply [Authorize] globally in Program.cs and use [AllowAnonymous] only for login/register. Use policy-based
+    authorization for sensitive actions: [Authorize(Policy = "AdminOnly")]
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/authorization/
+  context_awareness:
+    surrounding_context_patterns:
+    - '[ApiController]'
+    - '[Controller]'
+    - ControllerBase
+    taint_source_indicators:
+    - HTTP request
+    - Route parameter
+    taint_sink_indicators:
+    - DbContext
+    - Repository
+    - Service call
+    sanitization_patterns:
+    - '[Authorize]'
+    - RequireAuthorization
+    - User.Identity.IsAuthenticated
+  severity_scoring:
+    base_score: 8.5
+    exploitability: high
+    impact_score: 8.0
+    adjustments:
+    - condition: admin action without auth
+      modifier: '+1.0'
+    - condition: read-only action
+      modifier: '-2.0'
+  exploit_scenario: '1. Admin controller has [AllowAnonymous] on delete action. 2. Unauthenticated attacker discovers endpoint
+    via API enumeration. 3. Attacker deletes records without authentication.
+
+    '
+  confidence_factors:
+    increases:
+    - Sensitive action name (Delete, Admin)
+    - Missing Authorize attribute
+    decreases:
+    - Manual auth check in action body
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-002
+    - AUTH-CS-007
+    dependency_chain: Missing auth enables direct unauthorized access
+    combined_risk_increase: Critical when admin endpoints are exposed
+- rule_id: AUTH-CS-005
+  title: Insecure Cookie Configuration in ASP.NET
+  description: 'Detects insecure cookie settings in ASP.NET Core including missing Secure flag, HttpOnly flag, SameSite attribute,
+    and weak authentication cookie configuration.
+
+    '
+  language: csharp
+  category: auth
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-614
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - insecure-cookie
+  - session-management
+  - aspnet-core
+  - csharp
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - pattern: CookieOptions\s*\{[^}]*Secure\s*=\s*false
+    description: Cookie Secure flag disabled
+  - pattern: CookieOptions\s*\{[^}]*HttpOnly\s*=\s*false
+    description: Cookie HttpOnly flag disabled
+  - pattern: SameSite\s*=\s*SameSiteMode\.None(?!\s*,\s*Secure\s*=\s*true)
+    description: SameSite=None without Secure flag
+  - pattern: CookieAuthenticationDefaults[^;]*options\.Cookie\.SecurePolicy\s*=\s*CookieSecurePolicy\.(?:Never|SameAsRequest)
+    description: Auth cookie without Always Secure
+  - pattern: \.ExpireTimeSpan\s*=\s*TimeSpan\.From(?:Days|Hours)\s*\(\s*(?:[3-9]\d|\d{3,})
+    description: Excessively long authentication cookie expiration
+  anti_patterns:
+  - pattern: Secure\s*=\s*true.*HttpOnly\s*=\s*true
+    description: Properly secured cookie
+  - pattern: CookieSecurePolicy\.Always
+    description: Always secure policy
+  - pattern: SameSiteMode\.Strict
+    description: Strict SameSite mode
+  bypass_variants:
+  - variant: Cookie theft via XSS when HttpOnly is false
+    description: JavaScript cookie access
+  evasion_indicators:
+  - Missing Secure flag on auth cookies
+  - SameSite None allowing cross-site requests
+  encoding_variants:
+  - CookieOptions initialization
+  multi_function_chain_patterns:
+  - new CookieOptions { Secure = false } -> Response.Cookies.Append()
+  privilege_context_flags:
+  - Session management
+  - Authentication cookies
+  business_logic_indicator:
+  - Login flow
+  - Session persistence
+  probable_taint_paths:
+  - source: Authentication cookie
+    sink: Client browser
+    through: Insecure cookie transmission
+  impact: 'Insecure cookies can be stolen via XSS (no HttpOnly), intercepted via MITM (no Secure), or used in CSRF attacks
+    (no SameSite).
+
+    '
+  remediation: 'Configure cookies with Secure=true, HttpOnly=true, SameSite=Strict: options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.HttpOnly = true; options.Cookie.SameSite = SameSiteMode.Strict;
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/614.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/authentication/cookie
+  context_awareness:
+    surrounding_context_patterns:
+    - CookieOptions
+    - AddCookie
+    - CookieAuthenticationDefaults
+    taint_source_indicators:
+    - Authentication token
+    - Session ID
+    taint_sink_indicators:
+    - Response.Cookies.Append
+    - CookieAuthenticationOptions
+    sanitization_patterns:
+    - Secure = true
+    - HttpOnly = true
+    - SameSiteMode.Strict
+  severity_scoring:
+    base_score: 6.5
+    exploitability: medium
+    impact_score: 6.0
+    adjustments:
+    - condition: auth cookie without Secure
+      modifier: '+1.5'
+    - condition: non-sensitive cookie
+      modifier: '-2.0'
+  exploit_scenario: '1. Auth cookie set without HttpOnly flag. 2. XSS vulnerability allows document.cookie access. 3. Attacker
+    steals session cookie and hijacks user session.
+
+    '
+  confidence_factors:
+    increases:
+    - Authentication cookie context
+    - Missing Secure flag
+    decreases:
+    - Non-sensitive cookie
+    - Development environment
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-008
+    - AUTH-CS-006
+    dependency_chain: Insecure cookies enable session hijacking
+    combined_risk_increase: High when combined with XSS vulnerabilities
+- rule_id: AUTH-CS-006
+  title: CSRF Protection Bypass in ASP.NET
+  description: 'Detects disabled or misconfigured CSRF protection including missing [ValidateAntiForgeryToken], disabled anti-forgery
+    filters, and misconfigured CORS with credentials.
+
+    '
+  language: csharp
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-352
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - csrf
+  - anti-forgery
+  - aspnet-core
+  - cross-site
+  - csharp
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - pattern: \[IgnoreAntiforgeryToken\]\s*(?:\[.*?\]\s*){0,5}public\s+(?:async\s+)?(?:IActionResult|ActionResult)
+    description: Anti-forgery token validation ignored on action
+  - pattern: options\.Filters\.Remove\s*\([^)]*AutoValidateAntiforgeryTokenAttribute
+    description: Global anti-forgery filter removed
+  - pattern: AllowAnyOrigin\s*\(\s*\)[^;]*AllowCredentials\s*\(\s*\)
+    description: CORS allowing any origin with credentials
+  - pattern: WithOrigins\s*\(\s*"\*"\s*\)[^;]*AllowCredentials
+    description: CORS wildcard origin with credentials
+  - pattern: options\.SuppressXFrameOptionsHeader\s*=\s*true
+    description: X-Frame-Options header suppressed
+  anti_patterns:
+  - pattern: '[ValidateAntiForgeryToken]'
+    description: Anti-forgery token validation present
+  - pattern: AutoValidateAntiforgeryToken
+    description: Auto-validation enabled
+  - pattern: SameSiteMode\.Strict
+    description: SameSite cookie protection
+  bypass_variants:
+  - variant: CORS misconfiguration enabling cross-origin requests
+    description: CORS-based CSRF bypass
+  evasion_indicators:
+  - CORS with credentials and weak origin policy
+  - X-Frame-Options suppressed enabling clickjacking
+  encoding_variants:
+  - Attribute-based anti-forgery
+  multi_function_chain_patterns:
+  - '[IgnoreAntiforgeryToken] -> [HttpPost] -> database modification'
+  privilege_context_flags:
+  - State-changing operations
+  - Financial transactions
+  business_logic_indicator:
+  - Form submission
+  - API mutation endpoints
+  probable_taint_paths:
+  - source: Cross-origin POST request
+    sink: State-changing action
+    through: Missing CSRF validation
+  impact: 'CSRF enables attackers to perform actions on behalf of authenticated users including password changes, fund transfers,
+    and data modification.
+
+    '
+  remediation: "Use [AutoValidateAntiforgeryToken] globally. Configure strict CORS: builder.Services.AddAntiforgery(); builder.Services.AddControllersWithViews(o\
+    \ =>\n    o.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/352.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery
+  context_awareness:
+    surrounding_context_patterns:
+    - '[HttpPost]'
+    - '[HttpPut]'
+    - '[HttpDelete]'
+    - AddAntiforgery
+    taint_source_indicators:
+    - Cross-origin request
+    - Form submission
+    taint_sink_indicators:
+    - Database modification
+    - State change
+    sanitization_patterns:
+    - '[ValidateAntiForgeryToken]'
+    - AutoValidateAntiforgeryToken
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: financial transaction endpoint
+      modifier: '+1.5'
+    - condition: read-only endpoint
+      modifier: '-3.0'
+  exploit_scenario: '1. [IgnoreAntiforgeryToken] on password change action. 2. Attacker hosts page with auto-submitting form
+    to change endpoint. 3. Victim visits page; their session submits password change.
+
+    '
+  confidence_factors:
+    increases:
+    - State-changing endpoint
+    - Financial action
+    decreases:
+    - Read-only endpoint
+    - API with token auth
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-005
+    - AUTH-CS-004
+    dependency_chain: CSRF bypass enables unauthorized state changes
+    combined_risk_increase: High with insecure cookie configuration
+- rule_id: AUTH-CS-007
+  title: Broken Access Control in ASP.NET MVC
+  description: 'Detects Insecure Direct Object Reference (IDOR) and broken access control patterns where user-supplied IDs
+    access resources without ownership verification in ASP.NET Core controllers.
+
+    '
+  language: csharp
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-639
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - idor
+  - broken-access-control
+  - authorization
+  - aspnet-core
+  - csharp
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - pattern: (?:FindAsync|Find|FirstOrDefault)\s*\(\s*(?:id|Id|userId|recordId)\b[^)]*\)(?:(?!User\.(?:Identity|FindFirst|Claims)).)*$
+    description: Database lookup by ID without user ownership check
+  - pattern: \[HttpGet\]\s*(?:\[.*?\]\s*){0,5}public\s+(?:async\s+)?(?:IActionResult|ActionResult)\s+\w+\s*\(\s*(?:int|Guid|string)\s+id\s*\)[^}]*(?:FindAsync|Find)\s*\(\s*id\s*\)
+    description: GET with ID parameter directly querying database
+  - pattern: \[HttpDelete\]\s*(?:\[.*?\]\s*){0,5}public\s+(?:async\s+)?(?:IActionResult|ActionResult)\s+\w+\s*\(\s*(?:int|Guid|string)\s+id\s*\)[^}]*(?:Remove|Delete)\s*\(
+    description: DELETE with ID parameter without ownership validation
+  anti_patterns:
+  - pattern: User\.FindFirst|User\.Identity|HttpContext\.User|ClaimTypes
+    description: User context check present
+  - pattern: IAuthorizationService
+    description: Authorization service used
+  - pattern: \.UserId\s*==|\.OwnerId\s*==
+    description: Ownership check present
+  bypass_variants:
+  - variant: Parameter tampering on update endpoint
+    description: Changing ID in request body
+  evasion_indicators:
+  - Direct DB access with route parameter
+  - Missing ownership filter in query
+  encoding_variants:
+  - Route parameter ID
+  - Query string ID
+  multi_function_chain_patterns:
+  - Route {id} -> FindAsync(id) -> return Ok(entity)
+  privilege_context_flags:
+  - Resource ownership
+  - Multi-tenant access
+  business_logic_indicator:
+  - Resource CRUD operations
+  - User data access
+  probable_taint_paths:
+  - source: Route parameter id
+    sink: Database FindAsync(id)
+    through: Direct ID lookup without ownership filter
+  impact: 'IDOR allows accessing, modifying, or deleting other users'' data by manipulating resource IDs in requests.
+
+    '
+  remediation: "Always filter queries by the authenticated user's context: var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;\
+    \ var item = await _context.Items.FirstOrDefaultAsync(\n    i => i.Id == id && i.UserId == userId);\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/639.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '[HttpGet]'
+    - '[HttpDelete]'
+    - FindAsync
+    - DbContext
+    taint_source_indicators:
+    - Route parameter
+    - Query string
+    - Form value
+    taint_sink_indicators:
+    - FindAsync(
+    - Find(
+    - FirstOrDefault(
+    sanitization_patterns:
+    - User.FindFirst
+    - .UserId ==
+    - IAuthorizationService
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: financial data
+      modifier: '+1.0'
+    - condition: public data
+      modifier: '-3.0'
+  exploit_scenario: '1. GET /api/orders/123 returns order for user A. 2. User B changes ID to /api/orders/456 and sees user
+    A''s order. 3. No ownership check prevents cross-user data access.
+
+    '
+  confidence_factors:
+    increases:
+    - Direct ID parameter to DB query
+    - No User context check
+    decreases:
+    - Authorization service present
+    - Ownership filter in query
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: complex
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-004
+    - AUTH-CS-002
+    dependency_chain: IDOR enables cross-user data access
+    combined_risk_increase: Critical with missing authentication
+- rule_id: AUTH-CS-008
+  title: Weak Session Management in ASP.NET
+  description: 'Detects weak session configuration including in-memory session storage in production, missing session timeout,
+    predictable session IDs, and session fixation vulnerabilities.
+
+    '
+  language: csharp
+  category: auth
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-384
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session-management
+  - session-fixation
+  - aspnet-core
+  - csharp
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - pattern: AddDistributedMemoryCache\s*\(\s*\)[^;]*AddSession
+    description: In-memory session cache (not distributed) with sessions
+  - pattern: IdleTimeout\s*=\s*TimeSpan\.From(?:Hours|Days)\s*\(\s*(?:[2-9]\d|\d{2,})
+    description: Excessively long session idle timeout
+  - pattern: options\.Cookie\.Name\s*=\s*"(?:ASP\.NET_SessionId|JSESSIONID)"
+    description: Default or predictable session cookie name
+  - pattern: Session\[.*\]\s*=\s*.*(?:password|Password|credential|secret)
+    description: Sensitive data stored in session
+  anti_patterns:
+  - pattern: AddStackExchangeRedisCache|AddSqlServerCache|AddNCache
+    description: Distributed cache for sessions
+  - pattern: options\.Cookie\.IsEssential\s*=\s*true.*Secure\s*=\s*true
+    description: Secure session cookie configuration
+  bypass_variants:
+  - variant: Session fixation via URL rewriting
+    description: Session ID in URL
+  evasion_indicators:
+  - In-memory cache for production sessions
+  - Long session timeouts
+  encoding_variants:
+  - Session middleware configuration
+  multi_function_chain_patterns:
+  - AddDistributedMemoryCache() -> AddSession() -> UseSession()
+  privilege_context_flags:
+  - User session persistence
+  business_logic_indicator:
+  - Authentication state management
+  probable_taint_paths:
+  - source: Session cookie
+    sink: Session state
+    through: Weak session configuration
+  impact: 'Weak session management enables session hijacking, fixation attacks, and data loss when in-memory cache resets.
+
+    '
+  remediation: 'Use distributed cache (Redis, SQL Server) for production sessions. Set reasonable timeouts. Regenerate session
+    ID after login.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/384.html
+  - https://learn.microsoft.com/en-us/aspnet/core/fundamentals/app-state
+  context_awareness:
+    surrounding_context_patterns:
+    - AddSession
+    - UseSession
+    - HttpContext.Session
+    taint_source_indicators:
+    - Session cookie
+    taint_sink_indicators:
+    - Session[
+    - HttpContext.Session
+    sanitization_patterns:
+    - AddStackExchangeRedisCache
+    - IdleTimeout reasonable
+  severity_scoring:
+    base_score: 6.0
+    exploitability: medium
+    impact_score: 5.5
+    adjustments:
+    - condition: sensitive data in session
+      modifier: '+2.0'
+    - condition: read-only session
+      modifier: '-1.0'
+  exploit_scenario: '1. Application uses in-memory session cache in production. 2. App restart loses all sessions; users logged
+    out unexpectedly. 3. Long idle timeout allows stolen sessions to remain valid for days.
+
+    '
+  confidence_factors:
+    increases:
+    - In-memory cache in production
+    - Long timeout
+    decreases:
+    - Development environment
+    - Distributed cache
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-005
+    - AUTH-CS-003
+    dependency_chain: Weak sessions enable hijacking
+    combined_risk_increase: High with insecure cookie settings
+- rule_id: AUTH-CS-009
+  title: OAuth/OIDC Misconfiguration in ASP.NET Core
+  description: 'Detects insecure OAuth 2.0 and OpenID Connect configurations including disabled HTTPS, missing state/nonce
+    validation, weak redirect URI validation, and insecure token storage.
+
+    '
+  language: csharp
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-287
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - oauth
+  - oidc
+  - misconfiguration
+  - aspnet-core
+  - csharp
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: RequireHttpsMetadata\s*=\s*false
+    description: HTTPS metadata requirement disabled for OIDC
+  - pattern: SaveTokens\s*=\s*true(?:(?!DataProtection|Encryption).)*$
+    description: Tokens saved without encryption configuration
+  - pattern: options\.(?:ClientSecret|ClientId)\s*=\s*"[^"]{6,}"
+    description: Hardcoded OAuth client credentials
+  - pattern: BackchannelHttpHandler\s*=\s*new\s+HttpClientHandler\s*\{[^}]*ServerCertificateCustomValidationCallback\s*=\s*\([^)]*\)\s*=>\s*true
+    description: SSL certificate validation disabled for OAuth
+  - pattern: options\.Events\.OnRedirectToIdentityProvider\s*=\s*[^;]*(?:state|nonce)\s*=\s*(?:null|"")
+    description: State or nonce parameter cleared
+  anti_patterns:
+  - pattern: RequireHttpsMetadata\s*=\s*true
+    description: HTTPS metadata required
+  - pattern: DataProtectionProvider
+    description: Data protection for token encryption
+  - pattern: options\.Scope\.Add
+    description: Explicit scope configuration
+  bypass_variants:
+  - variant: OAuth state parameter forgery
+    description: CSRF via missing state validation
+  evasion_indicators:
+  - HTTPS disabled for OIDC discovery
+  - Certificate validation bypassed
+  encoding_variants:
+  - AddOpenIdConnect configuration
+  - AddOAuth configuration
+  multi_function_chain_patterns:
+  - AddOpenIdConnect -> RequireHttpsMetadata = false -> production deployment
+  privilege_context_flags:
+  - OAuth/OIDC authentication
+  - SSO integration
+  business_logic_indicator:
+  - Identity provider integration
+  - Social login configuration
+  probable_taint_paths:
+  - source: OAuth authorization response
+    sink: Authentication middleware
+    through: Misconfigured validation
+  impact: 'OAuth/OIDC misconfiguration enables token theft via MITM, CSRF via missing state parameter, and impersonation through
+    redirect URI manipulation.
+
+    '
+  remediation: 'Always enable RequireHttpsMetadata=true in production. Validate state and nonce parameters. Use Configuration
+    for client credentials.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/287.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/authentication/social/
+  context_awareness:
+    surrounding_context_patterns:
+    - AddOpenIdConnect
+    - AddOAuth
+    - AddGoogle
+    - AddMicrosoftAccount
+    taint_source_indicators:
+    - OAuth callback
+    - Authorization code
+    taint_sink_indicators:
+    - Token validation
+    - Claims mapping
+    sanitization_patterns:
+    - RequireHttpsMetadata = true
+    - DataProtectionProvider
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: HTTPS disabled in production
+      modifier: '+1.0'
+    - condition: development environment
+      modifier: '-3.0'
+  exploit_scenario: '1. ASP.NET app has RequireHttpsMetadata=false in production. 2. Attacker performs MITM on OIDC discovery
+    endpoint. 3. Attacker substitutes their own signing keys to forge tokens.
+
+    '
+  confidence_factors:
+    increases:
+    - HTTPS disabled
+    - Hardcoded client secret
+    decreases:
+    - Development configuration
+    - Conditional check
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-002
+    - AUTH-CS-001
+    dependency_chain: OAuth misconfig enables authentication bypass
+    combined_risk_increase: Critical with JWT validation failures
+- rule_id: AUTH-CS-010
+  title: ASP.NET Identity Misconfiguration
+  description: 'Detects weak ASP.NET Core Identity configuration including disabled password requirements, disabled lockout,
+    weak password policies, and insecure token provider settings.
+
+    '
+  language: csharp
+  category: auth
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-521
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - identity
+  - password-policy
+  - lockout
+  - aspnet-core
+  - csharp
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: RequiredLength\s*=\s*[1-5]\b
+    description: Password minimum length too short (< 6)
+  - pattern: RequireDigit\s*=\s*false
+    description: Digit requirement disabled
+  - pattern: RequireLowercase\s*=\s*false
+    description: Lowercase requirement disabled
+  - pattern: RequireUppercase\s*=\s*false
+    description: Uppercase requirement disabled
+  - pattern: RequireNonAlphanumeric\s*=\s*false
+    description: Special character requirement disabled
+  - pattern: MaxFailedAccessAttempts\s*=\s*(?:0|[5-9]\d|\d{3,})
+    description: Account lockout disabled or too permissive
+  - pattern: DefaultLockoutTimeSpan\s*=\s*TimeSpan\.From(?:Seconds|Minutes)\s*\(\s*[0-2]\b
+    description: Lockout duration too short
+  anti_patterns:
+  - pattern: RequiredLength\s*=\s*(?:8|9|[1-9]\d{1,})
+    description: Adequate password length
+  - pattern: MaxFailedAccessAttempts\s*=\s*[3-5]\b
+    description: Reasonable lockout threshold
+  - pattern: RequiredUniqueChars\s*=\s*[2-9]
+    description: Unique character requirement
+  bypass_variants:
+  - variant: Credential stuffing with no lockout
+    description: Brute force without restriction
+  evasion_indicators:
+  - All password requirements disabled
+  - Lockout disabled or extremely permissive
+  encoding_variants:
+  - IdentityOptions configuration
+  multi_function_chain_patterns:
+  - AddIdentity -> options.Password -> all requirements false
+  privilege_context_flags:
+  - User registration
+  - Password management
+  business_logic_indicator:
+  - Identity configuration
+  - User account management
+  probable_taint_paths:
+  - source: User registration form
+    sink: Identity password validation
+    through: Weak IdentityOptions
+  impact: 'Weak identity configuration allows users to set trivially guessable passwords and enables credential stuffing without
+    lockout protection.
+
+    '
+  remediation: 'Configure strong password policies and lockout: options.Password.RequiredLength = 12; options.Password.RequireDigit
+    = true; options.Lockout.MaxFailedAccessAttempts = 5; options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/521.html
+  - https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-configuration
+  context_awareness:
+    surrounding_context_patterns:
+    - AddIdentity
+    - IdentityOptions
+    - Password.RequiredLength
+    taint_source_indicators:
+    - User password input
+    taint_sink_indicators:
+    - Password validation
+    - UserManager.CreateAsync
+    sanitization_patterns:
+    - RequiredLength >= 8
+    - MaxFailedAccessAttempts <= 5
+  severity_scoring:
+    base_score: 6.5
+    exploitability: high
+    impact_score: 6.0
+    adjustments:
+    - condition: all requirements disabled
+      modifier: '+2.0'
+    - condition: lockout enabled
+      modifier: '-1.0'
+  exploit_scenario: '1. Identity configured with RequiredLength=1, all requirements false. 2. Users create passwords like
+    "a" or "1234". 3. No lockout allows unlimited brute force attempts. 4. Attacker compromises accounts with dictionary attack.
+
+    '
+  confidence_factors:
+    increases:
+    - Multiple requirements disabled
+    - Lockout disabled
+    decreases:
+    - Strong password requirements
+    - Lockout enabled
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: simple
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-CS-003
+    - AUTH-CS-008
+    dependency_chain: Weak identity enables credential compromise
+    combined_risk_increase: High with weak password hashing

@@ -1,0 +1,61 @@
+# ==============================================================================
+# Test:     positive_02_host_network
+# Expected: TRIGGER rule DEVOPS-YAML-003 (Host namespace sharing detected)
+# Category: DevOps
+# Language: YAML (Kubernetes)
+# ==============================================================================
+# Description: Kubernetes Pod spec with hostNetwork and hostPID enabled. This
+# allows the pod to see all host network interfaces and all host processes,
+# enabling network sniffing and process enumeration/signaling attacks.
+# ==============================================================================
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: network-debugger
+  namespace: kube-system
+  labels:
+    app: network-debugger
+    purpose: troubleshooting
+    managed-by: ops-team
+spec:
+  hostNetwork: true      # VULNERABLE: shares host network namespace
+  hostPID: true          # VULNERABLE: shares host PID namespace
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Never
+  serviceAccountName: debugger-sa
+  tolerations:
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: debugger
+      image: nicolaka/netshoot:latest
+      command: ["sleep", "3600"]
+      env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      securityContext:
+        runAsUser: 1000
+        readOnlyRootFilesystem: true
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+      volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+  volumes:
+    - name: tmp-volume
+      emptyDir:
+        medium: Memory
+        sizeLimit: 64Mi

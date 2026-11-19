@@ -1,0 +1,480 @@
+rules:
+- rule_id: OBJC-INJ-001
+  title: SQL Injection via NSString Format
+  description: 'Detects SQL queries built using NSString formatting with user input.
+
+    '
+  language: objectivec
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - nsstring
+  patterns:
+  - type: regex
+    pattern: '(?:executeQuery|executeUpdate|executeStatements)\s*:\s*\[\s*NSString\s+stringWithFormat\s*:'
+  - type: regex
+    pattern: '(?:sqlite3_exec|sqlite3_prepare)\s*\([^,]+,\s*\[\s*NSString\s+stringWithFormat\s*:'
+  - type: regex
+    pattern: (?:executeQuery|executeUpdate)\s*:\s*\[NSString\s+stringWithFormat\s*:\s*@"(?:SELECT|INSERT|UPDATE|DELETE)
+  anti_patterns:
+  - executeQuery:withArgumentsInArray
+  - executeUpdate:withArgumentsInArray
+  - sqlite3_bind
+  - parameterized
+  impact: 'SQL injection via NSString formatting allows data theft and RCE.
+
+    '
+  remediation: "Use parameterized queries with FMDB:\n  [db executeQuery:@\"SELECT * FROM users WHERE id = ?\" withArgumentsInArray:@[@(userId)]];\n"
+- rule_id: OBJC-INJ-002
+  title: Command Injection via NSTask
+  description: 'Detects OS command execution with user-controlled arguments.
+
+    '
+  language: objectivec
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - command-injection
+  - nstask
+  patterns:
+  - type: regex
+    pattern: NSTask\s*\*.*setLaunchPath\s*:\s*(?:userInput|request|param|input)
+  - type: regex
+    pattern: \[\s*\w+\s+setArguments\s*:\s*@\[.*(?:userInput|request|param|input)\b
+  - type: regex
+    pattern: system\s*\(\s*\[\s*NSString\s+stringWithFormat
+  - type: regex
+    pattern: popen\s*\(\s*\[\s*NSString\s+stringWithFormat
+  anti_patterns:
+  - sanitize
+  - validate
+  - whitelist
+  impact: 'Command injection allows execution of arbitrary OS commands.
+
+    '
+  remediation: 'Use NSTask with explicit argument arrays. Never pass user input to system() or popen().
+
+    '
+- rule_id: OBJC-INJ-003
+  title: Format String Vulnerability
+  description: 'Detects format string vulnerabilities in Objective-C.
+
+    '
+  language: objectivec
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-134
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - format-string
+  patterns:
+  - type: regex
+    pattern: NSLog\s*\(\s*(?:userInput|request|param|input|data)\b
+  - type: regex
+    pattern: \[NSString\s+stringWithFormat\s*:\s*(?:userInput|request|param|input|data)\b
+  - type: regex
+    pattern: \[\s*\w+\s+appendFormat\s*:\s*(?:userInput|request|param|input|data)\b
+  - type: regex
+    pattern: NSAlert.*setMessageText\s*:\s*\[\s*NSString\s+stringWithFormat\s*:\s*(?:userInput|request|param|input)\b
+  anti_patterns:
+  - NSLog(@"%@",
+  - stringWithFormat:@"%@",
+  impact: 'Format string vulnerabilities can cause crashes, info leaks, and code execution.
+
+    '
+  remediation: "Always use format specifiers:\n  NSLog(@\"%@\", userInput);  // Safe\n  // Never: NSLog(userInput);  // Vulnerable\n"
+- rule_id: OBJC-INJ-004
+  title: Predicate Injection (NSPredicate)
+  description: 'Detects NSPredicate injection with user-controlled filter strings.
+
+    '
+  language: objectivec
+  category: injection
+  severity: High
+  confidence: 0.85
+  cwe: CWE-943
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - predicate-injection
+  - core-data
+  patterns:
+  - type: regex
+    pattern: NSPredicate\s+predicateWithFormat\s*:\s*\[\s*NSString\s+stringWithFormat
+  - type: regex
+    pattern: NSPredicate\s+predicateWithFormat\s*:\s*(?:userInput|request|param|input|data)\b
+  - type: regex
+    pattern: predicateWithFormat\s*:.*%@.*(?:userInput|request|param|input)\b
+  anti_patterns:
+  - predicateWithFormat:@"%@"
+  - predicateWithFormat:@"%K
+  impact: 'Predicate injection can bypass data filters and access unauthorized CoreData records.
+
+    '
+  remediation: "Use parameterized predicates:\n  [NSPredicate predicateWithFormat:@\"name == %@\", userInput];\n"
+- rule_id: OBJC-XAUTH-001
+  title: Insecure Keychain Storage
+  description: 'Detects insecure Keychain access configuration.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.88
+  cwe: CWE-922
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - keychain
+  - storage
+  patterns:
+  - type: regex
+    pattern: kSecAttrAccessible.*(?:kSecAttrAccessibleAlways|kSecAttrAccessibleAlwaysThisDeviceOnly)\b
+  - type: regex
+    pattern: SecItemAdd.*kSecAttrAccessibleAfterFirstUnlock\b
+  anti_patterns:
+  - kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+  - kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly
+  impact: 'Insecure Keychain accessibility allows data theft from locked devices.
+
+    '
+  remediation: "Use the most restrictive accessibility:\n  kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly\n"
+- rule_id: OBJC-XAUTH-002
+  title: Disabled App Transport Security
+  description: 'Detects disabled ATS allowing insecure HTTP connections.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.92
+  cwe: CWE-319
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - ats
+  - transport-security
+  patterns:
+  - type: regex
+    pattern: NSAppTransportSecurity.*NSAllowsArbitraryLoads.*(?:true|YES)
+  - type: regex
+    pattern: NSAllowsArbitraryLoads\s*</key>\s*<true/>
+  - type: regex
+    pattern: NSExceptionAllowsInsecureHTTPLoads.*(?:true|YES)
+  anti_patterns:
+  - NSExceptionDomains
+  - localhost
+  impact: 'Disabled ATS allows unencrypted HTTP traffic, enabling MITM attacks.
+
+    '
+  remediation: 'Enable ATS and only add exceptions for specific domains that require HTTP.
+
+    '
+- rule_id: OBJC-XAUTH-003
+  title: Hardcoded Credentials
+  description: 'Detects hardcoded passwords, API keys, or secrets in Objective-C code.
+
+    '
+  language: objectivec
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: (?:NSString\s*\*\s*)?(?:password|apiKey|api_key|secret|token|authToken)\s*=\s*@"[^"]{4,}
+  - type: regex
+    pattern: '#define\s+(?:API_KEY|SECRET_KEY|PASSWORD|TOKEN|AUTH_TOKEN)\s+@"[^"]{4,}'
+  - type: regex
+    pattern: (?:setPassword|setApiKey|setToken|setSecret)\s*:\s*@"[^"]{4,}
+  anti_patterns:
+  - NSProcessInfo
+  - NSBundle
+  - plist
+  - keychain
+  - SecItem
+  - placeholder
+  - changeme
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: OBJC-XCRYPTO-001
+  title: Weak Cryptographic Algorithm
+  description: 'Detects use of weak cryptographic algorithms in Objective-C.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: High
+  confidence: 0.92
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-crypto
+  patterns:
+  - type: regex
+    pattern: CC_MD5\s*\(
+  - type: regex
+    pattern: CC_SHA1\s*\(
+  - type: regex
+    pattern: kCCAlgorithmDES\b
+  - type: regex
+    pattern: kCCAlgorithm3DES\b
+  - type: regex
+    pattern: kCCAlgorithmRC4\b
+  - type: regex
+    pattern: CCCrypt\s*\([^,]*kCCAlgorithmDES
+  anti_patterns:
+  - kCCAlgorithmAES
+  - CC_SHA256
+  - CC_SHA512
+  impact: 'Weak cryptographic algorithms are vulnerable to brute force and collision attacks.
+
+    '
+  remediation: "Use AES-256 with GCM mode and SHA-256+:\n  CCCrypt(kCCEncrypt, kCCAlgorithmAES, kCCOptionPKCS7Padding, ...);\n  CC_SHA256(data, length, digest);\n"
+- rule_id: OBJC-XCRYPTO-002
+  title: Insecure Random Number Generator
+  description: 'Detects use of rand(), random(), or arc4random() for security-sensitive purposes.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: High
+  confidence: 0.82
+  cwe: CWE-330
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-random
+  patterns:
+  - type: regex
+    pattern: \brand\s*\(\s*\)
+  - type: regex
+    pattern: \brandom\s*\(\s*\)
+  - type: regex
+    pattern: arc4random\s*\(\s*\)\s*%
+  anti_patterns:
+  - SecRandomCopyBytes
+  - arc4random_uniform
+  impact: 'Predictable random values compromise tokens, keys, and nonces.
+
+    '
+  remediation: "Use SecRandomCopyBytes for cryptographic randomness:\n  SecRandomCopyBytes(kSecRandomDefault, count, bytes);\n"
+- rule_id: OBJC-XCRYPTO-003
+  title: Insecure TLS Configuration
+  description: 'Detects disabled SSL/TLS certificate validation.
+
+    '
+  language: objectivec
+  category: crypto
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-295
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - tls
+  - certificate-validation
+  patterns:
+  - type: regex
+    pattern: continueWithoutCredentialForAuthenticationChallenge
+  - type: regex
+    pattern: allowInvalidCertificates\s*=\s*YES
+  - type: regex
+    pattern: validatesDomainName\s*=\s*NO
+  - type: regex
+    pattern: setAllowsAnyHTTPSCertificate.*YES
+  - type: regex
+    pattern: SecTrustSetAnchorCertificatesOnly.*NO
+  anti_patterns:
+  - performDefaultHandling
+  - AFSecurityPolicy
+  - pinnedCertificates
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: OBJC-PATH-001
+  title: Path Traversal via User Input
+  description: 'Detects file operations with user-controlled paths.
+
+    '
+  language: objectivec
+  category: path_traversal
+  severity: High
+  confidence: 0.85
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - path-traversal
+  patterns:
+  - type: regex
+    pattern: (?:NSFileManager|fileManager).*(?:contentsAtPath|createFileAtPath|removeItemAtPath)\s*:\s*(?:userInput|request|param|input)\b
+  - type: regex
+    pattern: \[NSString\s+stringWithContentsOfFile\s*:\s*(?:userInput|request|param|input)\b
+  - type: regex
+    pattern: stringByAppendingPathComponent\s*:\s*(?:userInput|request|param|input)\b
+  anti_patterns:
+  - stringByStandardizingPath
+  - hasPrefix
+  - sanitize
+  impact: Path traversal enables reading or writing arbitrary files on the server
+  remediation: Canonicalize paths and verify they remain within expected base directories
+- rule_id: OBJC-DESER-001
+  title: Unsafe NSKeyedUnarchiver
+  description: 'Detects unsafe unarchiving of untrusted data without class validation.
+
+    '
+  language: objectivec
+  category: deserialization
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - deserialization
+  - nskeyed
+  patterns:
+  - type: regex
+    pattern: 'NSKeyedUnarchiver\s+unarchiveObjectWithData\s*:'
+  - type: regex
+    pattern: 'NSKeyedUnarchiver\s+unarchiveObjectWithFile\s*:'
+  - type: regex
+    pattern: \[\s*NSKeyedUnarchiver\s+(?:unarchivedObjectOfClass|unarchivedObjectOfClasses).*(?:request|param|input|data)\b
+  anti_patterns:
+  - requiresSecureCoding
+  - unarchivedObjectOfClass
+  - NSSecureCoding
+  impact: 'Unsafe deserialization can lead to arbitrary code execution.
+
+    '
+  remediation: "Use NSSecureCoding and unarchivedObjectOfClass:\n  [NSKeyedUnarchiver unarchivedObjectOfClass:[MyClass class] fromData:data error:&error];\n  Set requiresSecureCoding = YES.\n"
+- rule_id: OBJC-XSS-001
+  title: XSS via UIWebView/WKWebView
+  description: 'Detects XSS via loading untrusted HTML in web views.
+
+    '
+  language: objectivec
+  category: xss
+  severity: High
+  confidence: 0.85
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - xss
+  - webview
+  patterns:
+  - type: regex
+    pattern: (?:UIWebView|WKWebView).*loadHTMLString\s*:\s*(?:userInput|request|param|input|data)\b
+  - type: regex
+    pattern: evaluateJavaScript\s*:\s*(?:userInput|request|param|input|data|stringWithFormat)\b
+  - type: regex
+    pattern: stringByEvaluatingJavaScriptFromString\s*:\s*(?:userInput|request|param|input)\b
+  anti_patterns:
+  - sanitize
+  - encode
+  - WKContentRuleList
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers
+- rule_id: OBJC-XSEC-001
+  title: Sensitive Data in NSUserDefaults
+  description: 'Detects storage of sensitive data in unencrypted NSUserDefaults.
+
+    '
+  language: objectivec
+  category: secrets
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-922
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 1
+  tags:
+  - insecure-storage
+  - userdefaults
+  patterns:
+  - type: regex
+    pattern: \[\s*NSUserDefaults.*setObject\s*:.*(?:password|token|secret|apiKey|creditCard|ssn)\b
+  - type: regex
+    pattern: \[\s*NSUserDefaults.*forKey\s*:.*(?:password|token|secret|apiKey|creditCard|ssn)\b
+  - type: regex
+    pattern: (?:standardUserDefaults|suiteName).*set(?:Object|Value).*(?:password|token|secret)\b
+  anti_patterns:
+  - keychain
+  - SecItem
+  - encrypted
+  impact: 'NSUserDefaults stores data unencrypted and can be accessed by iTunes backups.
+
+    '
+  remediation: "Store sensitive data in the Keychain instead:\n  SecItemAdd(query, nil)\n"
+- rule_id: OBJC-FW-001
+  title: Deprecated UIWebView Usage
+  description: 'Detects use of deprecated UIWebView which has security issues.
+
+    '
+  language: objectivec
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.92
+  cwe: CWE-477
+  owasp: A06:2021-Vulnerable-and-Outdated-Components
+  detection_layer: 1
+  tags:
+  - deprecated
+  - uiwebview
+  patterns:
+  - type: regex
+    pattern: UIWebView\s*\*
+  - type: regex
+    pattern: \[\[UIWebView\s+alloc\]\s+init
+  - type: regex
+    pattern: IBOutlet.*UIWebView
+  anti_patterns:
+  - WKWebView
+  impact: 'UIWebView is deprecated and has known security vulnerabilities.
+
+    '
+  remediation: 'Migrate to WKWebView which has better security features.
+
+    '
+- rule_id: OBJC-FW-002
+  title: JavaScript Bridge Without Validation
+  description: 'Detects WKWebView JavaScript bridge without message validation.
+
+    '
+  language: objectivec
+  category: framework_misuse
+  severity: High
+  confidence: 0.8
+  cwe: CWE-749
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 2
+  tags:
+  - javascript-bridge
+  - webview
+  patterns:
+  - type: regex
+    pattern: addScriptMessageHandler\s*:\s*self\s+name\s*:\s*@"
+  - type: regex
+    pattern: userContentController.*didReceiveScriptMessage.*message\.body
+  anti_patterns:
+  - validateMessage
+  - allowedOrigins
+  - securityPolicy
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

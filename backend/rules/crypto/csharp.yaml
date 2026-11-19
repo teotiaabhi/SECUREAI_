@@ -1,0 +1,1661 @@
+# ============================================================================
+# Cryptographic Vulnerability Detection Rules - C#
+# Ruleset Version: 3.0.0
+# Last Updated: 2026-02-28
+# Category: Cryptographic Failures (CWE-310, CWE-326, CWE-327, CWE-328)
+# Language: C#
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-001: DES / 3DES Usage
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-001"
+    title: "Use of DES or Triple DES (3DES) Encryption"
+    description: >
+      Detects usage of DES or Triple DES (3DES) algorithms in C# code via
+      DESCryptoServiceProvider, TripleDESCryptoServiceProvider, or their factory
+      methods. DES uses a 56-bit key that is trivially brute-forced with modern
+      hardware in hours. 3DES is deprecated by NIST as of 2023 and is vulnerable
+      to the Sweet32 birthday attack on its 64-bit block cipher after processing
+      approximately 32 GB of data under the same key. Both RC2CryptoServiceProvider
+      and related weak symmetric ciphers are also flagged. Applications must
+      migrate to AES-256-GCM or AES-256-CBC with HMAC authentication.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.94
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-cipher
+      - des
+      - 3des
+      - triple-des
+      - rc2
+      - deprecated-algorithm
+      - symmetric-encryption
+      - nist-deprecated
+      - dotnet
+      - csharp
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'new\s+DESCryptoServiceProvider\s*\(\s*\)'
+        description: "DESCryptoServiceProvider instantiation"
+      - type: regex
+        pattern: 'new\s+TripleDESCryptoServiceProvider\s*\(\s*\)'
+        description: "TripleDESCryptoServiceProvider instantiation"
+      - type: regex
+        pattern: 'DES\.Create\s*\(\s*\)'
+        description: "DES.Create() factory method call"
+      - type: regex
+        pattern: 'TripleDES\.Create\s*\(\s*\)'
+        description: "TripleDES.Create() factory method call"
+      - type: regex
+        pattern: 'new\s+RC2CryptoServiceProvider\s*\(\s*\)'
+        description: "RC2CryptoServiceProvider instantiation"
+      - type: regex
+        pattern: 'RC2\.Create\s*\(\s*\)'
+        description: "RC2.Create() factory method call"
+      - type: regex
+        pattern: 'SymmetricAlgorithm\.Create\s*\(\s*"(?:DES|3DES|TripleDES|RC2)"\s*\)'
+        description: "SymmetricAlgorithm.Create with weak algorithm name"
+      - type: regex
+        pattern: 'CryptoConfig\.CreateFromName\s*\(\s*"(?:DES|TripleDES|RC2)"\s*\)'
+        description: "CryptoConfig factory with weak algorithm name"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#pragma\s+warning\s+disable'
+      - '\[Obsolete\]'
+      - 'legacy'
+      - 'migration'
+      - 'backward.*compat'
+      - 'decrypt.*only'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+    bypass_variants:
+      - description: "Algorithm selected from configuration string"
+        pattern: 'SymmetricAlgorithm\.Create\s*\(\s*(?:config|algorithmName|cipherName)\s*\)'
+      - description: "DES wrapped in utility class"
+        pattern: 'class\s+\w*[Cc]rypt\w*[\s\S]{0,500}DESCryptoServiceProvider'
+      - description: "Algorithm registered via dependency injection"
+        pattern: 'services\.AddSingleton.*DESCryptoServiceProvider'
+      - description: "Dynamically loading DES via reflection"
+        pattern: 'Type\.GetType\s*\(\s*"System\.Security\.Cryptography\.DES'
+    evasion_indicators:
+      - "Cipher algorithm loaded from appsettings.json or web.config"
+      - "Algorithm wrapped in service class with innocuous name"
+      - "Algorithm registered via dependency injection container"
+      - "Reflection-based instantiation of crypto providers"
+      - "Algorithm name constructed via string concatenation"
+    encoding_variants:
+      - type: "fully_qualified"
+        pattern: 'System\.Security\.Cryptography\.DESCryptoServiceProvider'
+      - type: "using_alias"
+        pattern: 'using\s+\w+\s*=\s*System\.Security\.Cryptography\.DES'
+      - type: "factory_method"
+        pattern: 'CryptoConfig\.CreateFromName\s*\(\s*"(?:DES|TripleDES|RC2)"'
+    multi_function_chain_patterns:
+      - "DESCryptoServiceProvider -> CreateEncryptor -> CryptoStream -> Write"
+      - "TripleDES.Create -> Mode = ECB -> CreateEncryptor -> TransformFinalBlock"
+      - "RC2CryptoServiceProvider -> CreateEncryptor -> TransformFinalBlock"
+      - "CryptoConfig.CreateFromName -> CreateEncryptor -> TransformBlock"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DES/RC2 keys are brute-forceable; TripleDES vulnerable to Sweet32 birthday attacks; encrypted data fully recoverable"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_supplied_plaintext"
+        sink: "DESCryptoServiceProvider.CreateEncryptor"
+        through: "byte array conversion via Encoding.GetBytes"
+      - source: "database_record"
+        sink: "DES.Create().CreateEncryptor"
+        through: "stream wrapper and CryptoStream"
+      - source: "sensitive_field"
+        sink: "RC2_encryption"
+        through: "RC2CryptoServiceProvider.CreateEncryptor"
+    impact: |
+      DES can be brute-forced in hours with commodity hardware or cloud resources.
+      3DES is vulnerable to the Sweet32 birthday attack after processing ~32 GB
+      under the same key. RC2 has variable key length with known weaknesses.
+      Encrypted data protected by these algorithms should be considered recoverable
+      by determined attackers. Non-compliance with PCI-DSS, NIST SP 800-131A,
+      and FIPS 140-3.
+    remediation: |
+      Replace DES/3DES/RC2 with AES-256-GCM (authenticated encryption) or
+      AES-256-CBC with HMAC-SHA256:
+
+      ```csharp
+      // VULNERABLE: DES encryption
+      using var des = new DESCryptoServiceProvider();
+
+      // SECURE: AesGcm (.NET Core 3.0+ / .NET 5+)
+      byte[] key = RandomNumberGenerator.GetBytes(32);
+      byte[] nonce = RandomNumberGenerator.GetBytes(12);
+      byte[] tag = new byte[16];
+      byte[] ciphertext = new byte[plaintext.Length];
+      using var aesGcm = new AesGcm(key, 16);
+      aesGcm.Encrypt(nonce, plaintext, ciphertext, tag);
+
+      // SECURE: Aes with CBC + HMAC (for older .NET)
+      using var aes = Aes.Create();
+      aes.KeySize = 256;
+      aes.Mode = CipherMode.CBC;
+      aes.Padding = PaddingMode.PKCS7;
+      aes.GenerateIV();
+      aes.GenerateKey();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://sweet32.info/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://nvd.nist.gov/vuln/detail/CVE-2016-2183"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'DESCrypto'
+        - 'TripleDES'
+        - 'RC2'
+        - 'CipherMode'
+        - 'CreateEncryptor'
+        - 'CryptoStream'
+        - 'SymmetricAlgorithm'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'HttpContext'
+        - 'Controller'
+        - 'IFormFile'
+      taint_sink_indicators:
+        - 'CreateEncryptor'
+        - 'CryptoStream'
+        - 'TransformFinalBlock'
+        - 'SqlCommand'
+      sanitization_patterns:
+        - 'Aes\.Create'
+        - 'AesGcm'
+        - 'AesCcm'
+        - 'ChaCha20Poly1305'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + cipher_weakness_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits DES encryption in a legacy ASP.NET application:
+        1. Application encrypts session tokens with DESCryptoServiceProvider
+        2. Attacker captures encrypted session cookies from network traffic
+        3. Using FPGA-based DES cracker, attacker brute-forces the 56-bit key
+        4. All current and historical session tokens decrypted within hours
+        5. Attacker forges session tokens to impersonate any user including admins
+      example_payload: "new DESCryptoServiceProvider() { Mode = CipherMode.ECB }"
+      attacker_objective: "Brute-force DES keys or exploit Sweet32 to recover encrypted data in .NET applications"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-003"
+        - "CRYPTO-CS-004"
+        - "CRYPTO-CS-005"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-002: MD5 / SHA1 for Security Purposes
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-002"
+    title: "Use of MD5 or SHA1 for Security-Critical Hashing"
+    description: >
+      Detects usage of cryptographically broken hash algorithms MD5 and SHA1 through
+      .NET's System.Security.Cryptography namespace. MD5CryptoServiceProvider,
+      SHA1CryptoServiceProvider, SHA1Managed, MD5.Create(), and
+      HashAlgorithm.Create("MD5"/"SHA1") are all vulnerable. MD5 is fully broken
+      for collision resistance, and SHA1 has demonstrated practical collision attacks
+      (SHAttered). Neither algorithm is safe for password hashing, digital signatures,
+      certificate validation, or integrity verification in security contexts.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-328
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-hash
+      - md5
+      - sha1
+      - password-hashing
+      - collision-resistance
+      - dotnet
+      - csharp
+      - HashAlgorithm
+    detection_layer: 1
+    attack_surface_type: "authentication"
+    patterns:
+      - type: regex
+        pattern: 'MD5\.Create\s*\(\s*\)'
+        description: "MD5.Create() factory method call"
+      - type: regex
+        pattern: 'SHA1\.Create\s*\(\s*\)'
+        description: "SHA1.Create() factory method call"
+      - type: regex
+        pattern: 'new\s+MD5CryptoServiceProvider\s*\(\s*\)'
+        description: "MD5CryptoServiceProvider instantiation"
+      - type: regex
+        pattern: 'new\s+SHA1(?:CryptoServiceProvider|Managed)\s*\(\s*\)'
+        description: "SHA1CryptoServiceProvider or SHA1Managed instantiation"
+      - type: regex
+        pattern: 'HashAlgorithm\.Create\s*\(\s*"(?:MD5|SHA1)"\s*\)'
+        description: "HashAlgorithm.Create with weak algorithm name"
+      - type: regex
+        pattern: 'new\s+HMACMD5\s*\('
+        description: "HMAC with MD5 hash algorithm"
+      - type: regex
+        pattern: 'new\s+HMACSHA1\s*\('
+        description: "HMAC with SHA1 hash algorithm"
+      - type: regex
+        pattern: 'FormsAuthentication\.HashPasswordForStoringInConfigFile\s*\([^,]+,\s*"(?:MD5|SHA1)"'
+        description: "Legacy ASP.NET Forms Authentication with weak hash"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#pragma\s+warning\s+disable'
+      - 'checksum'
+      - 'etag'
+      - 'cacheKey'
+      - 'fingerprint.*dedup'
+      - '\[Obsolete\]'
+      - 'legacy'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+    bypass_variants:
+      - description: "Hash algorithm name from configuration string"
+        pattern: 'HashAlgorithm\.Create\s*\(\s*(?:config|algorithmName|hashName)\s*\)'
+      - description: "Algorithm selected via CryptoConfig"
+        pattern: 'CryptoConfig\.CreateFromName\s*\(\s*"(?:MD5|SHA1)"'
+      - description: "Hash algorithm stored in variable from appsettings"
+        pattern: 'Configuration\[\s*"[^"]*[Hh]ash[^"]*"\s*\][\s\S]{0,100}(?:MD5|SHA1)'
+    evasion_indicators:
+      - "Hash algorithm loaded from configuration at runtime"
+      - "Algorithm selected via CryptoConfig factory"
+      - "Wrapper class hiding hash algorithm selection"
+      - "Algorithm name from dependency injection container"
+    encoding_variants:
+      - type: "using_alias"
+        pattern: 'using\s+\w+\s*=\s*System\.Security\.Cryptography\.(?:MD5|SHA1)'
+      - type: "fully_qualified"
+        pattern: 'System\.Security\.Cryptography\.MD5\.Create'
+      - type: "generic_create"
+        pattern: 'HashAlgorithm\.Create\s*\(\s*(?:algorithmName|hashType)\s*\)'
+    multi_function_chain_patterns:
+      - "MD5.Create() -> ComputeHash -> BitConverter.ToString for password storage"
+      - "SHA1.Create() -> ComputeHash -> comparison for signature verification"
+      - "HMACSHA1 -> ComputeHash -> token generation"
+      - "FormsAuthentication.HashPasswordForStoringInConfigFile -> database storage"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "MD5/SHA1 collisions enable signature forgery and password cracking via rainbow tables"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_password_input"
+        sink: "MD5.Create().ComputeHash"
+        through: "Encoding.UTF8.GetBytes conversion"
+      - source: "authentication_token"
+        sink: "SHA1.Create().ComputeHash"
+        through: "string to byte array conversion"
+      - source: "request_body"
+        sink: "token_validation"
+        through: "HMACSHA1.ComputeHash()"
+    impact: |
+      Using MD5/SHA1 in .NET applications creates severe vulnerabilities:
+      - MD5 collisions generated in seconds on commodity hardware
+      - SHA1 chosen-prefix collisions demonstrated (SHAttered, Shambles)
+      - Password hashes crackable at billions of attempts per second via hashcat
+      - ASP.NET Forms Authentication with MD5/SHA1 enables account takeover
+      - Digital signatures and HMAC-based tokens become forgeable
+      - Non-compliance with NIST SP 800-131A, PCI-DSS, FIPS 140-3
+    remediation: |
+      Replace with SHA-256+ or proper password hashing:
+
+      ```csharp
+      // VULNERABLE: MD5 for hashing
+      using var md5 = MD5.Create();
+      byte[] hash = md5.ComputeHash(Encoding.UTF8.GetBytes(data));
+
+      // SECURE: SHA-256 for integrity
+      using var sha256 = SHA256.Create();
+      byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+
+      // SECURE: BCrypt for password hashing
+      string hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+      bool valid = BCrypt.Net.BCrypt.Verify(password, hash);
+
+      // SECURE: HMAC-SHA256
+      using var hmac = new HMACSHA256(key);
+      byte[] mac = hmac.ComputeHash(data);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/328.html"
+      - "https://shattered.io/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'HashAlgorithm'
+        - 'ComputeHash'
+        - 'password'
+        - 'token'
+        - 'signature'
+        - 'verify'
+        - 'HMAC'
+      taint_source_indicators:
+        - 'Request\.'
+        - 'HttpContext'
+        - 'Controller'
+        - 'Console\.ReadLine'
+        - 'IFormFile'
+      taint_sink_indicators:
+        - 'ComputeHash'
+        - 'SqlCommand'
+        - 'Response\.Cookies'
+        - 'Session\['
+        - 'SaveChanges'
+      sanitization_patterns:
+        - 'SHA256'
+        - 'SHA384'
+        - 'SHA512'
+        - 'BCrypt'
+        - 'PasswordHasher'
+        - 'Rfc2898DeriveBytes'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + business_impact_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker cracks MD5 password hashes in an ASP.NET application:
+        1. Attacker exploits SQL injection to extract user table with MD5 hashes
+        2. Using hashcat in MD5 mode, attacker cracks hashes at 25 billion/sec
+        3. 90% of passwords recovered within hours using wordlists and rules
+        4. Attacker gains admin access via recovered administrator credentials
+        5. From admin panel, attacker uploads a web shell for persistent access
+      example_payload: "MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(password))"
+      attacker_objective: "Crack weak MD5/SHA1 password hashes for account takeover"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-001"
+        - "CRYPTO-CS-004"
+        - "CRYPTO-CS-008"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-003: ECB Mode Usage
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-003"
+    title: "Use of ECB (Electronic Codebook) Block Cipher Mode"
+    description: >
+      Detects explicit use of ECB mode for block cipher operations in C# via
+      CipherMode.ECB assignment or related patterns. ECB mode encrypts identical
+      plaintext blocks to identical ciphertext blocks, leaking data patterns. This
+      is famously demonstrated by the ECB Penguin problem where encrypted images
+      retain visible structure. ECB also enables block-swapping attacks where an
+      adversary can rearrange ciphertext blocks to manipulate decrypted output.
+      ECB should never be used for encrypting data longer than a single block.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.90
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - ecb-mode
+      - block-cipher
+      - pattern-leak
+      - symmetric-encryption
+      - cipher-mode
+      - dotnet
+      - csharp
+    detection_layer: 2
+    attack_surface_type: "data-at-rest"
+    patterns:
+      - type: regex
+        pattern: '\.Mode\s*=\s*CipherMode\.ECB'
+        description: "Cipher mode set to ECB"
+      - type: regex
+        pattern: '\.IV\s*=\s*new\s+byte\s*\[\s*(?:8|16)\s*\]'
+        description: "IV set to zero-filled byte array (functionally ECB-like)"
+      - type: regex
+        pattern: '\.IV\s*=\s*new\s+byte\s*\[\s*\]\s*\{[^}]+\}'
+        description: "IV set to hardcoded byte array literal"
+      - type: regex
+        pattern: '\.IV\s*=\s*Encoding\.(?:UTF8|ASCII|Unicode)\.GetBytes\s*\(\s*"[^"]{8,}"\s*\)'
+        description: "IV set from hardcoded string"
+      - type: regex
+        pattern: 'CreateEncryptor\s*\(\s*\w+\s*,\s*new\s+byte\s*\[\s*(?:8|16)\s*\]\s*\)'
+        description: "CreateEncryptor with zero IV byte array"
+      - type: regex
+        pattern: 'private\s+(?:static\s+)?(?:readonly\s+)?byte\s*\[\s*\]\s+\w*[iI][vV]\w*\s*='
+        description: "Static or readonly IV field (IV reuse)"
+      - type: regex
+        pattern: 'aes\.IV\s*=\s*(?:key|aes\.Key)\b'
+        description: "IV set equal to the key (catastrophic reuse)"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'GenerateIV'
+      - 'RandomNumberGenerator'
+      - 'RNGCryptoServiceProvider'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'key.*wrap'
+      - 'single.*block'
+    bypass_variants:
+      - description: "IV derived deterministically from hash"
+        pattern: '\.IV\s*=\s*(?:MD5|SHA\d+)\.Create\(\)\.ComputeHash'
+      - description: "Static IV stored in configuration"
+        pattern: '\.IV\s*=\s*Convert\.FromBase64String\s*\(\s*Configuration'
+      - description: "IV reused from previous encryption"
+        pattern: '(?:savedIV|storedIV|lastIV|previousIV)[\s\S]{0,100}\.IV\s*='
+      - description: "Setting Mode property via reflection"
+        pattern: 'SetValue\s*\([^)]*CipherMode'
+    evasion_indicators:
+      - "Cipher mode set from variable or config value"
+      - "Enum cast from integer to CipherMode"
+      - "IV derived from deterministic hash"
+      - "IV loaded from static configuration"
+      - "IV reused across encryption operations"
+    encoding_variants:
+      - type: "base64_iv"
+        pattern: '\.IV\s*=\s*Convert\.FromBase64String\s*\(\s*"[^"]+"'
+      - type: "hex_iv"
+        pattern: '\.IV\s*=\s*Convert\.FromHexString\s*\(\s*"[^"]+"'
+      - type: "constant_iv"
+        pattern: 'const\s+string\s+\w*IV\w*\s*=\s*"[^"]{16,}"'
+    multi_function_chain_patterns:
+      - "aes.Mode = ECB -> CreateEncryptor -> CryptoStream"
+      - "aes.IV = new byte[16] -> CreateEncryptor -> TransformFinalBlock"
+      - "Static IV field -> multiple CreateEncryptor calls"
+      - "RijndaelManaged -> Mode=ECB -> TransformFinalBlock"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ECB leaks plaintext patterns; static IVs enable chosen-plaintext attacks; IV=Key catastrophically links parameters"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data_or_file_content"
+        sink: "SymmetricAlgorithm.CreateEncryptor with ECB"
+        through: "byte array transformation"
+      - source: "database_records"
+        sink: "CryptoStream with ECB-mode encryptor"
+        through: "serialization pipeline"
+      - source: "zero_byte_array"
+        sink: "IV_property"
+        through: "new byte[16]"
+    impact: |
+      ECB mode and improper IVs break encryption security in .NET:
+      - ECB mode produces identical ciphertext for identical plaintext blocks
+      - Static/zero IVs enable chosen-plaintext attacks in CBC mode
+      - IV = Key catastrophically ties confidentiality to a single secret
+      - Pattern leakage enables content analysis without key recovery
+      - Block swapping attacks can manipulate decrypted output
+      - Non-compliance with NIST SP 800-38A, SP 800-38D
+    remediation: |
+      Use AesGcm or CBC with random IVs:
+
+      ```csharp
+      // VULNERABLE: ECB mode
+      using var aes = Aes.Create();
+      aes.Mode = CipherMode.ECB;
+
+      // SECURE: AesGcm (authenticated encryption, .NET Core 3.0+)
+      byte[] key = RandomNumberGenerator.GetBytes(32);
+      byte[] nonce = RandomNumberGenerator.GetBytes(12);
+      byte[] tag = new byte[16];
+      byte[] ciphertext = new byte[plaintext.Length];
+      using var aesGcm = new AesGcm(key, 16);
+      aesGcm.Encrypt(nonce, plaintext, ciphertext, tag);
+
+      // SECURE: CBC with random IV
+      using var aes = Aes.Create();
+      aes.KeySize = 256;
+      aes.Mode = CipherMode.CBC;
+      aes.GenerateIV(); // Random IV for each encryption
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://blog.filippo.io/the-ecb-penguin/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38a/final"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.symmetricalgorithm.iv"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'CipherMode'
+        - 'ECB'
+        - 'IV'
+        - 'CreateEncryptor'
+        - 'Aes'
+        - 'SymmetricAlgorithm'
+      taint_source_indicators:
+        - 'new\s+byte\[\]'
+        - 'Encoding\.\w+\.GetBytes'
+        - 'CipherMode\.ECB'
+        - 'static.*IV'
+      taint_sink_indicators:
+        - 'CreateEncryptor'
+        - 'TransformFinalBlock'
+        - 'CryptoStream'
+      sanitization_patterns:
+        - 'GenerateIV'
+        - 'RandomNumberGenerator\.GetBytes'
+        - 'AesGcm'
+        - 'RNGCryptoServiceProvider'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + cipher_mode_risk_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits ECB mode encryption in an ASP.NET Core application:
+        1. Application encrypts user role claims with AES-ECB before storing in cookies
+        2. Attacker observes that the "admin" role produces a specific ciphertext block
+        3. Attacker replaces their role ciphertext block with the observed admin block
+        4. Application decrypts the cookie and grants admin privileges
+        5. Frequency analysis reveals user behavior patterns in encrypted logs
+      example_payload: "aes.Mode = CipherMode.ECB; aes.CreateEncryptor()"
+      attacker_objective: "Exploit ECB patterns or IV reuse to analyze, manipulate, or forge encrypted data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-001"
+        - "CRYPTO-CS-004"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-004: Hardcoded Encryption Keys
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-004"
+    title: "Hardcoded Cryptographic Keys in Source Code"
+    description: >
+      Detects hardcoded cryptographic keys in C# source code including byte array
+      literals used with symmetric ciphers, hardcoded key constants, and key material
+      embedded in source files. .NET applications are compiled to IL which is trivially
+      decompilable using tools like dnSpy, ILSpy, or dotPeek. Hardcoded keys in .NET
+      assemblies provide false security since the keys are easily extractable from
+      compiled DLLs and EXEs. Key rotation requires code changes and redeployment.
+    language: csharp
+    category: crypto
+    severity: Critical
+    confidence: 0.89
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - hardcoded-key
+      - secret-management
+      - credential-exposure
+      - key-management
+      - secrets-in-code
+      - dotnet
+      - csharp
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: 'new\s+byte\s*\[\s*\]\s*\{\s*(?:0x[0-9a-fA-F]{1,2}\s*,\s*){7,}[\s\S]{0,50}(?:key|Key|KEY|secret|Secret)'
+        description: "Hardcoded byte array near key-related variable name"
+      - type: regex
+        pattern: '(?:key|Key|KEY|secret|Secret|password|Password)\s*=\s*new\s+byte\s*\[\s*\]\s*\{[^}]+\}'
+        description: "Key variable assigned hardcoded byte array"
+      - type: regex
+        pattern: '(?:ENCRYPTION_KEY|SECRET_KEY|AES_KEY|CIPHER_KEY)\s*=\s*"[^"]{16,}"'
+        description: "String constant with crypto name and hardcoded value"
+      - type: regex
+        pattern: 'Encoding\.(?:UTF8|ASCII|Unicode)\.GetBytes\s*\(\s*"[^"]{16,}"\s*\)[\s\S]{0,80}(?:key|Key|secret|Secret|Aes|AES)'
+        description: "String-to-bytes conversion for hardcoded key"
+      - type: regex
+        pattern: 'Convert\.FromBase64String\s*\(\s*"[A-Za-z0-9+/=]{16,}"\s*\)[\s\S]{0,80}(?:key|Key|secret)'
+        description: "Base64-decoded hardcoded key"
+      - type: regex
+        pattern: 'private\s+(?:static\s+)?(?:readonly\s+)?byte\s*\[\s*\]\s+\w*[Kk]ey\w*\s*=\s*(?:new\s+byte|Encoding|\{)'
+        description: "Private key field with hardcoded initialization"
+      - type: regex
+        pattern: 'const\s+string\s+\w*(?:Key|Secret|Password)\w*\s*=\s*"[^"]{8,}"'
+        description: "Const string field with crypto-related name"
+      - type: regex
+        pattern: '\.Key\s*=\s*Encoding\.(?:UTF8|ASCII)\.GetBytes\s*\(\s*"[^"]{8,}"'
+        description: "SymmetricAlgorithm.Key set from hardcoded string"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'Environment\.GetEnvironmentVariable'
+      - 'Configuration\['
+      - 'IConfiguration'
+      - 'KeyVault'
+      - 'SecretClient'
+      - 'CHANGEME'
+      - 'placeholder'
+      - 'TODO.*replace'
+      - 'mock'
+      - 'fixture'
+    bypass_variants:
+      - description: "Key from configuration with hardcoded default"
+        pattern: 'Configuration\[\s*"[^"]*Key[^"]*"\s*\]\s*\?\?\s*"[^"]{16,}"'
+      - description: "Key bytes split across multiple array segments"
+        pattern: 'Buffer\.BlockCopy[\s\S]{0,200}(?:key|Key)[\s\S]{0,100}new\s+byte'
+      - description: "Key loaded from embedded resource"
+        pattern: 'Assembly\.GetManifest.*ResourceStream[\s\S]{0,200}(?:key|Key)'
+      - description: "XOR-encoded key bytes decoded at initialization"
+        pattern: '\^\s*0x[0-9a-fA-F]+[\s\S]{0,100}(?:key|Key)'
+    evasion_indicators:
+      - "Key stored in embedded resource file (.resx)"
+      - "Key split across multiple arrays and reassembled"
+      - "Key loaded from config with hardcoded fallback"
+      - "Key obfuscated through XOR or transformation"
+      - "Key material assembled from multiple constants"
+    encoding_variants:
+      - type: "base64_key"
+        pattern: 'Convert\.FromBase64String\s*\(\s*"[A-Za-z0-9+/=]{20,}"'
+      - type: "hex_key"
+        pattern: '(?:key|Key)\s*=\s*"[0-9a-fA-F]{32,}"'
+      - type: "interpolated_string"
+        pattern: '\$"[^"]*(?:key|Key|secret)[^"]*"'
+    multi_function_chain_patterns:
+      - "Hardcoded byte[] -> aes.Key = bytes -> CreateEncryptor"
+      - "Encoding.GetBytes(literal) -> HMACSHA256 -> ComputeHash"
+      - "Convert.FromBase64String(literal) -> SymmetricAlgorithm.Key"
+      - "Encoding.GetBytes(hardcoded) -> aes.Key = ... -> CryptoStream"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Hardcoded keys in .NET assemblies are trivially extractable via IL decompilation (ILSpy, dnSpy)"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "byte_array_literal"
+        sink: "aes_key_property"
+        through: "direct assignment"
+      - source: "string_constant"
+        sink: "hmac_constructor"
+        through: "Encoding.GetBytes()"
+      - source: "base64_literal"
+        sink: "symmetric_key"
+        through: "Convert.FromBase64String()"
+    impact: |
+      Hardcoded keys in C# applications are trivially extractable:
+      - .NET assemblies (DLL/EXE) are easily decompiled to readable C# code
+      - dnSpy, ILSpy, dotPeek, and JustDecompile recover source-level code
+      - NuGet packages with embedded keys expose them to all consumers
+      - Docker images with embedded keys expose them in image layers
+      - Key rotation requires rebuild and redeployment
+      - Violates PCI-DSS 3.5, NIST SP 800-57, SOC2 CC6.1
+    remediation: |
+      Use Azure Key Vault, environment variables, or DPAPI:
+
+      ```csharp
+      // VULNERABLE: Hardcoded key
+      byte[] key = new byte[] { 0x01, 0x02, 0x03, ... };
+      using var aes = Aes.Create();
+      aes.Key = key;
+
+      // SECURE: Azure Key Vault
+      var client = new SecretClient(
+          new Uri("https://myvault.vault.azure.net/"),
+          new DefaultAzureCredential());
+      KeyVaultSecret secret = await client.GetSecretAsync("encryption-key");
+      byte[] key = Convert.FromBase64String(secret.Value);
+
+      // SECURE: Environment variable
+      string keyHex = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
+          ?? throw new InvalidOperationException("ENCRYPTION_KEY not set");
+      byte[] key = Convert.FromHexString(keyHex);
+
+      // SECURE: ASP.NET Core Data Protection API
+      services.AddDataProtection()
+          .PersistKeysToAzureBlobStorage(blobUri)
+          .ProtectKeysWithAzureKeyVault(keyId, credential);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/798.html"
+      - "https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/"
+      - "https://learn.microsoft.com/en-us/azure/key-vault/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'Aes'
+        - 'SymmetricAlgorithm'
+        - 'HMAC'
+        - 'CreateEncryptor'
+        - 'Key'
+        - 'Secret'
+        - 'Encrypt'
+      taint_source_indicators:
+        - 'new\s+byte\[\]'
+        - 'Encoding\.\w+\.GetBytes'
+        - 'Convert\.FromBase64String'
+        - 'const.*string'
+      taint_sink_indicators:
+        - '\.Key\s*='
+        - 'new\s+HMAC'
+        - 'CreateEncryptor'
+        - 'CryptoStream'
+      sanitization_patterns:
+        - 'Environment\.GetEnvironmentVariable'
+        - 'Configuration\['
+        - 'SecretClient'
+        - 'KeyVault'
+        - 'DataProtection'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + exposure_surface_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker decompiles a .NET web API assembly:
+        1. Attacker downloads the DLL from an exposed deployment endpoint or NuGet package
+        2. Using dnSpy, attacker opens the assembly and browses to EncryptionService class
+        3. Hardcoded AES key visible as a byte array literal in the decompiled code
+        4. Attacker uses the key to decrypt database fields containing user PII
+        5. Attacker also finds JWT signing key, enabling admin token forgery
+      example_payload: "private static readonly byte[] Key = { 0xAB, 0xCD, 0xEF, ... };"
+      attacker_objective: "Decompile .NET assemblies to extract hardcoded keys for data decryption and token forgery"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-001"
+        - "CRYPTO-CS-003"
+        - "CRYPTO-CS-005"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-005: Weak RSA Key Size
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-005"
+    title: "Weak RSA Key Size (Below 2048 bits)"
+    description: >
+      Detects RSACryptoServiceProvider or RSA instances created with insufficient
+      key sizes (below 2048 bits) in .NET applications. The default
+      RSACryptoServiceProvider constructor generates a 1024-bit key in older .NET
+      Framework versions. RSA.Create() defaults to 2048 bits in newer versions but
+      developers may explicitly specify smaller sizes. RSA-512 and RSA-768 have
+      been publicly factored, and RSA-1024 is factorable by state-level attackers
+      using the General Number Field Sieve. NIST recommends a minimum of 2048 bits
+      with 3072 or 4096 bits preferred for long-term security.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.88
+    cwe: CWE-326
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - rsa
+      - key-size
+      - insufficient-key-size
+      - asymmetric-encryption
+      - weak-key
+      - dotnet
+      - csharp
+    detection_layer: 2
+    attack_surface_type: "data-in-transit"
+    patterns:
+      - type: regex
+        pattern: 'new\s+RSACryptoServiceProvider\s*\(\s*(?:512|768|1024)\s*\)'
+        description: "RSACryptoServiceProvider with small key size parameter"
+      - type: regex
+        pattern: 'new\s+RSACryptoServiceProvider\s*\(\s*\)'
+        description: "RSACryptoServiceProvider default constructor (1024-bit in old .NET Framework)"
+      - type: regex
+        pattern: 'RSA\.Create\s*\(\s*(?:512|768|1024)\s*\)'
+        description: "RSA.Create with insufficient key size"
+      - type: regex
+        pattern: '\.KeySize\s*=\s*(?:512|768|1024)\b'
+        description: "KeySize property set to insufficient value"
+      - type: regex
+        pattern: 'new\s+RSACng\s*\(\s*(?:512|768|1024)\s*\)'
+        description: "RSACng with insufficient key size"
+      - type: regex
+        pattern: 'DSACryptoServiceProvider\s*\(\s*(?:512|768|1024)\s*\)'
+        description: "DSA with insufficient key size"
+      - type: regex
+        pattern: 'ECDsa\.Create\s*\(\s*ECCurve\.NamedCurves\.(?:nistP192|nistP224)'
+        description: "ECDSA with weak curve (P-192 or P-224)"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - '#pragma\s+warning\s+disable'
+      - 'legacy'
+      - 'benchmark'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'performance.*test'
+      - 'migration'
+      - '\[Obsolete\]'
+    bypass_variants:
+      - description: "Key size from configuration"
+        pattern: '(?:KeySize|keySize)\s*=\s*(?:int\.Parse|Convert\.ToInt32)\s*\('
+      - description: "Key size in CspParameters"
+        pattern: 'new\s+CspParameters[\s\S]{0,100}KeySize\s*=\s*(?:512|768|1024)'
+      - description: "RSA key size via variable"
+        pattern: 'new\s+RSACryptoServiceProvider\s*\(\s*(?:keySize|bits|rsaBits)\s*\)'
+    evasion_indicators:
+      - "Key size loaded from configuration file"
+      - "Key size in CspParameters object"
+      - "Key size passed as parameter from caller"
+      - "Default constructor relying on framework defaults"
+    encoding_variants:
+      - type: "variable_size"
+        pattern: 'int\s+keySize\s*=\s*(?:512|768|1024)[\s\S]{0,100}RSA'
+      - type: "config_size"
+        pattern: 'Configuration\[\s*"[^"]*KeySize[^"]*"\s*\]'
+      - type: "const_size"
+        pattern: 'const\s+int\s+\w*KeySize\w*\s*=\s*(?:512|768|1024)'
+    multi_function_chain_patterns:
+      - "RSACryptoServiceProvider(1024) -> ExportParameters -> SignData"
+      - "RSA.Create(1024) -> Encrypt -> Convert.ToBase64String"
+      - "Default RSACryptoServiceProvider -> CreateSignature -> verify"
+      - "RSACng(1024) -> SignData -> VerifyData"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Short RSA keys can be factored to forge signatures and decrypt data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "key_generation"
+        sink: "encryption_operation"
+        through: "insufficient_key_size"
+      - source: "RSACryptoServiceProvider(1024)"
+        sink: "digital_signature"
+        through: "weak_key_pair"
+      - source: "RSA.Create(1024)"
+        sink: "certificate_signing"
+        through: "short_rsa_key"
+    impact: |
+      Insufficient RSA key sizes in .NET applications create security risks:
+      - RSA-512 and RSA-768 have been publicly factored
+      - RSA-1024 factorable by well-resourced attackers
+      - Default RSACryptoServiceProvider() in old .NET Framework uses 1024 bits
+      - Weak certificates enable MITM via key factoring
+      - Digital signatures become forgeable with recovered private key
+      - Non-compliance with NIST SP 800-131A, PCI-DSS, FIPS 140-3
+    remediation: |
+      Use minimum 2048-bit (preferably 4096-bit) RSA keys:
+
+      ```csharp
+      // VULNERABLE: Default or small RSA key
+      using var rsa = new RSACryptoServiceProvider(); // may be 1024-bit
+      using var rsa = new RSACryptoServiceProvider(1024);
+
+      // SECURE: RSA with 4096-bit key (.NET 5+)
+      using var rsa = RSA.Create(4096);
+
+      // SECURE: ECDSA with P-384 curve
+      using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/326.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://www.keylength.com/en/4/"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.rsacryptoserviceprovider"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'RSA'
+        - 'RSACryptoServiceProvider'
+        - 'RSACng'
+        - 'KeySize'
+        - 'Encrypt'
+        - 'Sign'
+        - 'Certificate'
+      taint_source_indicators:
+        - 'config\.'
+        - 'Configuration\['
+        - 'appsettings'
+      taint_sink_indicators:
+        - 'Encrypt'
+        - 'SignData'
+        - 'SignHash'
+        - 'CreateSignature'
+        - 'CertificateRequest'
+      sanitization_patterns:
+        - 'RSA\.Create\s*\(\s*(?:2048|3072|4096)'
+        - 'RSACryptoServiceProvider\s*\(\s*(?:2048|3072|4096)'
+        - 'KeySize\s*=\s*(?:2048|3072|4096)'
+        - 'nistP256'
+        - 'nistP384'
+        - 'nistP521'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + key_weakness_severity)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker factors a weak RSA key in an ASP.NET application:
+        1. Application uses default RSACryptoServiceProvider() (1024-bit on old .NET Framework)
+        2. Attacker obtains the public key from the TLS certificate or API endpoint
+        3. Using distributed GNFS factoring, attacker factors the 1024-bit RSA modulus
+        4. Attacker recovers the private key from the factored primes
+        5. Attacker forges JWT tokens signed with the recovered key
+        6. Attacker accesses all API endpoints as any user including admin
+      example_payload: "using var rsa = new RSACryptoServiceProvider(1024);"
+      attacker_objective: "Factor weak RSA keys to forge signatures and decrypt communications"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-004"
+        - "CRYPTO-CS-007"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-006: Insecure Random Number Generation
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-006"
+    title: "Use of System.Random for Security-Sensitive Operations"
+    description: >
+      Detects usage of System.Random for generating security-sensitive values instead
+      of System.Security.Cryptography.RandomNumberGenerator. System.Random uses a
+      subtraction PRNG that is not cryptographically secure and produces predictable
+      output given the seed. The default constructor uses Environment.TickCount as
+      seed, which is predictable from server startup time. .NET 6+ added
+      RandomNumberGenerator.GetBytes/GetInt32 as convenient CSPRNG methods. System.Random
+      should never be used for tokens, keys, nonces, salts, OTPs, or session IDs.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.91
+    cwe: CWE-338
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-random
+      - prng
+      - System.Random
+      - token-generation
+      - insecure-random
+      - dotnet
+      - csharp
+    detection_layer: 2
+    attack_surface_type: "authentication"
+    patterns:
+      - type: regex
+        pattern: 'new\s+Random\s*\(\s*\)[\s\S]{0,100}(?:token|key|secret|password|nonce|salt|session|csrf|otp|pin)'
+        description: "System.Random instance near security-sensitive variable names"
+      - type: regex
+        pattern: '(?:token|key|secret|password|nonce|salt|session|csrf|otp|pin)[\s\S]{0,100}(?:new\s+Random|random\.Next)'
+        description: "Security-sensitive variable populated from Random"
+      - type: regex
+        pattern: 'new\s+Random\s*\(\s*(?:DateTime\.Now|Environment\.TickCount|unchecked)'
+        description: "Random seeded with predictable value"
+      - type: regex
+        pattern: 'Random\.Shared\.Next[\s\S]{0,80}(?:token|key|secret|session|nonce|csrf|otp)'
+        description: "Random.Shared used for security values (.NET 6+)"
+      - type: regex
+        pattern: 'random\.NextBytes\s*\(\s*\w*(?:key|token|nonce|iv|salt)[\w]*\s*\)'
+        description: "Random.NextBytes filling security-sensitive byte array"
+      - type: regex
+        pattern: 'Guid\.NewGuid\s*\(\s*\)[\s\S]{0,80}(?:token|key|secret|password|session|csrf)'
+        description: "GUID used as security token (v4 GUIDs may be predictable)"
+      - type: regex
+        pattern: 'private\s+(?:static\s+)?(?:readonly\s+)?Random\s+\w+\s*=\s*new\s+Random'
+        description: "Static/instance Random field for potential security use"
+      - type: regex
+        pattern: 'random\.Next\s*\(\s*\d+\s*(?:,\s*\d+)?\s*\)[\s\S]{0,80}(?:otp|pin|code|verification)'
+        description: "Random.Next for OTP or verification code generation"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'shuffle'
+      - 'game'
+      - 'animation'
+      - 'delay'
+      - 'jitter'
+      - 'simulation'
+      - 'color'
+      - 'position'
+      - 'mock'
+      - 'fixture'
+    bypass_variants:
+      - description: "Random wrapped in utility class"
+        pattern: 'class\s+\w*Random\w*[\s\S]{0,300}System\.Random'
+      - description: "Random instance injected via dependency injection"
+        pattern: 'services\.AddSingleton.*new\s+Random'
+      - description: "Random.Shared used throughout service class"
+        pattern: 'Random\.Shared\.(?:Next|NextBytes|NextDouble)[\s\S]{0,50}(?:token|secret)'
+    evasion_indicators:
+      - "Random instance wrapped in service class"
+      - "Random injected via DI container"
+      - "Random.Shared used for convenience"
+      - "Thread-static Random instances"
+    encoding_variants:
+      - type: "static_field"
+        pattern: 'static\s+(?:readonly\s+)?Random\s+\w+\s*=\s*new\s+Random'
+      - type: "thread_static"
+        pattern: '\[ThreadStatic\][\s\S]{0,50}Random'
+      - type: "shared_instance"
+        pattern: 'Random\.Shared'
+    multi_function_chain_patterns:
+      - "new Random() -> Next/NextBytes -> hex string -> token"
+      - "Random.Shared.Next(range) -> ToString -> OTP"
+      - "random.NextBytes(array) -> Convert.ToBase64String -> session ID"
+      - "new Random() -> NextBytes -> set as encryption key/IV"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Predictable System.Random output enables token prediction, session hijacking, and CSRF bypass"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "new Random()"
+        sink: "session_token"
+        through: "Next().ToString()"
+      - source: "Random.Shared"
+        sink: "otp_value"
+        through: "Next(range)"
+      - source: "random.NextBytes()"
+        sink: "encryption_key"
+        through: "byte_array"
+    impact: |
+      Using System.Random for security operations in .NET is exploitable:
+      - Default seed (Environment.TickCount) is predictable from server start time
+      - Internal state recoverable from observed outputs
+      - Same-seed Random instances produce identical sequences
+      - Random.Shared is convenient but not cryptographically secure
+      - Password reset tokens, CSRF tokens, OTPs become predictable
+    remediation: |
+      Use RandomNumberGenerator for all security-sensitive random operations:
+
+      ```csharp
+      // VULNERABLE: System.Random for tokens
+      var random = new Random();
+      byte[] tokenBytes = new byte[32];
+      random.NextBytes(tokenBytes);
+
+      // SECURE: RandomNumberGenerator (.NET 6+)
+      byte[] tokenBytes = RandomNumberGenerator.GetBytes(32);
+      string token = Convert.ToHexString(tokenBytes);
+
+      // SECURE: Random integer in range (.NET 6+)
+      int otp = RandomNumberGenerator.GetInt32(100000, 1000000);
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/338.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.randomnumbergenerator"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.random"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'token'
+        - 'session'
+        - 'password'
+        - 'key'
+        - 'nonce'
+        - 'csrf'
+        - 'otp'
+        - 'secret'
+      taint_source_indicators:
+        - 'new\s+Random'
+        - 'Random\.Shared'
+        - 'random\.'
+      taint_sink_indicators:
+        - 'Response\.Cookies'
+        - 'Session\['
+        - 'HttpContext'
+        - 'SqlCommand'
+        - 'SaveChanges'
+      sanitization_patterns:
+        - 'RandomNumberGenerator'
+        - 'RNGCryptoServiceProvider'
+        - 'GetBytes'
+        - 'GetInt32'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + token_criticality_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits predictable password reset tokens in an ASP.NET application:
+        1. Application uses new Random().Next() to generate reset tokens
+        2. Attacker determines server start time from HTTP headers or error messages
+        3. Attacker computes Environment.TickCount at that time to determine seed
+        4. Attacker generates the same Random sequence and predicts future tokens
+        5. Attacker triggers password reset for the admin account
+        6. Attacker submits the predicted token and gains admin access
+      example_payload: "var token = new Random().Next(100000, 999999).ToString();"
+      attacker_objective: "Predict System.Random output to forge tokens and hijack user sessions"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-004"
+        - "CRYPTO-CS-008"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-007: Missing / Disabled Certificate Validation
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-007"
+    title: "Disabled or Bypassed SSL/TLS Certificate Validation"
+    description: >
+      Detects code that disables SSL/TLS certificate validation by setting
+      ServerCertificateValidationCallback to always return true, configuring
+      HttpClientHandler to skip certificate checks, or using deprecated TLS/SSL
+      protocol versions. ServicePointManager.ServerCertificateValidationCallback
+      affects ALL connections globally in the process. This completely negates TLS
+      protection, allowing trivial man-in-the-middle attacks on every HTTPS
+      connection the application makes including payment gateways and auth providers.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-295
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - tls
+      - ssl
+      - certificate
+      - mitm
+      - transport-security
+      - deprecated-protocol
+      - dotnet
+      - csharp
+    detection_layer: 3
+    attack_surface_type: "data-in-transit"
+    patterns:
+      - type: regex
+        pattern: 'ServerCertificateValidationCallback\s*=\s*\(\s*[^)]*\)\s*=>\s*true'
+        description: "Lambda certificate callback always returning true"
+      - type: regex
+        pattern: 'ServerCertificateValidationCallback\s*\+=?\s*delegate\s*\{[^}]*return\s+true'
+        description: "Delegate certificate callback always returning true"
+      - type: regex
+        pattern: 'ServerCertificateCustomValidationCallback\s*=\s*.*=>\s*true'
+        description: "HttpClientHandler custom cert callback always true"
+      - type: regex
+        pattern: 'ServerCertificateCustomValidationCallback\s*=\s*.*DangerousAcceptAnyServerCertificateValidator'
+        description: "HttpClientHandler using DangerousAcceptAnyServerCertificateValidator"
+      - type: regex
+        pattern: 'SecurityProtocol\s*=\s*SecurityProtocolType\.Ssl3'
+        description: "SecurityProtocol set to SSLv3"
+      - type: regex
+        pattern: 'SecurityProtocol\s*=\s*SecurityProtocolType\.Tls(?:\b|[^1])'
+        description: "SecurityProtocol set to TLS 1.0 only"
+      - type: regex
+        pattern: 'SecurityProtocol\s*\|=?\s*SecurityProtocolType\.(?:Ssl3|Tls11)'
+        description: "Deprecated protocol added to SecurityProtocol flags"
+      - type: regex
+        pattern: 'SslProtocols\.(?:Ssl2|Ssl3|Tls(?:\b)|Tls11)'
+        description: "Deprecated SslProtocols enum value used"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'development.*only'
+      - 'localhost'
+      - '//\s*TODO.*remove'
+      - '//\s*TEMPORARY'
+      - 'mock'
+      - 'fixture'
+      - '#if\s+DEBUG'
+      - 'SecurityProtocolType\.Tls12'
+      - 'SecurityProtocolType\.Tls13'
+    bypass_variants:
+      - description: "Certificate callback in separate helper class"
+        pattern: 'class\s+\w*Certificate\w*[\s\S]{0,300}return\s+true'
+      - description: "Security protocol set from configuration"
+        pattern: 'SecurityProtocol\s*=\s*\(SecurityProtocolType\)\s*(?:int\.Parse|Convert\.ToInt32)\s*\('
+      - description: "Protocol set in static constructor or startup"
+        pattern: 'static\s+\w+\s*\(\s*\)\s*\{[\s\S]{0,200}SecurityProtocol'
+      - description: "Method group reference that always returns true"
+        pattern: 'ServerCertificateValidationCallback\s*=\s*\w+\.AcceptAll'
+    evasion_indicators:
+      - "Certificate callback assigned from external method"
+      - "Validator logic controlled by runtime flag"
+      - "Certificate validation disabled in middleware"
+      - "Protocol configuration loaded from settings"
+      - "Conditional compilation hiding insecure settings"
+    encoding_variants:
+      - type: "numeric_cast"
+        pattern: 'SecurityProtocol\s*=\s*\(SecurityProtocolType\)\s*\d+'
+      - type: "combined_flags"
+        pattern: 'SecurityProtocolType\.Ssl3\s*\|\s*SecurityProtocolType\.Tls'
+      - type: "config_value"
+        pattern: 'Configuration\[\s*"[^"]*Protocol[^"]*"\s*\]'
+    multi_function_chain_patterns:
+      - "ServicePointManager.SecurityProtocol = Ssl3 -> HttpWebRequest"
+      - "ServicePointManager.ServerCertificateValidationCallback = true -> all HTTPS"
+      - "HttpClientHandler.ServerCertificateCustomValidationCallback = true -> HttpClient.GetAsync"
+      - "SslProtocols.Tls -> HttpClientHandler -> HttpClient"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Deprecated TLS protocols and disabled certificate validation enable MITM on all HTTPS connections"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "disabled_certificate_callback"
+        sink: "HttpClient_or_WebRequest"
+        through: "ServicePointManager global state"
+      - source: "handler_with_disabled_validation"
+        sink: "HttpClient_constructor"
+        through: "HttpClientHandler configuration"
+      - source: "SecurityProtocol_setting"
+        sink: "all_HTTPS_connections"
+        through: "ServicePointManager global configuration"
+    impact: |
+      Disabling certificate validation and using deprecated protocols enables attacks:
+      - Any attacker on the network path can intercept HTTPS with a self-signed cert
+      - SSLv3 vulnerable to POODLE attack (plaintext recovery)
+      - TLS 1.0 vulnerable to BEAST attack
+      - ServicePointManager settings affect ALL connections globally in the process
+      - Payment gateway, auth provider, and API communications all compromised
+      - Violates PCI-DSS 4.0, HIPAA, GDPR transport security requirements
+    remediation: |
+      Enforce TLS 1.2+ and proper certificate validation:
+
+      ```csharp
+      // VULNERABLE: Accept any certificate
+      ServicePointManager.ServerCertificateValidationCallback =
+          (sender, cert, chain, errors) => true;
+
+      // SECURE: Require TLS 1.2+
+      ServicePointManager.SecurityProtocol =
+          SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+      // SECURE: HttpClient with proper TLS (.NET 5+)
+      var handler = new HttpClientHandler
+      {
+          SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+      };
+      var client = new HttpClient(handler);
+
+      // SECURE: Certificate pinning
+      handler.ServerCertificateCustomValidationCallback = (msg, cert, chain, errors) =>
+      {
+          if (errors == SslPolicyErrors.None) return true;
+          return cert?.GetCertHashString(HashAlgorithmName.SHA256) == expectedThumbprint;
+      };
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/295.html"
+      - "https://learn.microsoft.com/en-us/dotnet/framework/network-programming/tls"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html"
+      - "https://learn.microsoft.com/en-us/dotnet/api/system.net.servicepointmanager.securityprotocol"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'ServicePointManager'
+        - 'SecurityProtocol'
+        - 'SslProtocols'
+        - 'HttpClient'
+        - 'HttpWebRequest'
+        - 'Certificate'
+        - 'TLS'
+      taint_source_indicators:
+        - 'Configuration'
+        - 'appsettings'
+        - 'Environment'
+      taint_sink_indicators:
+        - 'HttpClient'
+        - 'HttpWebRequest'
+        - 'WebClient'
+        - 'SslStream'
+        - 'TcpClient'
+      sanitization_patterns:
+        - 'SecurityProtocolType\.Tls12'
+        - 'SecurityProtocolType\.Tls13'
+        - 'SslProtocols\.Tls12'
+        - 'SystemDefault'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + network_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits disabled certificate validation in an ASP.NET app:
+        1. Application disables cert validation for its payment gateway connection
+        2. Attacker on the same network performs ARP spoofing
+        3. Attacker presents a self-signed certificate for the payment gateway
+        4. All payment data including credit card numbers flows through attacker proxy
+        5. Attacker also captures API keys and authentication tokens
+      example_payload: "ServicePointManager.ServerCertificateValidationCallback = (s, c, ch, e) => true;"
+      attacker_objective: "Intercept HTTPS traffic via MITM by exploiting disabled certificate validation"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-005"
+        - "CRYPTO-CS-004"
+
+  # --------------------------------------------------------------------------
+  # CRYPTO-CS-008: Custom Crypto Implementation
+  # --------------------------------------------------------------------------
+  - rule_id: "CRYPTO-CS-008"
+    title: "Custom Cryptographic Algorithm Implementation"
+    description: >
+      Detects attempts to implement custom cryptographic algorithms instead of using
+      well-tested standard libraries from System.Security.Cryptography. Custom
+      implementations of encryption (XOR ciphers, substitution ciphers), hashing,
+      key exchange, or random number generation are almost always weaker than
+      standard implementations due to subtle mathematical, timing, and implementation
+      flaws. This rule also detects weak key derivation patterns including
+      PasswordDeriveBytes (PBKDF1) and Rfc2898DeriveBytes with insufficient
+      iterations, as well as raw password-to-key conversions.
+    language: csharp
+    category: crypto
+    severity: High
+    confidence: 0.85
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - custom-crypto
+      - diy-encryption
+      - xor-cipher
+      - obfuscation
+      - weak-kdf
+      - pbkdf1
+      - password-hashing
+      - dotnet
+      - csharp
+    detection_layer: 2
+    attack_surface_type: "data-at-rest"
+    patterns:
+      - type: regex
+        pattern: 'class\s+\w*(?:Cipher|Encrypt|Crypt|Crypto)\w*\s*[:{]'
+        description: "Custom class with cryptographic name"
+      - type: regex
+        pattern: 'static\s+\w+\s+(?:Encrypt|Decrypt|Cipher)\s*\([^)]*\)\s*\{'
+        description: "Static encrypt/decrypt method"
+      - type: regex
+        pattern: '\^\s*(?:key|password|secret)\s*\['
+        description: "XOR operation with key byte array"
+      - type: regex
+        pattern: 'for\s*\([^)]*\)\s*\{[^}]*(?:plaintext|ciphertext|data)\s*\[\w+\]\s*\^='
+        description: "XOR encryption loop over byte array"
+      - type: regex
+        pattern: 'new\s+PasswordDeriveBytes\s*\('
+        description: "PasswordDeriveBytes instantiation (deprecated PBKDF1)"
+      - type: regex
+        pattern: 'new\s+Rfc2898DeriveBytes\s*\([^,]+,\s*[^,]+,\s*(?:[1-9]\d{0,3}|[1-9]\d{4})\b'
+        description: "Rfc2898DeriveBytes with insufficient iterations (<100000)"
+      - type: regex
+        pattern: 'Encoding\.(?:UTF8|ASCII)\.GetBytes\s*\(\s*(?:password|passwd|passphrase)\s*\)[\s\S]{0,80}(?:\.Key\s*=|new\s+\w*Key)'
+        description: "Raw password bytes used directly as encryption key"
+      - type: regex
+        pattern: '(?:SHA256|SHA512|MD5)\.Create\s*\(\s*\)\.ComputeHash[\s\S]{0,50}(?:password|passwd)[\s\S]{0,50}(?:\.Key|AES|aes|Encrypt)'
+        description: "Simple hash of password used as encryption key"
+    anti_patterns:
+      - 'Test\.cs$'
+      - 'Tests\.cs$'
+      - 'test/'
+      - 'tests/'
+      - '//\s*nosec'
+      - 'using\s+System\.Security\.Cryptography'
+      - 'Aes\.Create'
+      - 'AesGcm'
+      - 'RSACryptoServiceProvider'
+      - 'HMACSHA256'
+      - 'Rfc2898DeriveBytes.*600000'
+      - ':\s*SymmetricAlgorithm'
+      - ':\s*HashAlgorithm'
+      - 'Argon2'
+      - 'BCrypt'
+    bypass_variants:
+      - description: "Embedding XOR encryption inline without a named method"
+        pattern: 'byte\s*\[\s*\][\s\S]{0,200}\^=[\s\S]{0,100}key'
+      - description: "KDF parameters from configuration hiding weak defaults"
+        pattern: 'new\s+Rfc2898DeriveBytes\s*\([^,]+,\s*[^,]+,\s*(?:config|settings|options)\.'
+      - description: "KDF wrapped in utility class hiding weak parameters"
+        pattern: 'class\s+\w*(?:KeyDerivation|KDF|Crypto)\w*[\s\S]{0,400}PasswordDeriveBytes'
+      - description: "Custom base-encoding after homegrown encryption"
+        pattern: 'Convert\.To(?:Base64|Hex)String[\s\S]{0,100}\^'
+    evasion_indicators:
+      - "XOR operations on byte arrays with key material"
+      - "Custom S-box or permutation tables"
+      - "Bit rotation and substitution in loops"
+      - "Key derived from simple hash of password"
+      - "Character shifting (Caesar-like) on strings"
+    encoding_variants:
+      - type: "variable_iterations"
+        pattern: 'int\s+iterations\s*=\s*(?:\d{1,4}|1000\b)'
+      - type: "config_iterations"
+        pattern: 'Configuration\[\s*"[^"]*[Ii]teration[^"]*"\s*\]'
+      - type: "const_iterations"
+        pattern: 'const\s+int\s+\w*[Ii]teration\w*\s*=\s*(?:\d{1,4}|10000\b)'
+    multi_function_chain_patterns:
+      - "CustomEncrypt -> XOR loop -> Base64 encode -> Store"
+      - "GetBytes -> custom byte manipulation -> CustomDecrypt"
+      - "PasswordDeriveBytes -> GetBytes -> aes.Key assignment"
+      - "SHA256(password) -> aes.Key = hash -> encrypt"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Custom crypto and weak KDFs enable password brute-forcing and trivial cipher breaking"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "plaintext_user_data"
+        sink: "custom_encryption_method"
+        through: "byte conversion"
+      - source: "user_password"
+        sink: "encryption_key"
+        through: "PasswordDeriveBytes.GetBytes()"
+      - source: "passphrase"
+        sink: "symmetric_key"
+        through: "SHA256.ComputeHash() without stretching"
+    impact: |
+      Custom cryptographic implementations typically have fatal weaknesses:
+      - XOR ciphers are trivially broken with known-plaintext attacks
+      - Custom hashes have collision and preimage vulnerabilities
+      - PasswordDeriveBytes (PBKDF1) uses only MD5/SHA1 with limited output
+      - Rfc2898DeriveBytes with low iterations is GPU brute-forceable
+      - Raw password bytes as key limits entropy to password entropy
+      - Data protected by custom crypto should be considered unprotected
+    remediation: |
+      Use standard cryptographic libraries:
+
+      ```csharp
+      // VULNERABLE: Custom XOR cipher
+      for (int i = 0; i < data.Length; i++)
+          data[i] ^= key[i % key.Length];
+
+      // VULNERABLE: PasswordDeriveBytes (PBKDF1)
+      var pdb = new PasswordDeriveBytes(password, salt);
+
+      // SECURE: Rfc2898DeriveBytes with SHA-256 and 600000+ iterations
+      byte[] salt = RandomNumberGenerator.GetBytes(16);
+      using var rfc = new Rfc2898DeriveBytes(
+          password, salt, 600000, HashAlgorithmName.SHA256);
+      byte[] key = rfc.GetBytes(32);
+
+      // SECURE: Aes.Create() for encryption
+      using var aes = Aes.Create();
+      aes.Key = key;
+      aes.GenerateIV();
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://cwe.mitre.org/data/definitions/916.html"
+      - "https://www.schneier.com/blog/archives/2011/04/schneiers_law.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'PasswordDeriveBytes'
+        - 'Rfc2898DeriveBytes'
+        - 'Encrypt'
+        - 'Decrypt'
+        - 'password'
+        - 'key'
+        - 'XOR'
+      taint_source_indicators:
+        - 'password'
+        - 'passphrase'
+        - 'Request\.Form'
+        - 'user\.Password'
+      taint_sink_indicators:
+        - '\.Key\s*='
+        - 'CreateEncryptor'
+        - 'CryptoStream'
+        - 'AesGcm'
+      sanitization_patterns:
+        - 'Rfc2898DeriveBytes.*600000'
+        - 'Rfc2898DeriveBytes.*SHA256'
+        - 'KeyDerivation\.Pbkdf2'
+        - 'Argon2'
+        - 'BCrypt'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + crypto_weakness_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker breaks custom XOR encryption in a .NET application:
+        1. Developer implements XOR cipher to "encrypt" user passwords before storage
+        2. Attacker obtains encrypted database records
+        3. Knowing common password prefixes, attacker performs known-plaintext attack
+        4. XOR key recovered instantly from a single known plaintext-ciphertext pair
+        5. All stored passwords decrypted, enabling mass account takeover
+      example_payload: "for (int i = 0; i < data.Length; i++) data[i] ^= key[i % key.Length];"
+      attacker_objective: "Break custom encryption or brute-force weakly derived keys to compromise protected data"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2026-02-28"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-CS-002"
+        - "CRYPTO-CS-004"
+        - "CRYPTO-CS-006"

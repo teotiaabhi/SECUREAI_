@@ -1,0 +1,1670 @@
+rules:
+  - rule_id: "CRYPTO-GO-001"
+    title: "Weak Hash Algorithm Usage (crypto/md5 or crypto/sha1)"
+    description: >
+      Detects usage of cryptographically broken hash algorithms MD5 and SHA1 through Go's
+      crypto/md5 and crypto/sha1 packages for security-sensitive operations. Go's standard
+      library explicitly provides these packages but their documentation warns against using
+      them for security purposes. MD5 collisions are trivially generatable, and SHA1 was
+      broken by the SHAttered attack. These must not be used for password hashing, digital
+      signatures, certificate validation, or HMAC where collision resistance matters.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.92
+    cwe: CWE-328
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-hash
+      - md5
+      - sha1
+      - golang
+      - integrity
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'md5\.New\s*\(\s*\)'
+        description: "crypto/md5 hash instantiation"
+      - type: regex
+        pattern: 'md5\.Sum\s*\('
+        description: "crypto/md5 direct sum computation"
+      - type: regex
+        pattern: 'sha1\.New\s*\(\s*\)'
+        description: "crypto/sha1 hash instantiation"
+      - type: regex
+        pattern: 'sha1\.Sum\s*\('
+        description: "crypto/sha1 direct sum computation"
+      - type: regex
+        pattern: '"crypto/md5"'
+        description: "Import of crypto/md5 package"
+      - type: regex
+        pattern: '"crypto/sha1"'
+        description: "Import of crypto/sha1 package"
+      - type: regex
+        pattern: 'hmac\.New\s*\(\s*(?:md5\.New|sha1\.New)\s*,'
+        description: "HMAC with weak underlying hash function"
+      - type: regex
+        pattern: 'crypto\.MD5\b|crypto\.SHA1\b'
+        description: "crypto.MD5 or crypto.SHA1 hash constant reference"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - 'checksum'
+      - 'etag'
+      - 'cacheKey'
+      - 'fingerprint.*dedup'
+      - '// legacy'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'benchmark_'
+      - 'vendor/'
+      - 'third_party/'
+    bypass_variants:
+      - description: "Hash function stored in variable and called indirectly"
+        pattern: '(?:hashFunc|newHash|hasher)\s*:?=\s*(?:md5|sha1)\.New'
+      - description: "Hash function passed as parameter"
+        pattern: 'func\s+\w+\s*\([^)]*(?:hash\.Hash|func\(\)\s*hash\.Hash)[^)]*\)'
+      - description: "Hash selected from map or switch"
+        pattern: 'case\s+"(?:md5|sha1)"[\s\S]{0,50}(?:md5|sha1)\.New'
+    evasion_indicators:
+      - "Hash function assigned to interface variable"
+      - "Hash algorithm selected at runtime from configuration"
+      - "Third-party library wrapping standard crypto packages"
+      - "Hash function passed as closure parameter"
+    encoding_variants:
+      - type: "interface_assignment"
+        pattern: 'var\s+\w+\s+hash\.Hash\s*=\s*(?:md5|sha1)\.New\s*\(\s*\)'
+      - type: "factory_function"
+        pattern: 'func\s+\w+\s*\(\s*\)\s*hash\.Hash\s*\{[\s\S]{0,100}(?:md5|sha1)\.New'
+      - type: "crypto_constant"
+        pattern: 'crypto\.(?:MD5|SHA1)\.New\s*\(\s*\)'
+    multi_function_chain_patterns:
+      - "md5.New() -> Write -> Sum chain for password hashing"
+      - "sha1.Sum(data) -> hex.EncodeToString -> token comparison"
+      - "hmac.New(sha1.New, key) -> Write -> Sum for API signing"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Collision attacks on MD5/SHA1 enable signature forgery and integrity check bypasses in Go services"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_input"
+        sink: "hash_comparison"
+        through: "md5.Sum([]byte(input))"
+      - source: "password_string"
+        sink: "database_storage"
+        through: "sha1.New().Write(password)"
+      - source: "request_body"
+        sink: "hmac_verification"
+        through: "hmac.New(md5.New, key)"
+    impact: |
+      Using crypto/md5 or crypto/sha1 for security in Go applications creates vulnerabilities:
+      - MD5 collisions generatable in seconds on commodity hardware
+      - SHA1 chosen-prefix collisions demonstrated (SHAttered, Shambles)
+      - Password hashes crackable via rainbow tables and GPU brute force
+      - Digital signatures using these algorithms can be forged
+      - HMAC-MD5/HMAC-SHA1 weaker than HMAC-SHA256 for new applications
+      - Non-compliance with NIST SP 800-131A, PCI-DSS, FIPS 140-3
+    remediation: |
+      Replace with crypto/sha256 or stronger alternatives:
+
+      ```go
+      // VULNERABLE: MD5 for hashing
+      import "crypto/md5"
+      hash := md5.Sum([]byte(data))
+
+      // SECURE: SHA-256 for integrity
+      import "crypto/sha256"
+      hash := sha256.Sum256([]byte(data))
+
+      // SECURE: bcrypt for password hashing
+      import "golang.org/x/crypto/bcrypt"
+      hashed, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+      err = bcrypt.CompareHashAndPassword(hashed, []byte(password))
+
+      // SECURE: argon2 for password hashing
+      import "golang.org/x/crypto/argon2"
+      hash := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32)
+
+      // SECURE: HMAC-SHA256
+      import "crypto/hmac"
+      import "crypto/sha256"
+      mac := hmac.New(sha256.New, key)
+      mac.Write(data)
+      signature := mac.Sum(nil)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/328.html"
+      - "https://pkg.go.dev/crypto/md5"
+      - "https://shattered.io/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'password'
+        - 'token'
+        - 'signature'
+        - 'verify'
+        - 'authenticate'
+        - 'session'
+        - 'secret'
+      taint_source_indicators:
+        - 'r\.Body'
+        - 'r\.FormValue'
+        - 'r\.URL\.Query'
+        - 'os\.Stdin'
+        - 'bufio\.Scanner'
+      taint_sink_indicators:
+        - '\.Sum\('
+        - 'hex\.EncodeToString'
+        - 'db\.Exec'
+        - 'http\.SetCookie'
+        - 'w\.Write'
+      sanitization_patterns:
+        - 'sha256\.New'
+        - 'sha512\.New'
+        - 'sha3\.New'
+        - 'bcrypt\.'
+        - 'argon2\.'
+        - 'scrypt\.'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + business_impact_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a Go REST API using MD5 for API key hashing:
+        1. Attacker obtains leaked database containing MD5 hashes of API keys
+        2. Using hashcat in MD5 mode, attacker recovers API keys at 25B hashes/sec
+        3. Attacker uses recovered API keys to authenticate as legitimate users
+        4. For SHA1-signed webhooks, attacker generates collision to forge event payloads
+        5. Forged webhooks trigger privileged operations in the downstream system
+      example_payload: "fmt.Sprintf(\"%x\", md5.Sum([]byte(apiKey)))"
+      attacker_objective: "Crack weak MD5/SHA1 hashes to recover secrets or forge digital signatures"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-002"
+        - "CRYPTO-GO-003"
+        - "CRYPTO-GO-005"
+
+  - rule_id: "CRYPTO-GO-002"
+    title: "Weak Cipher Usage (DES/RC4)"
+    description: >
+      Detects usage of weak or deprecated cipher algorithms in Go applications including
+      crypto/des (DES and Triple DES) and crypto/rc4 (RC4/ARC4). DES uses a 56-bit key
+      brute-forceable in hours. Triple DES is vulnerable to Sweet32 birthday attacks on its
+      64-bit block size. RC4 has well-documented keystream biases exploitable in TLS and WPA.
+      Go's standard library includes these packages for legacy compatibility but they should
+      never be used for new encryption operations.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.93
+    cwe: CWE-327
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-cipher
+      - des
+      - rc4
+      - golang
+      - symmetric-encryption
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'des\.NewCipher\s*\('
+        description: "DES cipher instantiation"
+      - type: regex
+        pattern: 'des\.NewTripleDESCipher\s*\('
+        description: "Triple DES cipher instantiation"
+      - type: regex
+        pattern: 'rc4\.NewCipher\s*\('
+        description: "RC4 stream cipher instantiation"
+      - type: regex
+        pattern: '"crypto/des"'
+        description: "Import of crypto/des package"
+      - type: regex
+        pattern: '"crypto/rc4"'
+        description: "Import of crypto/rc4 package"
+      - type: regex
+        pattern: 'des\.BlockSize'
+        description: "Reference to DES block size constant"
+      - type: regex
+        pattern: 'cipher\.NewCBCEncrypter\s*\(\s*(?:desBlock|tripleDesBlock|block3des)'
+        description: "CBC mode with DES/3DES block cipher"
+      - type: regex
+        pattern: 'blowfish\.NewCipher\s*\('
+        description: "Blowfish cipher from x/crypto (64-bit block)"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - '// legacy'
+      - 'migration'
+      - 'backward.*compat'
+      - 'decrypt.*only'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'benchmark_'
+      - 'vendor/'
+      - 'third_party/'
+      - '@deprecated'
+    bypass_variants:
+      - description: "Block cipher assigned to interface variable"
+        pattern: 'var\s+\w+\s+cipher\.Block\s*[\s\S]{0,50}des\.NewCipher'
+      - description: "Cipher selected from factory function based on config"
+        pattern: 'func\s+\w+\s*\([^)]*\)\s*cipher\.Block[\s\S]{0,200}des\.'
+      - description: "Algorithm name from environment or config"
+        pattern: 'os\.Getenv\s*\(\s*"[^"]*CIPHER[^"]*"\s*\)[\s\S]{0,100}(?:des|rc4)'
+    evasion_indicators:
+      - "Cipher assigned to cipher.Block interface hiding concrete type"
+      - "Factory function returning different ciphers based on configuration"
+      - "Algorithm selection via environment variable or config file"
+      - "Third-party wrapper obscuring standard library usage"
+    encoding_variants:
+      - type: "interface_assignment"
+        pattern: 'block\s*,\s*(?:err|_)\s*:?=\s*des\.NewCipher'
+      - type: "wrapped_function"
+        pattern: 'func\s+\w*[Ee]ncrypt\w*[\s\S]{0,300}des\.New'
+      - type: "config_driven"
+        pattern: 'config\.(?:Cipher|Algorithm)\s*==\s*"(?:des|3des|rc4)"'
+    multi_function_chain_patterns:
+      - "des.NewCipher -> cipher.NewCBCEncrypter -> CryptBlocks"
+      - "rc4.NewCipher -> XORKeyStream for stream encryption"
+      - "des.NewTripleDESCipher -> cipher.NewCFBEncrypter -> XORKeyStream"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak ciphers enable brute-force key recovery and ciphertext decryption of sensitive data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_data"
+        sink: "encrypted_storage"
+        through: "des.NewCipher().Encrypt()"
+      - source: "api_payload"
+        sink: "encrypted_response"
+        through: "rc4.NewCipher().XORKeyStream()"
+      - source: "config_data"
+        sink: "encrypted_file"
+        through: "des.NewTripleDESCipher()"
+    impact: |
+      Using weak ciphers in Go applications exposes encrypted data:
+      - DES 56-bit key exhaustion in hours using FPGA clusters
+      - 3DES/Triple DES vulnerable to Sweet32 birthday attack after ~32GB
+      - RC4 keystream biases enable plaintext recovery
+      - Blowfish 64-bit block size enables birthday attacks
+      - All modern compliance standards prohibit these algorithms
+      - Data encrypted with these ciphers should be considered compromised
+    remediation: |
+      Replace with AES-256-GCM or XChaCha20-Poly1305:
+
+      ```go
+      // VULNERABLE: DES encryption
+      import "crypto/des"
+      block, _ := des.NewCipher(key8bytes)
+
+      // SECURE: AES-256-GCM
+      import (
+          "crypto/aes"
+          "crypto/cipher"
+          "crypto/rand"
+      )
+      block, err := aes.NewCipher(key32bytes) // 256-bit key
+      gcm, err := cipher.NewGCM(block)
+      nonce := make([]byte, gcm.NonceSize())
+      rand.Read(nonce)
+      ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+
+      // SECURE: XChaCha20-Poly1305
+      import "golang.org/x/crypto/chacha20poly1305"
+      aead, err := chacha20poly1305.NewX(key32bytes)
+      nonce := make([]byte, aead.NonceSize())
+      rand.Read(nonce)
+      ciphertext := aead.Seal(nonce, nonce, plaintext, nil)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/327.html"
+      - "https://pkg.go.dev/crypto/des"
+      - "https://sweet32.info/"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'des\.'
+        - 'rc4\.'
+        - 'cipher\.'
+        - 'encrypt'
+        - 'decrypt'
+        - 'NewCipher'
+      taint_source_indicators:
+        - 'r\.Body'
+        - 'io\.Read'
+        - 'bufio\.Read'
+        - 'os\.Open'
+      taint_sink_indicators:
+        - 'CryptBlocks'
+        - 'XORKeyStream'
+        - 'io\.Write'
+        - 'db\.Exec'
+      sanitization_patterns:
+        - 'aes\.NewCipher'
+        - 'cipher\.NewGCM'
+        - 'chacha20poly1305\.'
+        - 'cipher\.NewGCMWithNonceSize'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + data_sensitivity_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a Go microservice using DES for data encryption:
+        1. Attacker captures encrypted data from database backup or network traffic
+        2. DES 8-byte block patterns confirm the cipher in use
+        3. Using distributed DES cracker, attacker recovers 56-bit key in hours
+        4. All encrypted records decrypted with the recovered key
+        5. For RC4-encrypted streams, attacker uses statistical bias attacks
+        6. Plaintext recovery from RC4 possible after collecting sufficient ciphertext
+      example_payload: "block, _ := des.NewCipher([]byte(\"8byteky\")); block.Encrypt(dst, src)"
+      attacker_objective: "Brute-force weak cipher keys to decrypt Go application data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-001"
+        - "CRYPTO-GO-003"
+        - "CRYPTO-GO-005"
+        - "CRYPTO-GO-006"
+
+  - rule_id: "CRYPTO-GO-003"
+    title: "Hardcoded Cryptographic Keys in Go Code"
+    description: >
+      Detects hardcoded cryptographic keys, secrets, and passwords embedded directly in Go
+      source code. Go binaries, while compiled, can be analyzed with tools like strings and
+      Go-specific reverse engineering tools (go tool objdump, Ghidra with Go plugins). Hardcoded
+      keys in Go are particularly dangerous because Go binaries are often distributed as
+      single static binaries, making key extraction straightforward. String constants in Go
+      are stored unencrypted in the binary data section.
+    language: go
+    category: crypto
+    severity: Critical
+    confidence: 0.88
+    cwe: CWE-798
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - hardcoded-key
+      - secret-management
+      - credential-exposure
+      - golang
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: '(?:encryptionKey|secretKey|cryptoKey|aesKey|hmacKey)\s*(?::=|=)\s*\[\]byte\s*\{[^}]+\}'
+        description: "Named key variable assigned byte slice literal"
+      - type: regex
+        pattern: '(?:encryptionKey|secretKey|cryptoKey|aesKey)\s*(?::=|=)\s*\[\]byte\s*\(\s*"[^"]{16,}"\s*\)'
+        description: "Key variable from string conversion to byte slice"
+      - type: regex
+        pattern: 'aes\.NewCipher\s*\(\s*\[\]byte\s*\(\s*"[^"]{16,}"\s*\)\s*\)'
+        description: "Hardcoded key string directly in AES NewCipher"
+      - type: regex
+        pattern: 'aes\.NewCipher\s*\(\s*\[\]byte\s*\{[^}]+\}\s*\)'
+        description: "Hardcoded byte slice directly in AES NewCipher"
+      - type: regex
+        pattern: '(?:ENCRYPTION_KEY|SECRET_KEY|AES_KEY|HMAC_SECRET)\s*=\s*"[^"]{16,}"'
+        description: "Constant with crypto-related name assigned string literal"
+      - type: regex
+        pattern: 'hmac\.New\s*\(\s*\w+\s*,\s*\[\]byte\s*\(\s*"[^"]{8,}"\s*\)\s*\)'
+        description: "Hardcoded HMAC key in hmac.New call"
+      - type: regex
+        pattern: 'var\s+\w*[Kk]ey\w*\s*=\s*\[\]byte\s*\{(?:\s*0x[0-9a-fA-F]{1,2}\s*,){7,}'
+        description: "Package-level key variable as hex byte slice"
+      - type: regex
+        pattern: 'jwt\.(?:SigningMethodHS|NewWithClaims)[\s\S]{0,200}\[\]byte\s*\(\s*"[^"]{8,}"'
+        description: "Hardcoded JWT signing secret"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - 'os\.Getenv'
+      - 'os\.LookupEnv'
+      - 'viper\.'
+      - 'vault'
+      - 'kms'
+      - 'CHANGEME'
+      - 'placeholder'
+      - 'TODO.*replace'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+    bypass_variants:
+      - description: "Key split across multiple byte slices and appended"
+        pattern: 'key\s*=\s*append\s*\(\s*\[\]byte\s*\{[^}]+\}\s*,\s*\[\]byte\s*\{[^}]+\}'
+      - description: "Key base64-decoded from hardcoded string"
+        pattern: 'base64\.(?:Std|URL|Raw)Encoding\.DecodeString\s*\(\s*"[A-Za-z0-9+/=_-]{16,}"'
+      - description: "Key hex-decoded from hardcoded string"
+        pattern: 'hex\.DecodeString\s*\(\s*"[0-9a-fA-F]{16,}"'
+    evasion_indicators:
+      - "Key assembled from multiple append operations"
+      - "Key decoded from base64/hex constant at runtime"
+      - "Key stored in embedded file via go:embed"
+      - "Key obfuscated through XOR or byte manipulation"
+    encoding_variants:
+      - type: "base64_encoded"
+        pattern: 'base64\.\w+Encoding\.DecodeString\s*\(\s*"[A-Za-z0-9+/=]{20,}"'
+      - type: "hex_encoded"
+        pattern: 'hex\.DecodeString\s*\(\s*"[0-9a-fA-F]{32,}"'
+      - type: "embed_directive"
+        pattern: '//go:embed\s+\w*key\w*'
+    multi_function_chain_patterns:
+      - "Hardcoded []byte -> aes.NewCipher -> cipher.NewGCM -> Seal"
+      - "Constant string -> []byte -> hmac.New -> Write -> Sum"
+      - "Hardcoded key -> jwt.NewWithClaims -> SignedString"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Keys extracted from Go binaries via strings/objdump allow decryption of all data and forgery of signed tokens"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "byte_slice_literal"
+        sink: "aes_new_cipher"
+        through: "variable_assignment"
+      - source: "string_constant"
+        sink: "hmac_new"
+        through: "byte_conversion"
+      - source: "hardcoded_secret"
+        sink: "jwt_sign"
+        through: "signing_key_parameter"
+    impact: |
+      Hardcoded keys in Go applications are extractable and compromise all protected data:
+      - Go binaries contain strings in their data section, extractable via `strings` command
+      - Go-specific tools (go tool objdump, Ghidra) can identify key material in binaries
+      - Single static binaries are easily shared and analyzed
+      - Docker images with embedded keys expose keys in image layers
+      - Key rotation requires rebuilding and redeploying all binaries
+      - Violates PCI-DSS 3.5, NIST SP 800-57, SOC2 CC6.1
+    remediation: |
+      Use environment variables, vaults, or KMS for key management:
+
+      ```go
+      // VULNERABLE: Hardcoded key
+      key := []byte("my-secret-key-1234567890123456")
+      block, _ := aes.NewCipher(key)
+
+      // SECURE: Load from environment variable
+      keyHex := os.Getenv("ENCRYPTION_KEY")
+      key, err := hex.DecodeString(keyHex)
+      if err != nil || len(key) != 32 {
+          log.Fatal("invalid encryption key")
+      }
+      block, err := aes.NewCipher(key)
+
+      // SECURE: Use HashiCorp Vault
+      client, _ := vault.NewClient(vault.DefaultConfig())
+      secret, _ := client.Logical().Read("secret/data/encryption")
+      keyStr := secret.Data["data"].(map[string]interface{})["key"].(string)
+      key, _ := hex.DecodeString(keyStr)
+
+      // SECURE: Use AWS KMS
+      kmsClient := kms.NewFromConfig(cfg)
+      result, _ := kmsClient.Decrypt(ctx, &kms.DecryptInput{
+          CiphertextBlob: encryptedKey,
+      })
+      key := result.Plaintext
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/798.html"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final"
+      - "https://pkg.go.dev/crypto/aes"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'aes\.'
+        - 'cipher\.'
+        - 'hmac\.'
+        - 'encrypt'
+        - 'decrypt'
+        - 'jwt\.'
+        - 'sign'
+      taint_source_indicators:
+        - '\\[\\]byte\\{'
+        - '\\[\\]byte\\('
+        - 'const.*='
+        - 'var.*key'
+      taint_sink_indicators:
+        - 'aes\.NewCipher'
+        - 'hmac\.New'
+        - 'cipher\.NewGCM'
+        - 'jwt\.SignedString'
+      sanitization_patterns:
+        - 'os\.Getenv'
+        - 'os\.LookupEnv'
+        - 'viper\.GetString'
+        - 'vault\.'
+        - 'kms\.'
+        - 'crypto/rand'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + exposure_surface_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker extracts hardcoded keys from a Go microservice binary:
+        1. Attacker gains access to the Go binary (Docker image pull, artifact download)
+        2. Running `strings binary | grep -i key` reveals potential key material
+        3. Using go tool objdump, attacker identifies AES key constant in data section
+        4. Attacker uses extracted key to decrypt database fields encrypted by the service
+        5. Extracted JWT signing key enables admin token forgery
+        6. Attacker accesses all API endpoints with forged admin tokens
+      example_payload: "var aesKey = []byte(\"0123456789abcdef0123456789abcdef\")"
+      attacker_objective: "Extract hardcoded encryption keys from Go binaries to decrypt data and forge tokens"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-002"
+        - "CRYPTO-GO-004"
+        - "CRYPTO-GO-006"
+
+  - rule_id: "CRYPTO-GO-004"
+    title: "math/rand Used Instead of crypto/rand"
+    description: >
+      Detects usage of Go's math/rand package for generating security-sensitive values instead
+      of crypto/rand. math/rand uses a deterministic PRNG (source-based) that produces
+      predictable output given the seed. The default source is not safe for concurrent use
+      and produces identical sequences with the same seed. Even math/rand/v2 with modern
+      algorithms is not cryptographically secure. crypto/rand reads from the OS CSPRNG
+      (/dev/urandom on Unix, CryptGenRandom on Windows) and must be used for all security operations.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.91
+    cwe: CWE-338
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - weak-random
+      - prng
+      - math-rand
+      - token-generation
+      - golang
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '"math/rand"'
+        description: "Import of math/rand package"
+      - type: regex
+        pattern: 'rand\.Intn\s*\([^)]+\)[\s\S]{0,80}(?:token|key|secret|password|nonce|salt|session|csrf|otp)'
+        description: "math/rand.Intn near security-sensitive variable names"
+      - type: regex
+        pattern: '(?:token|key|secret|password|nonce|salt|session|csrf|otp)[\s\S]{0,80}rand\.(?:Intn|Int63|Int31|Float64)'
+        description: "Security-sensitive variable populated from math/rand"
+      - type: regex
+        pattern: 'rand\.Seed\s*\(\s*time\.Now\s*\(\s*\)\.(?:Unix|UnixNano)\s*\(\s*\)\s*\)'
+        description: "math/rand seeded with current time (predictable)"
+      - type: regex
+        pattern: 'rand\.Read\s*\([^)]+\)[\s\S]{0,80}(?:key|nonce|iv|salt|secret)'
+        description: "math/rand.Read for security byte generation"
+      - type: regex
+        pattern: 'rand\.New\s*\(\s*rand\.NewSource\s*\(\s*(?:\d+|time\.Now)'
+        description: "New math/rand source with predictable seed"
+      - type: regex
+        pattern: 'func\s+generate(?:Token|Key|Secret|Password|Nonce|Salt)\s*\([^)]*\)[\s\S]{0,300}rand\.(?:Intn|Int63|Read)'
+        description: "Security generator function using math/rand"
+      - type: regex
+        pattern: 'rand\.Shuffle[\s\S]{0,100}(?:password|token|key|secret)'
+        description: "math/rand.Shuffle for security-sensitive shuffling"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - 'shuffle.*display'
+      - 'jitter'
+      - 'backoff'
+      - 'delay'
+      - 'game'
+      - 'simulation'
+      - 'mock'
+      - 'fixture'
+      - 'benchmark'
+      - 'sample'
+      - 'example'
+    bypass_variants:
+      - description: "math/rand aliased on import"
+        pattern: 'import\s+\w+\s+"math/rand"'
+      - description: "Random source injected as interface"
+        pattern: 'type\s+\w+\s+interface\s*\{[\s\S]*?Intn\s*\(\s*int\s*\)\s*int'
+      - description: "Global rand functions used without explicit import reference"
+        pattern: 'rand\.(?:Intn|Int63|Float64|Read)\s*\('
+    evasion_indicators:
+      - "math/rand aliased to avoid detection"
+      - "Random source interface hiding concrete implementation"
+      - "Wrapper function obscuring math/rand usage"
+      - "math/rand imported in separate package and used transitively"
+    encoding_variants:
+      - type: "aliased_import"
+        pattern: 'import\s+(?:mrand|insecureRand|pseudoRand)\s+"math/rand"'
+      - type: "dot_import"
+        pattern: 'import\s+\.\s+"math/rand"'
+      - type: "package_reference"
+        pattern: 'mrand\.(?:Intn|Int63|Read)\s*\('
+    multi_function_chain_patterns:
+      - "rand.Intn(len(charset)) in loop -> string builder -> token"
+      - "rand.Read(bytes) -> hex.EncodeToString -> session ID"
+      - "rand.Seed(time) -> rand.Int63() -> key derivation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Predictable math/rand output enables token prediction, session hijacking, and CSRF bypass"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "rand.Intn()"
+        sink: "session_token"
+        through: "string_builder"
+      - source: "rand.Read()"
+        sink: "encryption_key"
+        through: "byte_slice"
+      - source: "rand.Int63()"
+        sink: "csrf_token"
+        through: "hex_encoding"
+    impact: |
+      Using math/rand for security operations in Go applications enables prediction:
+      - math/rand with known seed produces entirely deterministic output
+      - Time-based seeds (time.Now().UnixNano()) narrow search space to ~1 billion values
+      - Default math/rand (before Go 1.20) uses seed 1, producing identical sequences
+      - Attackers observing outputs can recover state and predict future values
+      - Password reset tokens, session IDs, OTPs become predictable
+      - Even math/rand/v2 is explicitly documented as not cryptographically secure
+    remediation: |
+      Use crypto/rand for all security-sensitive random operations:
+
+      ```go
+      // VULNERABLE: math/rand for token generation
+      import "math/rand"
+      rand.Seed(time.Now().UnixNano())
+      token := rand.Int63()
+
+      // SECURE: crypto/rand for random bytes
+      import "crypto/rand"
+      token := make([]byte, 32)
+      _, err := rand.Read(token)
+      if err != nil {
+          log.Fatal("CSPRNG failure:", err)
+      }
+      tokenStr := hex.EncodeToString(token)
+
+      // SECURE: crypto/rand for random integers
+      import "crypto/rand"
+      import "math/big"
+      n, err := rand.Int(rand.Reader, big.NewInt(900000))
+      otp := n.Int64() + 100000
+
+      // SECURE: Use crypto/rand with encoding
+      import (
+          "crypto/rand"
+          "encoding/base64"
+      )
+      b := make([]byte, 32)
+      rand.Read(b)
+      sessionID := base64.URLEncoding.EncodeToString(b)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/338.html"
+      - "https://pkg.go.dev/crypto/rand"
+      - "https://pkg.go.dev/math/rand"
+      - "https://go.dev/blog/randv2"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'token'
+        - 'key'
+        - 'secret'
+        - 'session'
+        - 'password'
+        - 'nonce'
+        - 'csrf'
+        - 'otp'
+      taint_source_indicators:
+        - 'rand\.Intn'
+        - 'rand\.Int63'
+        - 'rand\.Read'
+        - 'rand\.Float64'
+      taint_sink_indicators:
+        - 'http\.SetCookie'
+        - 'w\.Header\(\)\.Set'
+        - 'session\.'
+        - 'aes\.NewCipher'
+        - 'db\.Exec'
+      sanitization_patterns:
+        - 'crypto/rand'
+        - 'rand\.Reader'
+        - 'rand\.Read'
+        - 'rand\.Int.*rand\.Reader'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + token_criticality_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits predictable tokens in a Go web application:
+        1. Application uses math/rand seeded with time.Now().UnixNano() for password reset tokens
+        2. Attacker notes the approximate time of their own password reset request
+        3. Attacker brute-forces the seed by trying all nanosecond values within a +-1s window
+        4. After finding the correct seed, attacker predicts all subsequent tokens
+        5. Attacker triggers a password reset for the admin account
+        6. Attacker submits the predicted token and hijacks the admin account
+      example_payload: "rand.Seed(time.Now().UnixNano()); token := fmt.Sprintf(\"%x\", rand.Int63())"
+      attacker_objective: "Predict math/rand outputs by recovering the seed to forge tokens and hijack sessions"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: false
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-003"
+        - "CRYPTO-GO-005"
+
+  - rule_id: "CRYPTO-GO-005"
+    title: "Insufficient Cryptographic Key Sizes in Go"
+    description: >
+      Detects usage of cryptographic keys that do not meet minimum length requirements in Go
+      applications. RSA keys below 2048 bits are vulnerable to factoring. AES keys below 256
+      bits provide reduced security margins. Elliptic curve keys on curves smaller than P-256
+      offer insufficient security. Go's crypto/rsa, crypto/ecdsa, and crypto/aes packages
+      all accept arbitrary key sizes, making it the developer's responsibility to choose
+      appropriate lengths.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.87
+    cwe: CWE-326
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - key-length
+      - rsa
+      - aes
+      - ecdsa
+      - insufficient-key-size
+      - golang
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'rsa\.GenerateKey\s*\(\s*\w+\s*,\s*(?:512|768|1024)\s*\)'
+        description: "RSA key generation with insufficient bit length"
+      - type: regex
+        pattern: 'rsa\.GenerateMultiPrimeKey\s*\(\s*\w+\s*,\s*\d+\s*,\s*(?:512|768|1024)\s*\)'
+        description: "RSA multi-prime key with insufficient bit length"
+      - type: regex
+        pattern: 'aes\.NewCipher\s*\(\s*\w+\s*\)[\s\S]{0,30}len\s*\(\s*\w+\s*\)\s*==\s*16\b'
+        description: "AES with 128-bit (16-byte) key check"
+      - type: regex
+        pattern: 'make\s*\(\s*\[\]byte\s*,\s*16\s*\)[\s\S]{0,80}(?:key|aes|encrypt|cipher)'
+        description: "16-byte key allocation for AES (128-bit)"
+      - type: regex
+        pattern: 'ecdsa\.GenerateKey\s*\(\s*elliptic\.P224\s*\(\s*\)'
+        description: "ECDSA with P-224 curve (insufficient)"
+      - type: regex
+        pattern: 'elliptic\.P192\s*\(\s*\)'
+        description: "P-192 elliptic curve (insufficient security)"
+      - type: regex
+        pattern: 'ed25519\.GenerateKey[\s\S]{0,50}(?:truncat|[:]\d{1,2}\])'
+        description: "Ed25519 key potentially truncated (must be 32 bytes)"
+      - type: regex
+        pattern: '\[\]byte\s*\{(?:[^}]{0,32})\}[\s\S]{0,50}aes\.NewCipher'
+        description: "Short byte slice passed to AES (potentially under 32 bytes)"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - '// legacy'
+      - 'benchmark'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'non.*sensitive'
+      - 'cache.*encrypt'
+      - 'temporary'
+      - 'performance.*test'
+      - 'vendor/'
+    bypass_variants:
+      - description: "Key size from configuration variable"
+        pattern: 'rsa\.GenerateKey\s*\(\s*\w+\s*,\s*(?:keySize|bits|rsaBits)\s*\)'
+      - description: "Key size computed from other parameters"
+        pattern: 'keySize\s*:?=\s*\d+\s*\*\s*\d+'
+      - description: "Key size from environment variable"
+        pattern: 'strconv\.Atoi\s*\(\s*os\.Getenv\s*\(\s*"[^"]*KEY_SIZE[^"]*"\s*\)\s*\)'
+    evasion_indicators:
+      - "Key size loaded from configuration"
+      - "Key size variable set from external source"
+      - "Key generation function with customizable size parameter"
+      - "Key size computed from other values"
+    encoding_variants:
+      - type: "variable_size"
+        pattern: 'bits\s*:?=\s*(?:512|768|1024)[\s\S]{0,100}rsa\.GenerateKey'
+      - type: "const_size"
+        pattern: 'const\s+\w*[Bb]its\w*\s*=\s*(?:512|768|1024)'
+      - type: "config_size"
+        pattern: 'config\.\w*KeySize\w*[\s\S]{0,50}(?:512|768|1024)'
+    multi_function_chain_patterns:
+      - "rsa.GenerateKey(rand, 1024) -> x509 certificate signing"
+      - "make([]byte, 16) -> rand.Read -> aes.NewCipher"
+      - "ecdsa.GenerateKey(P224) -> Sign -> Verify"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak RSA keys can be factored to recover private keys for signature forgery and decryption"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "key_generation"
+        sink: "encryption_operation"
+        through: "insufficient_key_size"
+      - source: "rsa.GenerateKey"
+        sink: "tls_certificate"
+        through: "weak_key_pair"
+      - source: "make([]byte,16)"
+        sink: "aes.NewCipher"
+        through: "undersized_key"
+    impact: |
+      Insufficient key lengths compromise Go application cryptographic security:
+      - RSA-512 and RSA-768 have been publicly factored
+      - RSA-1024 factorable by well-resourced attackers
+      - AES-128 provides adequate current security but no quantum safety margin
+      - P-224 and P-192 curves offer insufficient security levels
+      - Weak TLS certificate keys enable MITM via key factoring
+      - Non-compliance with NIST SP 800-131A, PCI-DSS, FIPS 140-3
+    remediation: |
+      Use recommended minimum key lengths:
+
+      ```go
+      // VULNERABLE: RSA 1024-bit key
+      key, _ := rsa.GenerateKey(rand.Reader, 1024)
+
+      // SECURE: RSA 4096-bit key
+      key, err := rsa.GenerateKey(rand.Reader, 4096)
+
+      // SECURE: AES-256 (32-byte key)
+      key := make([]byte, 32)
+      rand.Read(key)
+      block, err := aes.NewCipher(key)
+
+      // SECURE: ECDSA with P-384 curve
+      key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+
+      // SECURE: Ed25519 (fixed 256-bit security)
+      pub, priv, err := ed25519.GenerateKey(rand.Reader)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/326.html"
+      - "https://pkg.go.dev/crypto/rsa"
+      - "https://csrc.nist.gov/publications/detail/sp/800-131a/rev-2/final"
+      - "https://www.keylength.com/en/4/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'GenerateKey'
+        - 'rsa'
+        - 'ecdsa'
+        - 'aes'
+        - 'key'
+        - 'certificate'
+        - 'tls'
+      taint_source_indicators:
+        - 'config\.'
+        - 'os\.Getenv'
+        - 'viper\.'
+      taint_sink_indicators:
+        - 'aes\.NewCipher'
+        - 'x509\.CreateCertificate'
+        - 'tls\.Config'
+        - '\.Sign\('
+      sanitization_patterns:
+        - 'GenerateKey.*4096'
+        - 'GenerateKey.*3072'
+        - 'GenerateKey.*2048'
+        - 'make.*\\[\\]byte.*32'
+        - 'P384'
+        - 'P521'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + key_weakness_severity)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker targets a Go TLS server with a 1024-bit RSA certificate:
+        1. Attacker obtains the server's TLS certificate (public key)
+        2. Using GNFS factoring on cloud GPU instances, attacker factors the 1024-bit modulus
+        3. Attacker recovers the RSA private key
+        4. Attacker performs MITM by impersonating the server with the recovered private key
+        5. All client traffic to the server is intercepted and decrypted
+      example_payload: "rsa.GenerateKey(rand.Reader, 1024)"
+      attacker_objective: "Factor weak RSA keys to impersonate servers or forge signatures"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-001"
+        - "CRYPTO-GO-002"
+        - "CRYPTO-GO-006"
+
+  - rule_id: "CRYPTO-GO-006"
+    title: "AES-ECB or CBC Without Proper IV"
+    description: >
+      Detects insecure AES mode usage in Go applications including ECB mode (manual block
+      encryption without a mode), CBC mode with static or zero IVs, and CTR/GCM with reused
+      nonces. Go's crypto/aes only provides the raw block cipher; developers must use
+      crypto/cipher for modes. Direct use of the Block.Encrypt method without a mode wrapper
+      implements de facto ECB mode. CBC mode with predictable IVs enables chosen-plaintext
+      attacks, and GCM nonce reuse catastrophically breaks security.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.89
+    cwe: CWE-329
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - ecb-mode
+      - iv-reuse
+      - nonce
+      - aes
+      - golang
+      - block-cipher
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'block\.Encrypt\s*\(\s*\w+\s*,\s*\w+\s*\)'
+        description: "Direct Block.Encrypt call (ECB mode - single block)"
+      - type: regex
+        pattern: 'for[\s\S]{0,100}block\.Encrypt\s*\('
+        description: "Block.Encrypt in loop (ECB mode for multi-block data)"
+      - type: regex
+        pattern: 'cipher\.NewCBCEncrypter\s*\(\s*\w+\s*,\s*make\s*\(\s*\[\]byte\s*,\s*(?:aes\.)?BlockSize\s*\)\s*\)'
+        description: "CBC with zero-filled IV via make([]byte, BlockSize)"
+      - type: regex
+        pattern: 'cipher\.NewCBCEncrypter\s*\(\s*\w+\s*,\s*\[\]byte\s*\{[^}]*\}\s*\)'
+        description: "CBC with hardcoded IV byte slice"
+      - type: regex
+        pattern: 'iv\s*:?=\s*\[\]byte\s*\(\s*"[^"]{16,}"\s*\)'
+        description: "Static IV from hardcoded string conversion"
+      - type: regex
+        pattern: 'iv\s*:?=\s*make\s*\(\s*\[\]byte\s*,\s*(?:aes\.)?BlockSize\s*\)[\s\S]{0,20}(?://|$)'
+        description: "Zero IV allocated without rand.Read"
+      - type: regex
+        pattern: 'nonce\s*:?=\s*\[\]byte\s*\{[^}]+\}'
+        description: "Hardcoded GCM nonce as byte slice literal"
+      - type: regex
+        pattern: 'nonce\s*:?=\s*make\s*\(\s*\[\]byte\s*,\s*\d+\s*\)[\s\S]{0,20}(?://|$)[\s\S]{0,30}(?:gcm\.Seal|Seal)'
+        description: "Zero nonce allocated without rand.Read before GCM Seal"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - 'rand\.Read\s*\(\s*iv'
+      - 'rand\.Read\s*\(\s*nonce'
+      - 'io\.ReadFull\s*\(\s*rand\.Reader'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'documentation'
+      - 'key.*wrap'
+      - 'single.*block'
+      - 'vendor/'
+      - 'third_party/'
+    bypass_variants:
+      - description: "IV derived deterministically from hash of data"
+        pattern: 'sha256\.Sum256\s*\([^)]+\)[\s\S]{0,80}(?:iv|IV)[\s\S]{0,50}NewCBCEncrypter'
+      - description: "Nonce from counter without randomization"
+        pattern: '(?:counter|sequence|index)[\s\S]{0,80}(?:nonce|iv)[\s\S]{0,50}(?:Seal|NewCBCEncrypter)'
+      - description: "IV reused from previous encryption stored in struct field"
+        pattern: '(?:s|self|c)\.\w*[iI][vV]\w*[\s\S]{0,100}NewCBCEncrypter'
+    evasion_indicators:
+      - "IV derived from deterministic source"
+      - "Nonce from counter without initial randomization"
+      - "IV stored in struct and reused across operations"
+      - "Block.Encrypt used without mode in utility function"
+    encoding_variants:
+      - type: "hex_iv"
+        pattern: 'hex\.DecodeString\s*\(\s*"[0-9a-fA-F]{32}"\s*\)[\s\S]{0,50}(?:iv|IV)'
+      - type: "base64_nonce"
+        pattern: 'base64\.\w+\.DecodeString\s*\(\s*"[^"]+"\s*\)[\s\S]{0,50}nonce'
+      - type: "repeated_byte"
+        pattern: 'bytes\.Repeat\s*\(\s*\[\]byte\s*\{[^}]+\}\s*,\s*\d+\s*\)[\s\S]{0,50}(?:iv|nonce)'
+    multi_function_chain_patterns:
+      - "block.Encrypt in for-loop iterating over data blocks (ECB)"
+      - "make([]byte, BlockSize) -> NewCBCEncrypter -> CryptBlocks"
+      - "Hardcoded nonce -> gcm.Seal -> repeated encryption"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ECB mode leaks patterns; IV/nonce reuse in GCM breaks both confidentiality and authenticity"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "zero_byte_slice"
+        sink: "NewCBCEncrypter_iv"
+        through: "make([]byte, 16)"
+      - source: "hardcoded_nonce"
+        sink: "gcm_Seal"
+        through: "byte_literal"
+      - source: "block_cipher"
+        sink: "direct_Encrypt"
+        through: "loop_iteration"
+    impact: |
+      ECB mode and IV/nonce reuse create severe encryption vulnerabilities in Go:
+      - ECB mode (direct Block.Encrypt) leaks plaintext patterns
+      - CBC with zero/static IV enables chosen-plaintext attacks
+      - GCM nonce reuse catastrophically leaks the GHASH authentication key
+      - CTR mode nonce reuse produces identical keystreams for XOR-based recovery
+      - Multi-block ECB via loop produces the classic "ECB penguin" pattern
+      - Non-compliance with NIST SP 800-38A, SP 800-38D
+    remediation: |
+      Use GCM mode with random nonces:
+
+      ```go
+      // VULNERABLE: ECB mode (direct block encryption)
+      block, _ := aes.NewCipher(key)
+      block.Encrypt(dst, src) // ECB - single block
+
+      // VULNERABLE: CBC with zero IV
+      iv := make([]byte, aes.BlockSize) // all zeros
+      stream := cipher.NewCBCEncrypter(block, iv)
+
+      // SECURE: AES-GCM with random nonce
+      block, err := aes.NewCipher(key)
+      gcm, err := cipher.NewGCM(block)
+      nonce := make([]byte, gcm.NonceSize())
+      if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+          log.Fatal(err)
+      }
+      ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+
+      // SECURE: CBC with random IV (if GCM not available)
+      iv := make([]byte, aes.BlockSize)
+      if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+          log.Fatal(err)
+      }
+      stream := cipher.NewCBCEncrypter(block, iv)
+      // Prepend IV to ciphertext
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/329.html"
+      - "https://pkg.go.dev/crypto/cipher"
+      - "https://csrc.nist.gov/publications/detail/sp/800-38d/final"
+      - "https://blog.filippo.io/the-ecb-penguin/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'aes\.'
+        - 'cipher\.'
+        - 'Encrypt'
+        - 'Seal'
+        - 'iv'
+        - 'nonce'
+        - 'CBC'
+        - 'GCM'
+      taint_source_indicators:
+        - 'make\(\[\]byte'
+        - '\[\]byte\{'
+        - 'const.*iv'
+        - 'var.*nonce'
+      taint_sink_indicators:
+        - 'NewCBCEncrypter'
+        - 'NewCTR'
+        - '\.Seal\('
+        - 'CryptBlocks'
+      sanitization_patterns:
+        - 'rand\.Read'
+        - 'io\.ReadFull\(rand\.Reader'
+        - 'crypto/rand'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + cipher_mode_risk_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits GCM nonce reuse in a Go data encryption service:
+        1. Service uses a hardcoded nonce for all AES-GCM encryptions
+        2. Attacker obtains two ciphertexts encrypted with the same key and nonce
+        3. XOR of the two ciphertexts yields XOR of plaintexts
+        4. Using known-plaintext portions, attacker recovers the full GCM keystream
+        5. Attacker recovers the GHASH authentication key via polynomial analysis
+        6. Attacker forges authenticated ciphertexts with arbitrary content
+      example_payload: "nonce := make([]byte, 12); gcm.Seal(nonce, nonce, plaintext, nil)"
+      attacker_objective: "Exploit ECB patterns or nonce reuse to recover plaintext and forge ciphertexts"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-002"
+        - "CRYPTO-GO-003"
+        - "CRYPTO-GO-005"
+
+  - rule_id: "CRYPTO-GO-007"
+    title: "InsecureSkipVerify TLS Configuration"
+    description: >
+      Detects insecure TLS configurations in Go applications, primarily the
+      InsecureSkipVerify flag in tls.Config which disables TLS certificate verification.
+      This is the most common TLS vulnerability in Go applications and is frequently found
+      in production code. When InsecureSkipVerify is true, the TLS client accepts any
+      certificate, enabling trivial man-in-the-middle attacks. Go's net/http and other
+      HTTP clients all respect this tls.Config setting.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.94
+    cwe: CWE-295
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - tls
+      - ssl
+      - certificate-validation
+      - mitm
+      - golang
+      - insecure-skip-verify
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'InsecureSkipVerify\s*:\s*true'
+        description: "InsecureSkipVerify set to true in tls.Config"
+      - type: regex
+        pattern: 'TLSClientConfig\s*:\s*&tls\.Config\s*\{[\s\S]*?InsecureSkipVerify\s*:\s*true'
+        description: "InsecureSkipVerify in HTTP transport TLS config"
+      - type: regex
+        pattern: 'tls\.Config\s*\{[\s\S]*?InsecureSkipVerify\s*:\s*true'
+        description: "tls.Config struct literal with InsecureSkipVerify"
+      - type: regex
+        pattern: 'MinVersion\s*:\s*tls\.VersionSSL30'
+        description: "TLS minimum version set to SSLv3"
+      - type: regex
+        pattern: 'MinVersion\s*:\s*tls\.VersionTLS10'
+        description: "TLS minimum version set to TLS 1.0"
+      - type: regex
+        pattern: 'MinVersion\s*:\s*tls\.VersionTLS11'
+        description: "TLS minimum version set to TLS 1.1"
+      - type: regex
+        pattern: 'VerifyPeerCertificate\s*:\s*func[\s\S]{0,100}return\s+nil'
+        description: "Custom VerifyPeerCertificate that always returns nil"
+      - type: regex
+        pattern: 'VerifyConnection\s*:\s*func[\s\S]{0,100}return\s+nil'
+        description: "Custom VerifyConnection that always returns nil"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - '// development only'
+      - 'localhost'
+      - 'self.*signed'
+      - '// TODO.*remove'
+      - '// TEMPORARY'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'if.*debug'
+      - 'if.*dev'
+      - 'vendor/'
+    bypass_variants:
+      - description: "InsecureSkipVerify set from environment variable"
+        pattern: 'InsecureSkipVerify\s*:\s*(?:skipVerify|insecure|noVerify)\b'
+      - description: "TLS config modified after creation"
+        pattern: 'tlsConfig\.\s*InsecureSkipVerify\s*=\s*true'
+      - description: "Custom dialer with insecure TLS"
+        pattern: 'tls\.Dial[\s\S]{0,100}InsecureSkipVerify'
+    evasion_indicators:
+      - "InsecureSkipVerify set from configuration variable"
+      - "TLS config modified post-creation via field assignment"
+      - "Custom dialer hiding insecure TLS settings"
+      - "TLS config loaded from separate package"
+    encoding_variants:
+      - type: "field_assignment"
+        pattern: '\w+\.InsecureSkipVerify\s*=\s*true'
+      - type: "config_variable"
+        pattern: 'InsecureSkipVerify\s*:\s*(?:os\.Getenv|config\.Get|viper\.GetBool)\s*\('
+      - type: "conditional"
+        pattern: 'if[\s\S]{0,50}InsecureSkipVerify\s*=\s*true'
+    multi_function_chain_patterns:
+      - "tls.Config{InsecureSkipVerify:true} -> http.Transport -> http.Client"
+      - "InsecureSkipVerify:true -> tls.Dial -> database connection"
+      - "Custom transport -> grpc.WithTransportCredentials -> insecure gRPC"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "InsecureSkipVerify enables trivial MITM attacks on all HTTPS/TLS connections from the Go application"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "tls_config"
+        sink: "http_client"
+        through: "transport_tls_config"
+      - source: "insecure_flag"
+        sink: "database_connection"
+        through: "tls_dial"
+      - source: "config_setting"
+        sink: "grpc_connection"
+        through: "transport_credentials"
+    impact: |
+      InsecureSkipVerify disables all TLS certificate validation:
+      - Any certificate (expired, self-signed, wrong domain) is accepted
+      - MITM attackers can intercept all encrypted communications
+      - Particularly dangerous in microservice architectures (service mesh)
+      - Credentials, tokens, and sensitive data exposed in transit
+      - gRPC connections with insecure TLS expose inter-service communication
+      - Violates PCI-DSS 4.0, HIPAA, GDPR encryption-in-transit requirements
+    remediation: |
+      Always verify TLS certificates in production:
+
+      ```go
+      // VULNERABLE: Skip verification
+      client := &http.Client{
+          Transport: &http.Transport{
+              TLSClientConfig: &tls.Config{
+                  InsecureSkipVerify: true,
+              },
+          },
+      }
+
+      // SECURE: Default TLS verification
+      client := &http.Client{} // uses system CA bundle
+
+      // SECURE: Custom CA certificate pool
+      caCert, _ := os.ReadFile("/path/to/ca.crt")
+      caCertPool := x509.NewCertPool()
+      caCertPool.AppendCertsFromPEM(caCert)
+      client := &http.Client{
+          Transport: &http.Transport{
+              TLSClientConfig: &tls.Config{
+                  RootCAs:    caCertPool,
+                  MinVersion: tls.VersionTLS13,
+              },
+          },
+      }
+
+      // SECURE: Certificate pinning
+      tlsConfig := &tls.Config{
+          VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+              for _, chain := range verifiedChains {
+                  for _, cert := range chain {
+                      fingerprint := sha256.Sum256(cert.Raw)
+                      if fingerprint == expectedFingerprint {
+                          return nil
+                      }
+                  }
+              }
+              return fmt.Errorf("certificate pinning failed")
+          },
+      }
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/295.html"
+      - "https://pkg.go.dev/crypto/tls"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html"
+      - "https://go.dev/blog/tls-cipher-suites"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'tls\.Config'
+        - 'http\.Transport'
+        - 'http\.Client'
+        - 'tls\.Dial'
+        - 'grpc\.'
+        - 'InsecureSkipVerify'
+      taint_source_indicators:
+        - 'config\.'
+        - 'os\.Getenv'
+        - 'viper\.'
+        - 'flag\.'
+      taint_sink_indicators:
+        - 'http\.Client'
+        - 'http\.Transport'
+        - 'tls\.Dial'
+        - 'grpc\.Dial'
+        - 'sql\.Open'
+      sanitization_patterns:
+        - 'InsecureSkipVerify\s*:\s*false'
+        - 'RootCAs'
+        - 'MinVersion\s*:\s*tls\.VersionTLS13'
+        - 'VerifyPeerCertificate.*error'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + network_exposure_modifier)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker exploits InsecureSkipVerify in a Go Kubernetes operator:
+        1. Go operator connects to Kubernetes API with InsecureSkipVerify: true
+        2. Attacker compromises a network path between operator and API server
+        3. Attacker presents a fake certificate for the Kubernetes API
+        4. Operator accepts the certificate and sends ServiceAccount tokens
+        5. Attacker captures Kubernetes API credentials with cluster-admin privileges
+        6. Attacker gains full control over the Kubernetes cluster
+      example_payload: "tls.Config{InsecureSkipVerify: true}"
+      attacker_objective: "Intercept TLS connections by exploiting disabled certificate verification for credential theft"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-002"
+        - "CRYPTO-GO-003"
+
+  - rule_id: "CRYPTO-GO-008"
+    title: "Weak Key Derivation Function (KDF) Usage"
+    description: >
+      Detects usage of weak or improper key derivation functions in Go applications. This
+      includes using simple hash functions (SHA-256, MD5) directly for password-to-key
+      derivation instead of proper KDFs like Argon2, scrypt, or bcrypt. Also covers PBKDF2
+      with insufficient iterations, direct key derivation from short passwords without
+      stretching, and custom KDF implementations. Go's x/crypto package provides proper
+      KDFs but developers often skip them for simplicity.
+    language: go
+    category: crypto
+    severity: High
+    confidence: 0.88
+    cwe: CWE-916
+    owasp: "A02:2021-Cryptographic-Failures"
+    tags:
+      - cryptography
+      - kdf
+      - key-derivation
+      - password-hashing
+      - pbkdf2
+      - scrypt
+      - argon2
+      - golang
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'sha256\.Sum256\s*\(\s*\[\]byte\s*\(\s*(?:password|passwd|passphrase|secret)'
+        description: "Direct SHA-256 hash of password for key derivation"
+      - type: regex
+        pattern: 'sha512\.Sum512\s*\(\s*\[\]byte\s*\(\s*(?:password|passwd|passphrase|secret)'
+        description: "Direct SHA-512 hash of password for key derivation"
+      - type: regex
+        pattern: 'md5\.Sum\s*\(\s*\[\]byte\s*\(\s*(?:password|passwd|passphrase|secret)'
+        description: "MD5 hash of password for key derivation"
+      - type: regex
+        pattern: 'pbkdf2\.Key\s*\([^,]+,\s*[^,]+,\s*(?:[1-9]\d{0,3}|[1-4]\d{4})\s*,'
+        description: "PBKDF2 with insufficient iterations (less than 50,000)"
+      - type: regex
+        pattern: '\[\]byte\s*\(\s*(?:password|passwd|secret)\s*\)[\s\S]{0,50}aes\.NewCipher'
+        description: "Password bytes directly used as AES key"
+      - type: regex
+        pattern: 'scrypt\.Key\s*\([^,]+,\s*[^,]+,\s*(?:1024|2048|4096)\s*,'
+        description: "scrypt with low N parameter (should be 32768+)"
+      - type: regex
+        pattern: 'argon2\.(?:Key|IDKey)\s*\([^,]+,\s*[^,]+,\s*1\s*,'
+        description: "Argon2 with minimal time parameter (should be 3+)"
+      - type: regex
+        pattern: 'func\s+derive(?:Key|Secret)\s*\([^)]*\)[\s\S]{0,300}(?:sha256|sha512|md5)\.(?:New|Sum)'
+        description: "Custom key derivation function using simple hash"
+    anti_patterns:
+      - '_test\.go$'
+      - 'testdata/'
+      - '//\s*nolint'
+      - '//\s*nosec'
+      - 'argon2\.IDKey.*3.*65536'
+      - 'scrypt\.Key.*32768'
+      - 'pbkdf2\.Key.*600000'
+      - 'bcrypt\.'
+      - 'mock'
+      - 'fixture'
+      - 'example'
+      - 'benchmark'
+      - 'vendor/'
+      - 'third_party/'
+      - 'hkdf\.'
+    bypass_variants:
+      - description: "KDF parameters loaded from configuration"
+        pattern: '(?:pbkdf2|scrypt|argon2)\.\w+\s*\([^,]+,\s*[^,]+,\s*(?:config|opts|params)\.'
+      - description: "Custom wrapper hiding weak KDF"
+        pattern: 'func\s+\w*[Dd]eriv\w*\s*\([^)]*password[^)]*\)[\s\S]{0,200}(?:sha256|sha512)\.Sum'
+      - description: "Hash-based key derivation in separate utility package"
+        pattern: 'import\s+"[^"]*(?:util|helper|crypto)[^"]*"[\s\S]{0,200}DeriveKey'
+    evasion_indicators:
+      - "KDF wrapped in utility function hiding implementation"
+      - "Parameters loaded from external configuration"
+      - "Custom key derivation in imported internal package"
+      - "Hash function used for key derivation labeled as 'KDF'"
+    encoding_variants:
+      - type: "simple_hash"
+        pattern: 'h\s*:=\s*sha256\.New\(\)[\s\S]{0,50}h\.Write\(\[\]byte\(password'
+      - type: "double_hash"
+        pattern: 'sha256\.Sum256\(sha256\.Sum256[\s\S]{0,50}password'
+      - type: "salted_hash"
+        pattern: '(?:sha256|sha512)\.Sum(?:256|512)\s*\(\s*append\s*\(\s*\[\]byte\s*\(\s*password'
+    multi_function_chain_patterns:
+      - "sha256.Sum256(password) -> [:32] -> aes.NewCipher"
+      - "password -> bytes -> sha512 digest -> truncate -> encryption key"
+      - "pbkdf2.Key(password, salt, 1000, 32, sha256.New) -> AES key"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Weak KDFs enable password brute-forcing to recover encryption keys, decrypting all password-protected data"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "user_password"
+        sink: "aes_key"
+        through: "sha256_hash"
+      - source: "passphrase"
+        sink: "encryption_key"
+        through: "pbkdf2_low_iterations"
+      - source: "secret_string"
+        sink: "cipher_key"
+        through: "direct_byte_conversion"
+    impact: |
+      Weak key derivation enables password brute-forcing to recover encryption keys:
+      - Direct hash (SHA-256) of password enables GPU-accelerated brute force at billions/sec
+      - PBKDF2 with low iterations provides insufficient computational cost
+      - scrypt with low N parameter reduces memory-hardness
+      - Argon2 with minimal parameters fails to provide adequate defense
+      - Raw password bytes as key limits key entropy to password entropy
+      - Non-compliance with NIST SP 800-132, OWASP password storage guidelines
+    remediation: |
+      Use proper key derivation functions with adequate parameters:
+
+      ```go
+      // VULNERABLE: SHA-256 hash as key
+      key := sha256.Sum256([]byte(password))
+      block, _ := aes.NewCipher(key[:])
+
+      // SECURE: Argon2id for key derivation
+      import "golang.org/x/crypto/argon2"
+      salt := make([]byte, 16)
+      rand.Read(salt)
+      key := argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32)
+      block, _ := aes.NewCipher(key)
+
+      // SECURE: scrypt for key derivation
+      import "golang.org/x/crypto/scrypt"
+      salt := make([]byte, 32)
+      rand.Read(salt)
+      key, _ := scrypt.Key([]byte(password), salt, 32768, 8, 1, 32)
+      block, _ := aes.NewCipher(key)
+
+      // SECURE: PBKDF2 with high iterations
+      import "golang.org/x/crypto/pbkdf2"
+      salt := make([]byte, 16)
+      rand.Read(salt)
+      key := pbkdf2.Key([]byte(password), salt, 600000, 32, sha256.New)
+
+      // SECURE: bcrypt for password hashing (not key derivation)
+      import "golang.org/x/crypto/bcrypt"
+      hash, _ := bcrypt.GenerateFromPassword([]byte(password), 12)
+      ```
+    references:
+      - "https://cwe.mitre.org/data/definitions/916.html"
+      - "https://pkg.go.dev/golang.org/x/crypto/argon2"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+      - "https://csrc.nist.gov/publications/detail/sp/800-132/final"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'password'
+        - 'passphrase'
+        - 'deriveKey'
+        - 'key.*derivation'
+        - 'KDF'
+        - 'stretch'
+        - 'salt'
+      taint_source_indicators:
+        - 'password'
+        - 'passphrase'
+        - 'r\.FormValue'
+        - 'user\.Password'
+      taint_sink_indicators:
+        - 'aes\.NewCipher'
+        - 'cipher\.NewGCM'
+        - 'hmac\.New'
+        - 'SecretKeySpec'
+      sanitization_patterns:
+        - 'argon2\.IDKey'
+        - 'scrypt\.Key.*32768'
+        - 'pbkdf2\.Key.*600000'
+        - 'bcrypt\.'
+        - 'hkdf\.'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 + password_strength_deficit)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker brute-forces a password-derived encryption key:
+        1. Go application uses sha256.Sum256([]byte(password)) as the AES encryption key
+        2. Attacker obtains encrypted data from a database breach
+        3. Since the key is just SHA-256(password), attacker runs dictionary attack
+        4. Using GPU with hashcat, attacker tries billions of password candidates per second
+        5. Common passwords (80%+ of users) cracked within hours
+        6. Each cracked password immediately yields the AES key for decryption
+        7. Attacker decrypts all records for each cracked password
+      example_payload: "key := sha256.Sum256([]byte(userPassword)); aes.NewCipher(key[:])"
+      attacker_objective: "Brute-force weakly derived encryption keys to decrypt password-protected data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "CRYPTO-GO-001"
+        - "CRYPTO-GO-003"
+        - "CRYPTO-GO-005"

@@ -1,0 +1,308 @@
+rules:
+- rule_id: RUST-INJ-003
+  title: Rust SQL Injection via format! Macro
+  description: Detects SQL queries built with format! or format string macros
+  language: rust
+  category: injection
+  severity: Critical
+  confidence: 95
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - sqli
+  - rust
+  - format-macro
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: query\s*\(\s*&format!\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b
+  - type: regex
+    pattern: execute\s*\(\s*&format!\s*\(\s*"
+  - type: regex
+    pattern: raw_sql\s*\(\s*&format!\s*\(
+  - type: regex
+    pattern: sql_query\s*\(\s*&format!\s*\(
+  anti_patterns:
+  - pattern: bind\s*\(
+    description: Using parameter binding
+  - pattern: sqlx::query!
+    description: Using compile-time verified queries
+  impact: SQL injection can lead to full database compromise
+  remediation: Use sqlx::query!() compile-time checked queries or diesel's query builder
+- rule_id: RUST-INJ-004
+  title: Rust Command Injection
+  description: Detects command execution with user-controlled arguments in Rust
+  language: rust
+  category: injection
+  severity: Critical
+  confidence: 90
+  cwe: 78
+  owasp: A03:2021
+  tags:
+  - cmdi
+  - rust
+  - command
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: Command::new\s*\(\s*"(?:sh|bash|cmd)"\s*\)\s*\.arg\s*\(\s*"-c"\s*\)\s*\.arg\s*\(\s*(?:&?\w+|format!)
+  - type: regex
+    pattern: Command::new\s*\(\s*(?:&?\w+|format!)
+  - type: regex
+    pattern: Command::new\s*\([^)]*\)\s*\.args?\s*\(\s*&?\w*(?:input|user|param)
+  anti_patterns:
+  - pattern: Command::new\s*\(\s*"[^"]*"\s*\)\s*\.arg\s*\(\s*"[^"]*"\s*\)
+    description: Static command and arguments
+  impact: Command injection enables arbitrary code execution on the server
+  remediation: Use Command::new with explicit args, never pass user input to shell
+- rule_id: RUST-INJ-005
+  title: Rust Unsafe HTML Response
+  description: Detects unescaped user input in HTML responses using Actix/Rocket
+  language: rust
+  category: xss
+  severity: High
+  confidence: 80
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - xss
+  - rust
+  - actix
+  - rocket
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: HttpResponse::Ok\s*\(\s*\)\s*\.body\s*\(\s*format!\s*\(\s*"[^"]*<[^"]*\{[^}]*\}
+  - type: regex
+    pattern: content_type\s*\(\s*"text/html"\s*\)\s*\.body\s*\(\s*format!
+  anti_patterns:
+  - pattern: askama|tera|handlebars
+    description: Using template engine with auto-escaping
+  - pattern: escape_html|html_escape
+    description: HTML escaping applied
+  impact: Cross-site scripting via unescaped user input in HTML responses
+  remediation: Use template engines (Askama, Tera) with auto-escaping, or manually escape output
+- rule_id: RUST-CRYPTO-001
+  title: Rust Weak Cryptography
+  description: Detects use of weak or deprecated cryptographic algorithms in Rust
+  language: rust
+  category: crypto
+  severity: High
+  confidence: 90
+  cwe: 327
+  owasp: A02:2021
+  tags:
+  - crypto
+  - rust
+  - weak-algorithm
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: use\s+md5\b
+  - type: regex
+    pattern: use\s+sha1\b
+  - type: regex
+    pattern: Md5::(?:new|digest)\s*\(
+  - type: regex
+    pattern: Sha1::(?:new|digest)\s*\(
+  - type: regex
+    pattern: Des::new|Rc4::new|Blowfish::new
+  anti_patterns:
+  - pattern: Sha256|Sha384|Sha512|Aes256Gcm
+    description: Using strong algorithms
+  impact: Weak hash/cipher algorithms can be broken by modern attacks
+  remediation: Use ring, RustCrypto with AES-256-GCM, SHA-256+, or Argon2 for passwords
+- rule_id: RUST-CRYPTO-002
+  title: Rust Insecure Random Number Generation
+  description: Detects use of non-cryptographic RNG for security-sensitive operations
+  language: rust
+  category: crypto
+  severity: High
+  confidence: 85
+  cwe: 338
+  owasp: A02:2021
+  tags:
+  - crypto
+  - rust
+  - prng
+  - random
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: use\s+rand::rngs::SmallRng
+  - type: regex
+    pattern: SmallRng::from_entropy\s*\(
+  - type: regex
+    pattern: thread_rng\s*\(\s*\)[^;]*(?:token|secret|key|password|session|nonce)
+  anti_patterns:
+  - pattern: OsRng|ChaCha20Rng
+    description: Using cryptographic RNG
+  impact: Predictable random numbers enable session prediction, token forgery
+  remediation: Use OsRng or ring::rand::SystemRandom for security-sensitive randomness
+- rule_id: RUST-CRYPTO-003
+  title: Rust Insecure TLS Configuration
+  description: Detects disabled certificate verification in Rust HTTP clients
+  language: rust
+  category: crypto
+  severity: Critical
+  confidence: 90
+  cwe: 295
+  owasp: A02:2021
+  tags:
+  - tls
+  - rust
+  - cert-validation
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: danger_accept_invalid_certs\s*\(\s*true\s*\)
+  - type: regex
+    pattern: danger_accept_invalid_hostnames\s*\(\s*true\s*\)
+  - type: regex
+    pattern: set_certificate_verifier\s*\(\s*Arc::new\s*\(\s*NoCertificateVerification
+  - type: regex
+    pattern: ServerCertVerifier.*fn\s+verify_server_cert[^}]*Ok\s*\(\s*ServerCertVerified
+  anti_patterns:
+  - pattern: '#\[cfg\(test\)\]'
+    description: Only in test configuration
+  impact: Disabled TLS certificate validation enables man-in-the-middle attacks
+  remediation: Enable certificate verification using rustls with proper CA certificates
+- rule_id: RUST-AUTH-001
+  title: Rust Hardcoded Secrets
+  description: Detects hardcoded passwords, API keys, or tokens in Rust code
+  language: rust
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 798
+  owasp: A07:2021
+  tags:
+  - hardcoded-creds
+  - rust
+  - secrets
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: const\s+\w*(?:PASSWORD|SECRET|API_KEY|TOKEN|PRIVATE_KEY)\w*\s*:\s*&str\s*=\s*"[^"]{8,}"
+  - type: regex
+    pattern: let\s+\w*(?:password|secret|api_key|token)\w*\s*=\s*"[^"]{8,}"
+  - type: regex
+    pattern: static\s+\w*(?:PASSWORD|SECRET|KEY|TOKEN)\w*\s*:\s*&str\s*=\s*"[^"]{8,}"
+  anti_patterns:
+  - pattern: std::env::var
+    description: Reading from environment
+  - pattern: '""'
+    description: Empty placeholder
+  impact: Hardcoded credentials can be extracted from compiled binaries
+  remediation: Use environment variables (std::env::var) or secret management systems
+- rule_id: RUST-DESER-001
+  title: Rust Unsafe Deserialization
+  description: Detects deserialization of untrusted data without type constraints
+  language: rust
+  category: deserialization
+  severity: High
+  confidence: 80
+  cwe: 502
+  owasp: A08:2021
+  tags:
+  - deserialization
+  - rust
+  - serde
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: serde_json::from_str\s*::<\s*serde_json::Value\s*>
+  - type: regex
+    pattern: serde_yaml::from_str\s*::<\s*serde_yaml::Value\s*>
+  - type: regex
+    pattern: bincode::deserialize\s*::<\s*Vec<u8>\s*>
+  - type: regex
+    pattern: rmp_serde::from_slice\s*::<\s*(?:Value|Vec<u8>)\s*>
+  anti_patterns:
+  - pattern: serde_json::from_str\s*::<\s*\w+[A-Z]\w*\s*>
+    description: Deserializing to specific struct type
+  impact: Deserializing arbitrary types can lead to denial of service or logic bugs
+  remediation: 'Always deserialize to specific, validated struct types using #[derive(Deserialize)]'
+- rule_id: RUST-SSRF-001
+  title: Rust Server-Side Request Forgery
+  description: Detects SSRF via user-controlled URLs in Rust HTTP clients
+  language: rust
+  category: ssrf
+  severity: High
+  confidence: 80
+  cwe: 918
+  owasp: A10:2021
+  tags:
+  - ssrf
+  - rust
+  - reqwest
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: reqwest::get\s*\(\s*&?\w*(?:url|uri|target|dest)\w*\s*\)
+  - type: regex
+    pattern: Client::new\s*\(\s*\)\s*\.get\s*\(\s*&?\w*(?:url|uri|target)\w*\s*\)
+  - type: regex
+    pattern: reqwest::get\s*\(\s*&?format!\s*\(
+  anti_patterns:
+  - pattern: is_private|is_loopback|validate_url
+    description: URL/IP validation present
+  impact: SSRF enables access to internal APIs, cloud metadata, and internal networks
+  remediation: Validate URLs against allowlists, block private/loopback IP ranges
+- rule_id: RUST-PT-001
+  title: Rust Path Traversal
+  description: Detects path traversal vulnerabilities in Rust file operations
+  language: rust
+  category: path_traversal
+  severity: High
+  confidence: 85
+  cwe: 22
+  owasp: A01:2021
+  tags:
+  - path-traversal
+  - rust
+  - lfi
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: Path::new\s*\(\s*&?\w*(?:path|file|name|input)\w*\s*\)
+  - type: regex
+    pattern: std::fs::(?:read|write|remove|create)\w*\s*\(\s*&?\w*(?:path|file|name)\w*\s*\)
+  - type: regex
+    pattern: File::open\s*\(\s*&?format!\s*\(
+  anti_patterns:
+  - pattern: canonicalize|strip_prefix|starts_with
+    description: Path normalization and validation
+  impact: Path traversal allows reading/writing arbitrary files on the server
+  remediation: Use canonicalize() and verify paths start with expected base directory using starts_with()
+- rule_id: RUST-UNSAFE-001
+  title: Rust Unsafe Block with Raw Pointer Dereference
+  description: Detects unsafe blocks dereferencing raw pointers from external input
+  language: rust
+  category: rce
+  severity: High
+  confidence: 75
+  cwe: 119
+  owasp: A06:2021
+  tags:
+  - memory-safety
+  - rust
+  - unsafe
+  - buffer-overflow
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: unsafe\s*\{[^}]*\*\w+\.as_ptr\s*\(
+  - type: regex
+    pattern: unsafe\s*\{[^}]*ptr::read\s*\(
+  - type: regex
+    pattern: unsafe\s*\{[^}]*slice::from_raw_parts\s*\(
+  - type: regex
+    pattern: unsafe\s*\{[^}]*transmute\s*\(
+  anti_patterns:
+  - pattern: assert!|debug_assert!
+    description: Bounds checking present
+  - pattern: \.len\(\)\s*[<>]
+    description: Length validation
+  impact: Unsafe pointer operations can lead to memory corruption, buffer overflows, or code execution
+  remediation: Minimize unsafe blocks, add bounds checking, consider using safe abstractions

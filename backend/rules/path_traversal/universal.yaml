@@ -1,0 +1,171 @@
+rules:
+- rule_id: PT-CS-001
+  title: Path Traversal in ASP.NET File Operations
+  description: 'Detects .NET file operations with user-controlled paths, enabling directory traversal to access arbitrary
+    files on the server through ASP.NET web applications.
+
+    '
+  language: csharp
+  category: path_traversal
+  severity: High
+  confidence: 0.9
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - aspnet
+  - file-io
+  - csharp
+  - dotnet
+  - server-side
+  patterns:
+  - type: regex
+    pattern: File\.(?:ReadAllText|ReadAllBytes|ReadAllLines|WriteAllText|Delete|Copy|Move|Open)\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: System\.IO\.File\.(?:ReadAllText|Open|Delete)\s*\(\s*(?:Request|param|model)\b
+  - type: regex
+    pattern: Path\.Combine\s*\([^)]*(?:Request|param|input|user)\b[^)]*\)
+  - type: regex
+    pattern: PhysicalFile\s*\(\s*(?:Request|param|input|fileName)\b
+  - type: regex
+    pattern: new\s+FileStream\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: new\s+StreamReader\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: new\s+StreamWriter\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: Directory\.(?:GetFiles|GetDirectories|EnumerateFiles|Delete|CreateDirectory)\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: new\s+FileInfo\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: File\.(?:ReadAllTextAsync|ReadAllBytesAsync|WriteAllTextAsync|WriteAllBytesAsync)\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: System\.IO\.File\.(?:Exists|ReadAllText|ReadAllBytes|WriteAllText)\s*\(\s*\$"[^"]*\{(?:Request|param|input|user|model)\b
+  - type: regex
+    pattern: VirtualFile\s*\(\s*(?:Request|param|input|user|fileName|filePath)\b
+  - type: regex
+    pattern: Server\.MapPath\s*\(\s*(?:Request|param|input|user|fileName)\b
+  anti_patterns:
+  - Path.GetFileName
+  - GetFullPath
+  - StartsWith
+  - SanitizePath
+  - Path.GetFileNameWithoutExtension
+  - Path.GetExtension
+  - Path.IsPathRooted
+  - Path.GetInvalidPathChars
+  - IFileProvider
+  - PhysicalFileProvider
+  - ContentRootFileProvider
+  - webHostEnvironment.ContentRootPath
+  - Regex.IsMatch.*alphanumeric
+  - Path.GetRelativePath
+  - Uri.IsWellFormedUriString
+  context_awareness:
+    surrounding_context_patterns:
+    - \[HttpGet\]|\[HttpPost\]|\[Route\]
+    - Controller|ControllerBase
+    - public.*IActionResult|ActionResult
+    - \[ApiController\]
+    - public class.*Controller
+    taint_source_indicators:
+    - Request.Query
+    - Request.Form
+    - Request.Headers
+    - Request.Cookies
+    - '[FromQuery]'
+    - '[FromRoute]'
+    - '[FromBody]'
+    - '[FromForm]'
+    - HttpContext.Request
+    - Request.QueryString
+    - RouteData.Values
+    - ModelState
+    - IFormFile
+    taint_sink_indicators:
+    - File.ReadAllText
+    - File.ReadAllBytes
+    - File.WriteAllText
+    - File.WriteAllBytes
+    - File.Delete
+    - File.Copy
+    - File.Move
+    - File.Open
+    - new FileStream
+    - new StreamReader
+    - new StreamWriter
+    - PhysicalFile
+    - new FileInfo
+    - Directory.GetFiles
+    - Server.MapPath
+    sanitization_patterns:
+    - Path.GetFileName(
+    - Path.GetFullPath(input).StartsWith(allowedRoot)
+    - Path.GetFileNameWithoutExtension(
+    - Path.IsPathRooted(
+    - IFileProvider.GetFileInfo(
+    - PhysicalFileProvider
+    - Regex.IsMatch(input, @"^[a-zA-Z0-9]"
+    - Path.GetInvalidPathChars()
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_presence) * exploitability_score
+    exploitability_score: 0.88
+  exploit_scenario:
+    attack_example: "An ASP.NET Core controller serves files based on a route parameter: [HttpGet(\"download/{fileName}\"\
+      )] public IActionResult Download(string fileName) {\n  return PhysicalFile(Path.Combine(_uploadsDir, fileName), \"application/octet-stream\"\
+      ); }.\nAn attacker manipulates the fileName parameter with traversal sequences to access files outside the uploads directory.\n"
+    example_payload: GET /download/..%5c..%5c..%5cwindows%5csystem32%5cdrivers%5cetc%5chosts
+    attacker_objective: 'Read sensitive files including appsettings.json with database connection strings and API keys, web.config
+      with machine keys, application source code, or Windows system files. Write operations may enable deploying ASPX webshells
+      or modifying application binaries.
+
+      '
+  confidence_factors:
+    pattern_strength: 0.88
+    context_match: 0.87
+    proximity_to_user_input: 0.92
+    sanitization_absence: 0.87
+  impact: 'Directory traversal in ASP.NET enabling arbitrary file access, including
+
+    appsettings.json with connection strings, web.config with machine keys,
+
+    and application source code. On Windows, uses backslash traversal (..\\).
+
+    '
+  remediation: "- Use Path.GetFileName() to extract filename\n- Validate Path.GetFullPath(input).StartsWith(allowedRoot)\n\
+    - Use [FromRoute] with strict routing constraints\n- Implement IFileProvider for controlled file access\n- Framework-specific\
+    \ validation:\n  - ASP.NET Core: Use IFileProvider (PhysicalFileProvider) with root-constrained access\n  - ASP.NET Core:\
+    \ Use FileExtensionContentTypeProvider for validated content types\n  - ASP.NET Core: Use StaticFileOptions with FileProvider\
+    \ and RequestPath restrictions\n  - ASP.NET MVC: Use FilePathResult with Server.MapPath validation against AppDomain.CurrentDomain.BaseDirectory\n\
+    \  - Blazor: Use IWebHostEnvironment.ContentRootPath as the base for file path validation\n  - ASP.NET Core: Apply [RegularExpression]\
+    \ attribute on route parameters for filename constraints\n- Canonical path validation pattern:\n    var fullPath = Path.GetFullPath(Path.Combine(baseDir,\
+    \ userInput));\n    if (!fullPath.StartsWith(Path.GetFullPath(baseDir) + Path.DirectorySeparatorChar))\n        return\
+    \ Forbid();\n- Handle both forward slash (/) and backslash (\\\\) traversal on Windows\n- Use Microsoft.Extensions.FileProviders\
+    \ for sandboxed file access\n"
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+    author: security-rules-team
+    created_date: '2024-06-01'
+    false_positive_rate: low
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-JAVA-001
+    - PT-JS-001
+    - PT-PHP-001
+    escalation_rules:
+    - If appsettings.json readable, escalate to credential exposure
+    - If web.config machine key exposed, escalate to ViewState deserialization RCE
+    - If ASPX files writable, escalate to webshell deployment
+    - If combined with file upload, escalate to arbitrary code execution
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://learn.microsoft.com/en-us/aspnet/core/fundamentals/file-providers
+  - https://learn.microsoft.com/en-us/aspnet/core/mvc/models/file-uploads#security-considerations
+  detection_layer: 1

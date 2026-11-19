@@ -1,0 +1,173 @@
+# SecureAI Code Analyzer — Helm values
+# Override these in your environment-specific values file.
+
+# ── Global ────────────────────────────────────────────────────
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: secureai/analyzer
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# ── API Server ────────────────────────────────────────────────
+api:
+  replicas: 2
+  port: 8000
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  env:
+    DEBUG: "false"
+    WORKER_MODE: "embedded"
+    QUEUE_BACKEND: "memory"
+    LOG_FORMAT: "json"
+    RATE_LIMIT: "100/minute"
+
+  # Additional env vars from ConfigMap keys
+  extraEnv: []
+  #  - name: CUSTOM_VAR
+  #    value: "custom-value"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Pod-level annotations (e.g. for Vault agent injector)
+  podAnnotations: {}
+
+# ── Worker ────────────────────────────────────────────────────
+worker:
+  enabled: true
+  replicas: 2
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  env:
+    WORKER_MODE: "standalone"
+    QUEUE_BACKEND: "redis"
+    LOG_FORMAT: "json"
+
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+# ── Redis ─────────────────────────────────────────────────────
+redis:
+  # Set to true to use Redis for queue + distributed locks
+  enabled: false
+  # External Redis URL (if not using bundled Redis)
+  url: "redis://redis:6379/0"
+
+# ── PostgreSQL ────────────────────────────────────────────────
+postgresql:
+  host: "postgresql"
+  port: 5432
+  database: "secureai"
+  # Name of existing Kubernetes Secret containing DATABASE_URL
+  existingSecret: "secureai-db-credentials"
+  existingSecretKey: "DATABASE_URL"
+
+# ── Ingress ───────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: secureai.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: secureai-tls
+      hosts:
+        - secureai.example.com
+
+# ── Autoscaling ───────────────────────────────────────────────
+autoscaling:
+  api:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  worker:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    # Custom metric: scale on queue depth
+    # Requires prometheus-adapter or KEDA
+    customMetrics: []
+    #  - type: Pods
+    #    pods:
+    #      metric:
+    #        name: secureai_queued_scans
+    #      target:
+    #        type: AverageValue
+    #        averageValue: "5"
+
+# ── Monitoring ────────────────────────────────────────────────
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    namespace: ""
+    additionalLabels: {}
+  grafana:
+    enabled: false
+    dashboardLabel: grafana_dashboard
+    dashboardLabelValue: "1"
+
+# ── Secrets ───────────────────────────────────────────────────
+# Provide values via --set or external secret manager.
+# These create a Kubernetes Secret; leave empty to use existingSecret references.
+secrets:
+  # Name of existing secret (if managing secrets externally)
+  existingSecret: ""
+  # Only used if existingSecret is empty:
+  jwtSecret: ""
+  encryptionKey: ""
+  pplxApiKey: ""
+  databaseUrl: ""
+  githubAppPrivateKey: ""
+
+# ── Service ───────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+# ── Security Context ──────────────────────────────────────────
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  readOnlyRootFilesystem: true
+
+# ── Scan temp directory (emptyDir volume) ─────────────────────
+scanTemp:
+  sizeLimit: 5Gi

@@ -1,0 +1,308 @@
+rules:
+- rule_id: COBOL-INJ-001
+  title: SQL Injection in Embedded SQL
+  description: 'Detects dynamic SQL construction with string concatenation in COBOL.
+
+    '
+  language: cobol
+  category: injection
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - embedded-sql
+  patterns:
+  - type: regex
+    pattern: EXEC\s+SQL\s+(?:SELECT|INSERT|UPDATE|DELETE)\b[^;]*STRING\b
+  - type: regex
+    pattern: STRING\s+.*\s+DELIMITED\s+.*INTO\s+WS-SQL
+  - type: regex
+    pattern: EXEC\s+SQL\s+EXECUTE\s+IMMEDIATE\s+:(?:WS-|LK-|LS-)\w+
+  - type: regex
+    pattern: EXEC\s+SQL\s+PREPARE\s+\w+\s+FROM\s+:(?:WS-|LK-)\w+
+  anti_patterns:
+  - EXEC SQL SELECT.*:HOST-VAR
+  - WHERE.*=.*:WS-
+  - USING DESCRIPTOR
+  impact: 'SQL injection in COBOL mainframe applications can compromise
+
+    entire enterprise databases (DB2, IMS, VSAM).
+
+    '
+  remediation: "Use host variables in embedded SQL:\n  EXEC SQL SELECT * FROM ACCOUNTS WHERE ID = :WS-ACCOUNT-ID END-EXEC.\nNever concatenate user input into SQL strings.\n"
+- rule_id: COBOL-INJ-002
+  title: CICS Command Injection
+  description: 'Detects CICS command injection via unsanitized user input.
+
+    '
+  language: cobol
+  category: injection
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - cics
+  - command-injection
+  patterns:
+  - type: regex
+    pattern: EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*(?:WS-|LK-|DFHCOMMAREA)
+  - type: regex
+    pattern: EXEC\s+CICS\s+(?:START|XCTL)\s+.*INPUTMSG\s*\(
+  - type: regex
+    pattern: EXEC\s+CICS\s+SPOOLOPEN\s+.*FROM\s*\(
+  anti_patterns:
+  - LENGTH(PROGRAM-NAME)
+  - VALIDATE-PROGRAM
+  impact: 'CICS command injection can execute arbitrary transactions on mainframes.
+
+    '
+  remediation: 'Validate program names and transaction IDs against allowlists.
+
+    Use RACF/ACF2/TopSecret for resource access control.
+
+    '
+- rule_id: COBOL-INJ-003
+  title: JCL Injection via Dynamic Parameters
+  description: 'Detects dynamic JCL parameter construction from user input.
+
+    '
+  language: cobol
+  category: injection
+  severity: High
+  confidence: 0.8
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - jcl
+  - injection
+  patterns:
+  - type: regex
+    pattern: STRING\s+.*DELIMITED.*INTO\s+(?:WS-|LK-)?JCL
+  - type: regex
+    pattern: EXEC\s+CICS\s+SPOOL(?:OPEN|WRITE)\b.*FROM\s*\(
+  anti_patterns:
+  - VALIDATE
+  - CHECK-INPUT
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: COBOL-XAUTH-001
+  title: Hardcoded Credentials in COBOL
+  description: 'Detects hardcoded passwords or credentials in COBOL programs.
+
+    '
+  language: cobol
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: (?:05|77)\s+(?:WS-|LK-)?PASSWORD\s+PIC\s+X\(\d+\)\s+VALUE\s+['"][^'"]{4,}
+  - type: regex
+    pattern: (?:05|77)\s+(?:WS-|LK-)?(?:PASSWD|SECRET|API-KEY|AUTH-TOKEN)\s+PIC\s+X\(\d+\)\s+VALUE\s+['"][^'"]{4,}
+  - type: regex
+    pattern: MOVE\s+['"][^'"]{4,}['"]\s+TO\s+(?:WS-|LK-)?(?:PASSWORD|PASSWD|SECRET)
+  anti_patterns:
+  - SPACES
+  - LOW-VALUES
+  - HIGH-VALUES
+  - ZEROS
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: COBOL-XAUTH-002
+  title: Missing Authentication Check
+  description: 'Detects CICS transactions without security verification.
+
+    '
+  language: cobol
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-306
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 2
+  tags:
+  - missing-auth
+  - cics
+  patterns:
+  - type: regex
+    pattern: EXEC\s+CICS\s+RECEIVE\s+MAP\b
+  - type: regex
+    pattern: EXEC\s+CICS\s+(?:READ|WRITE|REWRITE|DELETE)\s+(?:FILE|DATASET)\b
+  anti_patterns:
+  - EXEC CICS VERIFY
+  - EXEC CICS SIGNON
+  - RACF
+  - PERFORM.*SECURITY
+  - PERFORM.*AUTH
+  - CHECK-AUTHORITY
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: COBOL-XCRYPTO-001
+  title: Weak Encryption in COBOL
+  description: 'Detects weak or custom encryption implementations in COBOL.
+
+    '
+  language: cobol
+  category: crypto
+  severity: High
+  confidence: 0.82
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 2
+  tags:
+  - weak-crypto
+  - custom-encryption
+  patterns:
+  - type: regex
+    pattern: PERFORM\s+ENCRYPT\b.*(?:XOR|ADD|SUBTRACT)\b
+  - type: regex
+    pattern: (?:COMPUTE|ADD)\s+.*FUNCTION\s+ORD\s*\(
+  - type: regex
+    pattern: INSPECT\s+.*CONVERTING\s+.*TO\s+.*(?:ENCRYPT|ENCODE|CIPHER)
+  anti_patterns:
+  - ICSF
+  - CSNB
+  - CSFP
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: COBOL-XSEC-001
+  title: Buffer Overflow via MOVE
+  description: 'Detects potential buffer overflows from MOVE operations without length checking.
+
+    '
+  language: cobol
+  category: injection
+  severity: High
+  confidence: 0.78
+  cwe: CWE-120
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - buffer-overflow
+  - move
+  patterns:
+  - type: regex
+    pattern: MOVE\s+FUNCTION\s+LENGTH\s*\(\s*\w+\s*\).*(?:REFERENCE|POINTER)\b
+  - type: regex
+    pattern: MOVE\s+(?:WS-|LK-)\w+\s+TO\s+(?:WS-|LK-)\w+\s*\(\s*\d+\s*:\s*\)
+  anti_patterns:
+  - FUNCTION LENGTH
+  - IF LENGTH
+  - EVALUATE
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: COBOL-XSEC-002
+  title: Sensitive Data in DISPLAY
+  description: 'Detects display of sensitive data to console/spool output.
+
+    '
+  language: cobol
+  category: secrets
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - data-exposure
+  - display
+  patterns:
+  - type: regex
+    pattern: DISPLAY\s+(?:WS-|LK-)?(?:PASSWORD|PASSWD|SECRET|SSN|SOCIAL-SEC|CREDIT-CARD|ACCOUNT-NUM|PIN)\b
+  - type: regex
+    pattern: DISPLAY\s+.*(?:PASSWORD|PASSWD|SECRET|PIN|SSN)\b
+  anti_patterns:
+  - MASK
+  - FUNCTION UPPER-CASE
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: COBOL-XSEC-003
+  title: Insecure File I/O Operations
+  description: 'Detects file operations with potentially insecure dataset names.
+
+    '
+  language: cobol
+  category: path_traversal
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - file-access
+  - dataset
+  patterns:
+  - type: regex
+    pattern: EXEC\s+CICS\s+(?:READ|WRITE|DELETE)\s+FILE\s*\(\s*(?:WS-|LK-)\w+\s*\)
+  - type: regex
+    pattern: OPEN\s+(?:INPUT|OUTPUT|I-O|EXTEND)\s+(?:WS-|LK-)\w+-FILE
+  anti_patterns:
+  - VALIDATE-FILE
+  - CHECK-FILE
+  - ALLOWED-FILES
+  impact: Path traversal enables reading or writing arbitrary files on the server
+  remediation: Canonicalize paths and verify they remain within expected base directories
+- rule_id: COBOL-XSEC-004
+  title: Numeric Overflow Risk
+  description: 'Detects arithmetic operations that could cause numeric overflow.
+
+    '
+  language: cobol
+  category: injection
+  severity: Medium
+  confidence: 0.72
+  cwe: CWE-190
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - numeric-overflow
+  - arithmetic
+  patterns:
+  - type: regex
+    pattern: COMPUTE\s+\w+\s*=\s*\w+\s*\*\s*\w+(?!\s+ON\s+SIZE\s+ERROR)
+  - type: regex
+    pattern: ADD\s+\w+\s+TO\s+\w+(?!\s+ON\s+SIZE\s+ERROR)
+  - type: regex
+    pattern: MULTIPLY\s+\w+\s+BY\s+\w+(?!\s+ON\s+SIZE\s+ERROR)
+  anti_patterns:
+  - ON SIZE ERROR
+  - NOT ON SIZE ERROR
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: COBOL-FW-001
+  title: CICS Temporary Storage Exposure
+  description: 'Detects sensitive data written to shared CICS temporary storage.
+
+    '
+  language: cobol
+  category: framework_misuse
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-922
+  owasp: A04:2021-Insecure-Design
+  detection_layer: 2
+  tags:
+  - cics
+  - temporary-storage
+  - data-exposure
+  patterns:
+  - type: regex
+    pattern: EXEC\s+CICS\s+WRITEQ\s+TS\s+.*(?:PASSWORD|SECRET|SSN|PIN|CREDIT)\b
+  - type: regex
+    pattern: EXEC\s+CICS\s+WRITEQ\s+TS\s+.*MAIN\b
+  anti_patterns:
+  - AUXILIARY
+  - ENCRYPT
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

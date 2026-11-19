@@ -1,0 +1,1227 @@
+rules:
+- rule_id: AUTH-JAVA-001
+  title: Spring Security Misconfiguration
+  description: 'Detects Spring Security configurations that disable critical protections such as permitAll on sensitive endpoints,
+    disabled authentication, or overly permissive security filter chains.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-306
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - spring-security
+  - misconfiguration
+  - authentication
+  - access-control
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: \.authorizeRequests\(\)\s*\.antMatchers\(.*(?:admin|api|user|account).*\)\.permitAll
+    description: Sensitive endpoint set to permitAll
+  - pattern: http\.authorizeHttpRequests\(.*\.anyRequest\(\)\.permitAll
+    description: All requests permitted without auth
+  - pattern: web\.ignoring\(\)\s*\.antMatchers\(.*(?:admin|api|user).*\)
+    description: Security ignoring sensitive endpoints
+  - pattern: '@Bean.*SecurityFilterChain.*permitAll'
+    description: SecurityFilterChain with permitAll
+  anti_patterns:
+  - pattern: \.authenticated\(\)
+    description: Authentication required
+  - pattern: \.hasRole\(|hasAuthority\(
+    description: Role-based access
+  - pattern: '@PreAuthorize'
+    description: Method-level security
+  - pattern: '@Secured'
+    description: Secured annotation
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: \.permitAll.*(?:login|register|public|health|actuator)
+    description: Public endpoint permitAll
+  bypass_variants:
+  - variant: Security filter chain ordering bypass
+    description: Lower order filter chain without auth takes precedence
+  - variant: Custom filter bypassing Spring Security
+    description: Custom servlet filter before security chain
+  evasion_indicators:
+  - Multiple SecurityFilterChain beans with conflicting rules
+  - web.ignoring() on sensitive paths
+  encoding_variants:
+  - Java configuration class
+  - application.yml security properties
+  multi_function_chain_patterns:
+  - SecurityFilterChain -> permitAll on admin -> unauthenticated admin access
+  - web.ignoring() -> /api/** -> security completely bypassed
+  privilege_context_flags:
+  - Admin endpoint access
+  - API security configuration
+  business_logic_indicator:
+  - Spring Security configuration class
+  - WebSecurityConfigurerAdapter
+  probable_taint_paths:
+  - source: Unauthenticated HTTP request
+    sink: Controller handling sensitive operation
+    through: permitAll security configuration
+  impact: 'Misconfigured Spring Security allows unauthenticated users to access admin panels, APIs, and sensitive operations.
+    This bypasses all authentication and authorization controls.
+
+    '
+  remediation: 'Configure Spring Security with authenticated() for sensitive endpoints. Only use permitAll() for truly public
+    paths like /login, /register, and /health. Use @PreAuthorize for method-level security.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://docs.spring.io/spring-security/reference/servlet/authorization/index.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - SecurityFilterChain
+    - WebSecurityConfigurerAdapter
+    taint_source_indicators:
+    - HttpServletRequest
+    - HTTP request
+    taint_sink_indicators:
+    - Controller method
+    - REST endpoint
+    sanitization_patterns:
+    - .authenticated()
+    - '@PreAuthorize'
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: admin endpoint permitAll
+      modifier: '+0.5'
+    - condition: test configuration
+      modifier: '-4.0'
+  exploit_scenario: '1. Spring Security configured with .anyRequest().permitAll(). 2. All REST endpoints accessible without
+    authentication. 3. Attacker directly calls /api/admin/users to list all users. 4. Full data access without any credentials.
+
+    '
+  confidence_factors:
+    increases:
+    - permitAll on sensitive path
+    - anyRequest().permitAll()
+    decreases:
+    - Test configuration
+    - Public endpoint context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-003
+    - AUTH-JAVA-006
+    dependency_chain: Security misconfiguration makes all other auth rules critical
+    combined_risk_increase: Maximum when combined with missing @PreAuthorize
+- rule_id: AUTH-JAVA-002
+  title: Hardcoded Credentials in Java Source
+  description: 'Detects hardcoded passwords, API keys, and credentials in Java source code including connection strings, configuration
+    constants, and inline authentication values.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - hardcoded-credentials
+  - passwords
+  - api-keys
+  - java
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: (?:password|passwd|pwd)\s*=\s*"[^"]{4,}"
+    description: Hardcoded password string
+  - pattern: (?:apiKey|api_key|API_KEY)\s*=\s*"[^"]{8,}"
+    description: Hardcoded API key
+  - pattern: setPassword\(\s*"[^"]{4,}"\s*\)
+    description: setPassword with hardcoded value
+  - pattern: new\s+UsernamePasswordAuthenticationToken\(.*"[^"]+".*"[^"]+"
+    description: Hardcoded credentials in authentication token
+  anti_patterns:
+  - pattern: System\.getenv\(|System\.getProperty\(
+    description: Environment variable or system property
+  - pattern: '@Value\("\$\{'
+    description: Spring @Value from properties
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: vault|secretsManager|keyStore
+    description: Secrets management
+  - pattern: application\.properties|application\.yml
+    description: Externalized configuration
+  - pattern: \bmock\b|\bstub\b
+    description: Mock or stub context
+  bypass_variants:
+  - variant: Password in application.properties committed to repo
+    description: Externalized but committed secret
+  - variant: Credentials in resource bundle or constants class
+    description: Constants class with hardcoded values
+  evasion_indicators:
+  - Credentials in constants class
+  - Password obfuscated with Base64
+  - API key in resource file
+  encoding_variants:
+  - Base64-encoded password string
+  - Hex-encoded API key
+  multi_function_chain_patterns:
+  - private static final String PASSWORD = 'secret' -> DataSource config
+  - apiKey = 'hardcoded' -> HTTP header -> API call
+  privilege_context_flags:
+  - Database credentials
+  - API authentication
+  - Service account credentials
+  business_logic_indicator:
+  - Configuration class
+  - Database configuration
+  probable_taint_paths:
+  - source: Hardcoded string literal
+    sink: Authentication mechanism
+    through: Direct credential usage
+  impact: 'Hardcoded credentials can be extracted from compiled JAR files, decompiled class files, or source repositories.
+    This provides direct access to databases, APIs, and services.
+
+    '
+  remediation: 'Use Spring @Value with externalized properties, environment variables, or a secrets manager like HashiCorp
+    Vault. Use Spring Cloud Config for centralized secret management.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.external-config
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - '@Configuration'
+    - DataSource
+    - '@Bean'
+    taint_source_indicators:
+    - String literal
+    - Static final constant
+    taint_sink_indicators:
+    - DataSource
+    - HttpClient
+    - RestTemplate
+    sanitization_patterns:
+    - '@Value'
+    - System.getenv
+    - Vault
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: database password
+      modifier: '+0.5'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker decompiles JAR file using JD-GUI. 2. Finds hardcoded database password in DataSourceConfig
+    class. 3. Connects directly to production database. 4. Extracts all user data and sensitive records.
+
+    '
+  confidence_factors:
+    increases:
+    - Password variable with inline string
+    - setPassword with literal
+    decreases:
+    - Test or mock context
+    - '@Value annotation present'
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-004
+    - AUTH-JAVA-009
+    dependency_chain: Hardcoded credentials provide direct system access
+    combined_risk_increase: Critical when combined with JDBC exposure
+- rule_id: AUTH-JAVA-003
+  title: Missing @PreAuthorize on Sensitive Methods
+  description: 'Detects Spring controller methods handling sensitive operations without @PreAuthorize, @Secured, or @RolesAllowed
+    annotations for method-level security enforcement.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-862
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - spring-security
+  - preauthorize
+  - method-security
+  - authorization
+  detection_layer: 2
+  attack_surface_type: authorization
+  patterns:
+  - pattern: '@(?:Post|Put|Delete|Patch)Mapping.*(?:admin|user|account|payment|settings)'
+    description: State-changing endpoint for sensitive resource without auth annotation
+  - pattern: '@RequestMapping.*(?:admin|user|account|payment).*\)\s*public'
+    description: Sensitive RequestMapping without security annotation
+  - pattern: public.*(?:delete|update|create|modify)(?:User|Account|Payment|Admin)\s*\(
+    description: Sensitive method name without security annotation
+  - pattern: '@RestController.*(?:Admin|User|Account|Payment)Controller'
+    description: Sensitive controller without class-level security
+  anti_patterns:
+  - pattern: '@PreAuthorize'
+    description: '@PreAuthorize annotation present'
+  - pattern: '@Secured'
+    description: '@Secured annotation'
+  - pattern: '@RolesAllowed'
+    description: '@RolesAllowed annotation'
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: '@GetMapping.*(?:login|register|public|health)'
+    description: Public endpoint
+  - pattern: hasRole|hasAuthority
+    description: Role check present
+  bypass_variants:
+  - variant: '@PreAuthorize with SpEL expression that always evaluates to true'
+    description: Permissive SpEL expression
+  - variant: Method security annotation on helper but not on entry point
+    description: Security on wrong method
+  evasion_indicators:
+  - Class-level security missing
+  - SpEL expression bypass
+  encoding_variants:
+  - Annotation-based security
+  - URL-based security only
+  multi_function_chain_patterns:
+  - Controller without @PreAuthorize -> service call -> database modification
+  - Admin endpoint -> no method security -> privilege escalation
+  privilege_context_flags:
+  - Admin operations
+  - User data modification
+  - Financial transactions
+  business_logic_indicator:
+  - REST controller
+  - Service layer
+  probable_taint_paths:
+  - source: HTTP request to sensitive endpoint
+    sink: Service method performing privileged operation
+    through: Controller missing @PreAuthorize
+  impact: 'Without method-level security, any authenticated user can access admin functionality, modify other users data,
+    and perform privileged operations.
+
+    '
+  remediation: 'Add @PreAuthorize annotations to all sensitive controller methods. Enable method-level security with @EnableMethodSecurity.
+    Use hasRole() or hasAuthority() for role-based access control.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/862.html
+  - https://docs.spring.io/spring-security/reference/servlet/authorization/method-security.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - '@RestController'
+    - '@Controller'
+    - '@RequestMapping'
+    taint_source_indicators:
+    - '@RequestBody'
+    - '@PathVariable'
+    - '@RequestParam'
+    taint_sink_indicators:
+    - Repository
+    - Service
+    - EntityManager
+    sanitization_patterns:
+    - '@PreAuthorize'
+    - '@Secured'
+    - '@RolesAllowed'
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: admin endpoint
+      modifier: '+1.0'
+    - condition: URL security covers the path
+      modifier: '-3.0'
+  exploit_scenario: '1. AdminController has deleteUser() without @PreAuthorize. 2. Regular authenticated user discovers DELETE
+    /api/admin/users/123. 3. User calls endpoint and successfully deletes another user. 4. Vertical privilege escalation achieved.
+
+    '
+  confidence_factors:
+    increases:
+    - Sensitive method name without annotation
+    - Admin controller without security
+    decreases:
+    - URL-level security covers the endpoint
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-001
+    - AUTH-JAVA-010
+    dependency_chain: Missing method security combined with security misconfig is critical
+    combined_risk_increase: Critical when combined with URL-level misconfiguration
+- rule_id: AUTH-JAVA-004
+  title: JDBC Credential Exposure
+  description: 'Detects hardcoded database credentials in JDBC connection strings, DataSource configurations, and Hibernate
+    properties within Java source code.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - jdbc
+  - database-credentials
+  - datasource
+  - hardcoded
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: jdbc:.*password=\w+
+    description: Password in JDBC connection string
+  - pattern: DriverManagerDataSource.*setPassword\(\s*"[^"]+"
+    description: Hardcoded password in DataSource
+  - pattern: spring\.datasource\.password\s*=\s*[^$\{]
+    description: Password in application.properties not from env
+  - pattern: hibernate\.connection\.password\s*=\s*\w+
+    description: Hibernate password hardcoded
+  anti_patterns:
+  - pattern: \$\{.*password.*\}
+    description: Property placeholder for password
+  - pattern: System\.getenv
+    description: Environment variable
+  - pattern: vault|secretsManager
+    description: Secrets manager
+  - pattern: \btest\b|\bTest\b
+    description: Test context
+  - pattern: 'h2:|hsqldb:|mem:'
+    description: In-memory test database
+  - pattern: '@Profile\("test"\)'
+    description: Test profile
+  bypass_variants:
+  - variant: Password in properties file committed to repo
+    description: Externalized but committed credential
+  - variant: JNDI lookup with hardcoded password in context.xml
+    description: Container-managed credential with hardcoded value
+  evasion_indicators:
+  - Password in committed properties file
+  - Base64-encoded JDBC password
+  encoding_variants:
+  - JDBC URL with inline credentials
+  - Properties file with plain password
+  multi_function_chain_patterns:
+  - JDBC URL with password -> DataSource -> database access
+  - application.properties credential -> Spring Boot auto-config -> DB
+  privilege_context_flags:
+  - Database access
+  - Connection pool configuration
+  business_logic_indicator:
+  - DataSource configuration
+  - Persistence configuration
+  probable_taint_paths:
+  - source: Hardcoded JDBC password
+    sink: Database connection
+    through: DataSource configuration
+  impact: 'Exposed JDBC credentials allow direct database access, enabling attackers to read, modify, or delete all data.
+
+    '
+  remediation: 'Use Spring Boot externalized configuration with ${DB_PASSWORD}. Store credentials in environment variables,
+    AWS Secrets Manager, or HashiCorp Vault.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.external-config
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - DataSource
+    - 'jdbc:'
+    - hibernate
+    taint_source_indicators:
+    - String literal
+    - Properties value
+    taint_sink_indicators:
+    - DriverManager.getConnection
+    - DataSource
+    sanitization_patterns:
+    - ${}
+    - System.getenv
+    - Vault
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: production database credential
+      modifier: '+0.5'
+    - condition: in-memory test database
+      modifier: '-5.0'
+  exploit_scenario: '1. Attacker finds JDBC URL with password in decompiled JAR. 2. Database port is accessible; direct connection
+    established. 3. Attacker dumps entire database including user credentials. 4. Complete data breach of all application
+    data.
+
+    '
+  confidence_factors:
+    increases:
+    - Password in JDBC URL
+    - setPassword with literal string
+    decreases:
+    - Test database (H2/HSQLDB)
+    - Property placeholder
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-002
+    - AUTH-JAVA-001
+    dependency_chain: JDBC credential exposure enables direct database compromise
+    combined_risk_increase: Critical with network exposure
+- rule_id: AUTH-JAVA-005
+  title: JWT Verification Bypass in Java
+  description: 'Detects insecure JWT handling in Java applications including disabled signature verification, missing algorithm
+    pinning, use of none algorithm, and acceptance of unsigned tokens.
+
+    '
+  language: java
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-347
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - jwt
+  - verification-bypass
+  - java-jwt
+  - jjwt
+  - authentication
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: Jwts\.parser\(\)(?!.*setSigningKey)
+    description: JJWT parser without signing key
+  - pattern: JWT\.decode\(.*\)\.getPayload\(\)
+    description: auth0 JWT decoded without verification
+  - pattern: setAllowedClockSkew.*(?:3600|7200|86400)
+    description: Excessive clock skew allowing expired tokens
+  - pattern: UnsecuredJWT|none.*algorithm
+    description: Unsigned JWT or none algorithm
+  anti_patterns:
+  - pattern: setSigningKey|signWith
+    description: Signing key configured
+  - pattern: RS256|ES256|RSA
+    description: Strong algorithm specified
+  - pattern: verifyWith|requireIssuer
+    description: Verification enabled
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: requireExpirationTime
+    description: Expiration required
+  - pattern: JwtDecoder|NimbusJwtDecoder
+    description: Spring Security JWT decoder
+  bypass_variants:
+  - variant: 'Algorithm confusion: HMAC with RSA public key'
+    description: Using RSA public key as HMAC secret
+  - variant: Custom JWT parser skipping signature verification
+    description: Wrapper hiding disabled verification
+  evasion_indicators:
+  - Parser without signing key
+  - Decoded without verification
+  - None algorithm accepted
+  encoding_variants:
+  - JJWT library syntax
+  - auth0 java-jwt syntax
+  multi_function_chain_patterns:
+  - JWT.decode(token) -> getPayload() -> trust claims (no verify)
+  - Jwts.parser() -> parseClaimsJws() -> no signing key
+  privilege_context_flags:
+  - Authentication token validation
+  - API authorization
+  business_logic_indicator:
+  - JWT authentication filter
+  - Token validation service
+  probable_taint_paths:
+  - source: Authorization header
+    sink: JWT claims used for auth decisions
+    through: Missing signature verification
+  impact: 'Attackers can forge JWT tokens with arbitrary claims, bypass authentication entirely, and impersonate any user
+    including administrators.
+
+    '
+  remediation: 'Always use Jwts.parserBuilder().setSigningKey(key).build() with JJWT. Pin algorithms to RS256 or ES256. Use
+    Spring Security NimbusJwtDecoder for standard JWT validation.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/347.html
+  - https://github.com/jwtk/jjwt
+  - https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
+  context_awareness:
+    surrounding_context_patterns:
+    - Jwts.
+    - JWT.
+    - import io.jsonwebtoken
+    taint_source_indicators:
+    - Authorization header
+    - Bearer token
+    taint_sink_indicators:
+    - SecurityContext
+    - Authentication
+    sanitization_patterns:
+    - setSigningKey
+    - verifyWith
+    - NimbusJwtDecoder
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: no signing key configured
+      modifier: '+0.5'
+    - condition: test context
+      modifier: '-5.0'
+  exploit_scenario: '1. Java API uses JWT.decode(token).getPayload() without verify. 2. Attacker creates JWT with admin claims.
+    3. Sends forged token in Authorization header. 4. Server extracts claims without verification and grants admin access.
+
+    '
+  confidence_factors:
+    increases:
+    - JWT decoded without verification
+    - No signing key in parser
+    decreases:
+    - Spring Security JwtDecoder used
+    - setSigningKey present
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-002
+    - AUTH-JAVA-001
+    dependency_chain: JWT bypass combined with hardcoded secrets is critical
+    combined_risk_increase: Maximum when combined with security misconfig
+- rule_id: AUTH-JAVA-006
+  title: Spring CSRF Protection Disabled
+  description: 'Detects Spring Security configurations where CSRF protection is explicitly disabled. Critical for session-based
+    applications where CSRF enables attackers to forge state-changing requests.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-352
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - csrf
+  - spring-security
+  - cross-site-request-forgery
+  - java
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: \.csrf\(\)\s*\.disable\(\)
+    description: CSRF explicitly disabled
+  - pattern: csrf\(AbstractHttpConfigurer::disable\)
+    description: CSRF disabled via method reference
+  - pattern: csrf\.disable\(\)
+    description: CSRF disabled in security config
+  - pattern: http\.csrf\(csrf\s*->\s*csrf\.disable\(\)\)
+    description: CSRF disabled with lambda DSL
+  anti_patterns:
+  - pattern: SessionCreationPolicy\.STATELESS
+    description: Stateless session (CSRF not needed)
+  - pattern: \.oauth2ResourceServer\(
+    description: OAuth2 resource server (token-based)
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: CsrfTokenRepository|CookieCsrfTokenRepository
+    description: CSRF token configured
+  - pattern: Bearer|JWT|jwt
+    description: Token-based authentication
+  - pattern: '@Profile\("test"\)'
+    description: Test profile
+  bypass_variants:
+  - variant: CsrfTokenRepository configured but not validated
+    description: Token generated but not required
+  - variant: CSRF enabled but excluded for specific sensitive paths
+    description: CSRF exclusion for sensitive paths
+  evasion_indicators:
+  - CSRF disabled globally
+  - Session-based auth without CSRF
+  encoding_variants:
+  - Method chain disable
+  - Lambda DSL disable
+  multi_function_chain_patterns:
+  - csrf().disable() -> session-based auth -> CSRF exploitation
+  - No CSRF -> POST /api/transfer -> unauthorized transfer
+  privilege_context_flags:
+  - State-changing operations
+  - Session-based authentication
+  business_logic_indicator:
+  - Spring Security configuration
+  - Web application security
+  probable_taint_paths:
+  - source: Cross-origin malicious form submission
+    sink: State-changing endpoint
+    through: Disabled CSRF protection
+  impact: 'CSRF disabled on session-based applications lets attackers forge requests that modify data, transfer funds, or
+    change settings on behalf of authenticated users.
+
+    '
+  remediation: 'Do not disable CSRF for session-based applications. Use CookieCsrfTokenRepository.withHttpOnlyFalse() for
+    SPAs. Only disable CSRF for purely stateless JWT-based APIs.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/352.html
+  - https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - SecurityFilterChain
+    - HttpSecurity
+    taint_source_indicators:
+    - Cross-origin form
+    - Malicious site
+    taint_sink_indicators:
+    - POST/PUT/DELETE endpoint
+    - State change
+    sanitization_patterns:
+    - CsrfTokenRepository
+    - csrf().csrfTokenRepository
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: session-based authentication
+      modifier: '+1.5'
+    - condition: stateless JWT API
+      modifier: '-4.0'
+  exploit_scenario: '1. Spring web app uses session auth with csrf().disable(). 2. Attacker creates page with auto-submitting
+    form. 3. Authenticated victim visits attacker''s page. 4. Form POSTs to /api/transfer; funds transferred to attacker.
+
+    '
+  confidence_factors:
+    increases:
+    - csrf().disable() with session auth
+    - No StatelessPolicy
+    decreases:
+    - Stateless JWT configuration
+    - OAuth2 resource server
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-001
+    - AUTH-JAVA-007
+    dependency_chain: Disabled CSRF with session auth enables cross-site attacks
+    combined_risk_increase: High when combined with session weakness
+- rule_id: AUTH-JAVA-007
+  title: Session Management Weakness
+  description: 'Detects insecure session management in Spring applications including missing session fixation protection,
+    excessive timeout, and insecure session cookie settings.
+
+    '
+  language: java
+  category: auth
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-384
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session-management
+  - session-fixation
+  - session-timeout
+  - spring
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: sessionFixation\(\)\s*\.none\(\)
+    description: Session fixation protection disabled
+  - pattern: maximumSessions\(-1\)
+    description: Unlimited concurrent sessions
+  - pattern: server\.servlet\.session\.timeout\s*=\s*(?:\d{5,})
+    description: Excessively long session timeout
+  - pattern: server\.servlet\.session\.cookie\.http-only\s*=\s*false
+    description: HttpOnly disabled on session cookie
+  anti_patterns:
+  - pattern: sessionFixation\(\)\s*\.(?:migrateSession|newSession|changeSessionId)
+    description: Session fixation protection enabled
+  - pattern: maximumSessions\(1\)
+    description: Single session enforcement
+  - pattern: \btest\b|\bTest\b
+    description: Test context
+  - pattern: cookie\.http-only\s*=\s*true
+    description: HttpOnly enabled
+  - pattern: cookie\.secure\s*=\s*true
+    description: Secure flag enabled
+  - pattern: SessionCreationPolicy\.STATELESS
+    description: Stateless session
+  bypass_variants:
+  - variant: Session fixation protection set to none
+    description: Explicitly disabling session fixation protection
+  - variant: Custom session management bypassing Spring defaults
+    description: Custom implementation missing protections
+  evasion_indicators:
+  - Session fixation protection disabled
+  - HttpOnly flag disabled
+  encoding_variants:
+  - Java configuration
+  - application.properties
+  multi_function_chain_patterns:
+  - sessionFixation().none() -> session fixation attack
+  - HttpOnly=false -> XSS session theft
+  privilege_context_flags:
+  - Session management
+  - Authentication persistence
+  business_logic_indicator:
+  - Spring Security session config
+  - Server session properties
+  probable_taint_paths:
+  - source: Pre-auth session ID
+    sink: Authenticated session
+    through: Disabled session fixation protection
+  impact: 'Disabled session fixation protection lets attackers fix a known session ID and hijack authenticated sessions. Missing
+    HttpOnly allows XSS theft.
+
+    '
+  remediation: 'Use sessionFixation().migrateSession() or changeSessionId(). Set maximumSessions(1). Enable HttpOnly and Secure
+    flags on session cookies.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/384.html
+  - https://docs.spring.io/spring-security/reference/servlet/authentication/session-management.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - sessionManagement
+    - HttpSecurity
+    taint_source_indicators:
+    - Session cookie
+    - JSESSIONID
+    taint_sink_indicators:
+    - Authenticated session
+    - SecurityContext
+    sanitization_patterns:
+    - migrateSession
+    - changeSessionId
+  severity_scoring:
+    base_score: 7.0
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: session fixation disabled
+      modifier: '+1.5'
+    - condition: stateless application
+      modifier: '-4.0'
+  exploit_scenario: '1. App uses sessionFixation().none(). 2. Attacker creates session and obtains JSESSIONID. 3. Sends link
+    with JSESSIONID to victim. 4. Victim logs in; session ID unchanged. 5. Attacker uses known JSESSIONID to access victim''s
+    session.
+
+    '
+  confidence_factors:
+    increases:
+    - sessionFixation().none()
+    - HttpOnly disabled
+    decreases:
+    - Stateless application
+    - Default Spring Security
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-006
+    - AUTH-JAVA-001
+    dependency_chain: Session weakness amplifies CSRF and XSS impacts
+    combined_risk_increase: High when combined with disabled CSRF
+- rule_id: AUTH-JAVA-008
+  title: BCrypt Cost Factor Too Low
+  description: 'Detects BCrypt password hashing with a cost factor below the recommended minimum. Low cost factors allow faster
+    brute-force attacks.
+
+    '
+  language: java
+  category: auth
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-916
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - bcrypt
+  - password-hashing
+  - cost-factor
+  - brute-force
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: BCryptPasswordEncoder\(\s*[1-9]\s*\)
+    description: BCrypt cost factor below 10
+  - pattern: BCrypt\.hashpw\(.*,\s*BCrypt\.gensalt\(\s*[1-9]\s*\)
+    description: BCrypt gensalt with low cost factor
+  - pattern: new\s+BCryptPasswordEncoder\(\s*4\s*\)
+    description: BCrypt with minimal cost factor of 4
+  - pattern: strength\s*=\s*[1-9]\b
+    description: BCrypt strength below 10
+  anti_patterns:
+  - pattern: BCryptPasswordEncoder\(\s*1[0-4]\s*\)
+    description: Adequate BCrypt cost factor
+  - pattern: BCryptPasswordEncoder\(\)
+    description: Default BCrypt cost (10)
+  - pattern: Argon2PasswordEncoder
+    description: Argon2 password encoder
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: SCryptPasswordEncoder
+    description: SCrypt password encoder
+  - pattern: Pbkdf2PasswordEncoder
+    description: PBKDF2 password encoder
+  bypass_variants:
+  - variant: Custom BCrypt wrapper with low default cost
+    description: Wrapper hiding low cost factor
+  - variant: Cost factor from config defaulting to low value
+    description: Configurable cost with weak default
+  evasion_indicators:
+  - Cost factor below 10
+  - Custom password encoder wrapper
+  encoding_variants:
+  - BCryptPasswordEncoder constructor
+  - BCrypt.gensalt parameter
+  multi_function_chain_patterns:
+  - BCryptPasswordEncoder(4) -> password encoding -> weak hash stored
+  - Low cost BCrypt -> database breach -> fast brute-force
+  privilege_context_flags:
+  - Password hashing
+  - User registration
+  business_logic_indicator:
+  - Security configuration
+  - User service
+  probable_taint_paths:
+  - source: User password
+    sink: Database storage
+    through: Low-cost BCrypt hash
+  impact: 'Low BCrypt cost factor significantly reduces brute-force time. At cost 4, cracking is approximately 64x faster
+    than cost 10.
+
+    '
+  remediation: 'Use BCryptPasswordEncoder with cost factor 12 or higher. Consider Argon2PasswordEncoder for stronger protection.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/916.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  - https://docs.spring.io/spring-security/reference/features/authentication/password-storage.html
+  context_awareness:
+    surrounding_context_patterns:
+    - '@Bean'
+    - PasswordEncoder
+    - BCrypt
+    taint_source_indicators:
+    - User password input
+    taint_sink_indicators:
+    - Database password column
+    sanitization_patterns:
+    - BCryptPasswordEncoder(12)
+    - Argon2PasswordEncoder
+  severity_scoring:
+    base_score: 5.5
+    exploitability: medium
+    impact_score: 6.0
+    adjustments:
+    - condition: cost factor 4 or below
+      modifier: '+2.0'
+    - condition: test context
+      modifier: '-3.0'
+  exploit_scenario: '1. Database breach exposes BCrypt hashes with cost factor 4. 2. Attacker uses hashcat with GPU to brute-force.
+    3. At cost 4, hashing is 64x faster than cost 10. 4. Many more passwords cracked per unit time.
+
+    '
+  confidence_factors:
+    increases:
+    - Explicit low cost factor
+    - gensalt with low rounds
+    decreases:
+    - Test context
+    - Default constructor
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-002
+    - AUTH-JAVA-004
+    dependency_chain: Weak hashing with credential exposure enables fast cracking
+    combined_risk_increase: High when database is exposed
+- rule_id: AUTH-JAVA-009
+  title: HTTP Basic Authentication Without HTTPS
+  description: 'Detects HTTP Basic authentication in Spring Security that may expose base64-encoded credentials over unencrypted
+    connections.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-319
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - http-basic
+  - cleartext
+  - credentials
+  - transport-security
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: \.httpBasic\(\)
+    description: HTTP Basic authentication enabled
+  - pattern: httpBasic\(Customizer\.withDefaults\(\)\)
+    description: HTTP Basic with defaults
+  - pattern: BasicAuthenticationFilter
+    description: Basic auth filter configured
+  - pattern: http\.httpBasic\(basic\s*->\s*basic
+    description: HTTP Basic with lambda config
+  anti_patterns:
+  - pattern: requiresChannel\(\)\s*\.anyRequest\(\)\s*\.requiresSecure
+    description: HTTPS enforced
+  - pattern: server\.ssl\.enabled\s*=\s*true
+    description: SSL enabled
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: https://
+    description: HTTPS configured
+  - pattern: SECURE_CHANNEL
+    description: Secure channel required
+  - pattern: HSTS|Strict-Transport-Security
+    description: HSTS enabled
+  bypass_variants:
+  - variant: HTTPS configured but not enforced (HTTP still accessible)
+    description: HTTP fallback allowing cleartext Basic auth
+  - variant: Reverse proxy terminates SSL but internal traffic is HTTP
+    description: Internal network cleartext credentials
+  evasion_indicators:
+  - HTTP Basic without HTTPS enforcement
+  - SSL termination at proxy level
+  encoding_variants:
+  - Spring Security httpBasic()
+  - Custom BasicAuthenticationFilter
+  multi_function_chain_patterns:
+  - httpBasic() -> no HTTPS -> credentials in cleartext
+  - Basic auth over HTTP -> network sniffing -> credential theft
+  privilege_context_flags:
+  - API authentication
+  - Service-to-service auth
+  business_logic_indicator:
+  - Spring Security configuration
+  - REST API security
+  probable_taint_paths:
+  - source: Client credentials
+    sink: HTTP Authorization header (plaintext)
+    through: HTTP Basic auth without TLS
+  impact: 'HTTP Basic sends base64-encoded (not encrypted) credentials in every request. Without HTTPS, any network observer
+    can intercept them.
+
+    '
+  remediation: 'Always enforce HTTPS with HTTP Basic. Use requiresChannel().anyRequest() .requiresSecure(). Prefer token-based
+    authentication instead.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/319.html
+  - https://docs.spring.io/spring-security/reference/servlet/authentication/passwords/basic.html
+  - https://owasp.org/Top10/A02_2021-Cryptographic_Failures/
+  context_awareness:
+    surrounding_context_patterns:
+    - HttpSecurity
+    - SecurityFilterChain
+    taint_source_indicators:
+    - 'Authorization: Basic header'
+    taint_sink_indicators:
+    - HTTP transmission
+    - Network
+    sanitization_patterns:
+    - requiresSecure()
+    - server.ssl.enabled
+  severity_scoring:
+    base_score: 7.0
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: HTTPS enforced
+      modifier: '-4.0'
+    - condition: internal network only
+      modifier: '-1.5'
+  exploit_scenario: '1. Spring API uses httpBasic() without HTTPS. 2. Client sends credentials via HTTP. 3. Attacker captures
+    Authorization: Basic header on network. 4. Base64-decoded to retrieve username:password.
+
+    '
+  confidence_factors:
+    increases:
+    - httpBasic() without requiresSecure()
+    - No SSL config
+    decreases:
+    - HTTPS enforced
+    - Internal service only
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-002
+    - AUTH-JAVA-001
+    dependency_chain: Basic auth without HTTPS exposes credentials on wire
+    combined_risk_increase: Critical when credentials are reused
+- rule_id: AUTH-JAVA-010
+  title: Role-Based Access Control Bypass
+  description: 'Detects patterns where Spring Security role-based access control can be bypassed through incorrect role hierarchy,
+    missing role checks, or permissive custom AccessDecisionVoter implementations.
+
+    '
+  language: java
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-863
+  owasp: A01:2021 - Broken Access Control
+  tags:
+  - rbac
+  - role-bypass
+  - authorization
+  - spring-security
+  detection_layer: 3
+  attack_surface_type: authorization
+  patterns:
+  - pattern: '@PreAuthorize\("hasRole\(''USER''\)"\).*(?:admin|delete|modify)'
+    description: USER role on admin operation
+  - pattern: hasRole\('ROLE_USER'\).*(?:Admin|admin)
+    description: User role check on admin endpoint
+  - pattern: getAuthorities\(\).*add.*ROLE_ADMIN
+    description: Dynamically adding admin role
+  - pattern: if\s*\(.*hasRole.*\)\s*\{[^}]*\}\s*else\s*\{.*proceed
+    description: Role check failure still proceeds
+  anti_patterns:
+  - pattern: hasRole\('ADMIN'\)|hasRole\('ROLE_ADMIN'\)
+    description: Proper admin role check
+  - pattern: '@PreAuthorize.*hasAnyRole.*ADMIN'
+    description: Admin role in authorization
+  - pattern: \btest\b|\bTest\b|@Test
+    description: Test context
+  - pattern: AccessDeniedException
+    description: Access denied on failure
+  - pattern: RoleHierarchy
+    description: Role hierarchy configured
+  - pattern: METHOD_SECURITY
+    description: Method security enabled
+  bypass_variants:
+  - variant: Role hierarchy misconfiguration granting more than intended
+    description: Incorrect role hierarchy inheritance
+  - variant: Custom voter that abstains instead of denying
+    description: Voter abstaining on unknown authority
+  evasion_indicators:
+  - USER role assigned to admin operations
+  - Role check failure not blocking request
+  encoding_variants:
+  - '@PreAuthorize annotation'
+  - URL-based role configuration
+  multi_function_chain_patterns:
+  - hasRole('USER') on admin endpoint -> privilege escalation
+  - Dynamic role addition -> privilege escalation
+  privilege_context_flags:
+  - Admin operations
+  - Role-based authorization
+  business_logic_indicator:
+  - Access control configuration
+  - Role management
+  probable_taint_paths:
+  - source: Authenticated user with regular role
+    sink: Admin functionality
+    through: Incorrect role check
+  impact: 'Incorrect RBAC allows regular users to access admin functionality and perform privileged operations. This is vertical
+    privilege escalation.
+
+    '
+  remediation: 'Use @PreAuthorize("hasRole(''ADMIN'')") on admin endpoints. Implement proper RoleHierarchy. Ensure custom
+    AccessDecisionVoters deny by default.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/863.html
+  - https://docs.spring.io/spring-security/reference/servlet/authorization/method-security.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - '@PreAuthorize'
+    - hasRole
+    - SecurityConfig
+    taint_source_indicators:
+    - Authentication principal
+    - GrantedAuthority
+    taint_sink_indicators:
+    - Admin service
+    - Privileged operation
+    sanitization_patterns:
+    - hasRole('ADMIN')
+    - RoleHierarchy
+  severity_scoring:
+    base_score: 8.0
+    exploitability: medium
+    impact_score: 8.0
+    adjustments:
+    - condition: admin operation with USER role
+      modifier: '+1.0'
+    - condition: proper role hierarchy
+      modifier: '-3.0'
+  exploit_scenario: '1. Admin endpoint protected with @PreAuthorize("hasRole(''USER'')"). 2. Any authenticated user has USER
+    role by default. 3. Regular user calls DELETE /api/admin/users/456. 4. Spring permits because USER role matches. Admin
+    accounts deleted.
+
+    '
+  confidence_factors:
+    increases:
+    - USER role on admin endpoint
+    - Role check failure proceeds
+    decreases:
+    - Proper ADMIN role check
+    - Role hierarchy configured
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-JAVA-003
+    - AUTH-JAVA-001
+    dependency_chain: RBAC bypass with security misconfig enables full escalation
+    combined_risk_increase: Critical when combined with missing method security

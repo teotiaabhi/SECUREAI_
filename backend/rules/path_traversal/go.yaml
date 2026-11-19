@@ -1,0 +1,1230 @@
+rules:
+- rule_id: PT-GO-001
+  title: os.Open with User-Controlled File Path
+  description: 'Detects usage of Go''s os.Open, os.OpenFile, os.Create, and os.ReadFile where the file path argument originates
+    from user-controlled input such as HTTP request parameters, URL path segments, form values, or JSON body fields. An attacker
+    can inject path traversal sequences like ../../etc/passwd to read or write arbitrary files on the server filesystem. Go
+    does not perform any automatic path validation in its os package functions, making explicit validation essential.
+
+    '
+  language: go
+  category: path_traversal
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - file-read
+  - file-write
+  - os-open
+  - golang
+  - server-side
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: os\.Open\s*\(\s*(?:r\s*\.\s*(?:URL\.Query\s*\(\s*\)\s*\.\s*Get|FormValue|PathValue)\s*\(|req\s*\.\s*(?:URL\.Query|FormValue))
+    description: os.Open with HTTP request parameter
+  - type: regex
+    pattern: os\.OpenFile\s*\(\s*(?:r\s*\.\s*(?:URL\.Query\s*\(\s*\)\s*\.\s*Get|FormValue|PathValue)\s*\(|filePath|fileName|userPath)\b
+    description: os.OpenFile with user-controlled path
+  - type: regex
+    pattern: os\.(?:Open|Create|ReadFile)\s*\(\s*(?:filePath|fileName|userPath|inputPath|docPath|targetFile)\s*[,\)]
+    description: os file operations with common user-controlled variable names
+  - type: regex
+    pattern: os\.(?:Open|Create|ReadFile)\s*\(\s*(?:filepath\.Join\s*\(\s*[^)]*(?:r\.|req\.|param|input|user))
+    description: os file operations with filepath.Join containing user input
+  - type: regex
+    pattern: os\.(?:Open|Create|ReadFile)\s*\(\s*(?:fmt\.Sprintf\s*\(\s*"[^"]*"\s*,\s*[^)]*(?:r\.|req\.|param|fileName|userInput))
+    description: os file operations with fmt.Sprintf interpolating user data
+  - type: regex
+    pattern: os\.(?:Open|Create|ReadFile)\s*\(\s*(?:\w+\s*\+\s*(?:r\.|req\.|param|fileName|userInput))
+    description: os file operations with string concatenation of user data
+  - type: regex
+    pattern: os\.(?:Open|Create|ReadFile)\s*\(\s*(?:vars|mux\.Vars|chi\.URLParam|c\.Param|c\.Query|ctx\.Param|ctx\.Query)\s*[\(\[]
+    description: os file operations with router parameter extraction (gorilla/mux, chi, gin, echo)
+  - type: regex
+    pattern: os\.(?:Open|Create)\s*\(\s*(?:path|file)\s*\)[\s\S]{0,50}(?:defer|io\.Copy|bufio|ioutil\.ReadAll)
+    description: os.Open with common path variable followed by read/copy operations
+  anti_patterns:
+  - filepath\.Clean\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - if\s+strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."\s*\)
+  - if\s+!strings\.HasPrefix\s*\(\s*\w+\s*,\s*(?:baseDir|allowedDir|rootDir)
+  - filepath\.Base\s*\(\s*(?:r\.|req\.|param|fileName|userInput)\b
+  - if\s+filepath\.IsAbs\s*\(
+  - securejoin\.\w+\s*\(
+  - filepath\.EvalSymlinks\s*\(
+  - os\.Open\s*\(\s*"[^"]*"\s*\)
+  - allowedPaths\[\s*\w+\s*\]
+  - whitelist\[\s*\w+\s*\]
+  - path\.Clean\s*\([^)]+\)[\s\S]{0,50}HasPrefix
+  - sanitize(?:Path|FileName|Input)\s*\(
+  - if\s+\w+\s*==\s*""
+  - filepath\.Rel\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(\s*\w+\s*,\s*"\.\."
+  bypass_variants:
+  - description: URL-encoded dot-dot-slash traversal
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c)
+  - description: Double URL-encoded traversal
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte injection (handled differently in Go)
+    pattern: (?:%00|\\x00)
+  - description: Backslash traversal on Windows Go
+    pattern: (?:\.\.\\\\|\.\.%5c|\.\.%5C)
+  - description: Unicode encoded traversal
+    pattern: (?:%c0%ae%c0%ae%c0%af|%e0%80%ae)
+  evasion_indicators:
+  - URL-encoded traversal in HTTP parameters
+  - Double encoding to bypass net/http URL decode
+  - Backslash on Windows Go deployments
+  - Unicode normalization differences
+  - Path length with redundant slashes
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae|%e0%80%ae)
+  multi_function_chain_patterns:
+  - r.URL.Query().Get('file') -> os.Open()
+  - r.FormValue('path') -> filepath.Join() -> os.Open()
+  - mux.Vars(r)['name'] -> os.ReadFile()
+  - c.Query('doc') -> fmt.Sprintf -> os.Open()
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Arbitrary file read/write through os.Open exposes credentials, keys, and configuration enabling full
+      server compromise
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.URL.Query().Get('file')
+    sink: os.Open(filePath)
+    through: direct parameter pass or filepath.Join
+  - source: r.FormValue('path')
+    sink: os.ReadFile(path)
+    through: form value extraction
+  - source: mux.Vars(r)['filename']
+    sink: os.Open(filepath.Join(dir, filename))
+    through: router parameter extraction
+  impact: 'Successful exploitation reads arbitrary files from the Go server''s
+
+    filesystem including /etc/passwd, /etc/shadow, application configuration
+
+    files, environment variables, private keys, TLS certificates, database
+
+    credentials, and source code. Write operations via os.Create or os.OpenFile
+
+    with O_WRONLY can overwrite configuration, inject code into template files,
+
+    or corrupt critical data. Go binaries often run with elevated privileges,
+
+    amplifying the impact.
+
+    '
+  remediation: "1. Clean and validate the resolved path:\n\n   cleanPath := filepath.Clean(userInput)\n   absPath, err :=\
+    \ filepath.Abs(filepath.Join(baseDir, cleanPath))\n   if err != nil || !strings.HasPrefix(absPath, filepath.Clean(baseDir)+string(os.PathSeparator))\
+    \ {\n       http.Error(w, \"Forbidden\", http.StatusForbidden)\n       return\n   }\n   f, err := os.Open(absPath)\n\n\
+    2. Use filepath.Base() for filename-only access:\n\n   safeName := filepath.Base(userInput)\n   f, err := os.Open(filepath.Join(uploadsDir,\
+    \ safeName))\n\n3. Use github.com/cyphar/filepath-securejoin for safe joins.\n4. Reject inputs containing '..' or path\
+    \ separators.\n5. Use file ID mappings instead of raw path input.\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - https://pkg.go.dev/os#Open
+  - https://pkg.go.dev/path/filepath
+  context_awareness:
+    surrounding_context_patterns:
+    - func\s+\w+\s*\(\s*w\s+http\.ResponseWriter\s*,\s*r\s+\*http\.Request\s*\)
+    - func\s+\w+\s*\(\s*c\s+\*gin\.Context\s*\)
+    - func\s+\w+\s*\(\s*ctx\s+echo\.Context\s*\)
+    - http\.HandleFunc\s*\(
+    taint_source_indicators:
+    - r\.URL\.Query\(\)\.Get\s*\(
+    - r\.FormValue\s*\(
+    - r\.PathValue\s*\(
+    - mux\.Vars\s*\(\s*r\s*\)
+    - chi\.URLParam\s*\(
+    - c\.Param\s*\(
+    - c\.Query\s*\(
+    taint_sink_indicators:
+    - os\.Open\s*\(
+    - os\.OpenFile\s*\(
+    - os\.Create\s*\(
+    - os\.ReadFile\s*\(
+    - ioutil\.ReadFile\s*\(
+    sanitization_patterns:
+    - filepath\.Clean\s*\([^)]+\)[\s\S]{0,100}HasPrefix
+    - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}HasPrefix
+    - filepath\.Base\s*\(
+    - securejoin\.\w+\s*\(
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Go HTTP handler serves files via GET /api/files?name=document.pdf.
+
+      The handler calls os.Open(filepath.Join(uploadDir, r.URL.Query().Get("name"))).
+
+      The attacker sends GET /api/files?name=../../../../etc/passwd. The
+
+      filepath.Join normalizes but does not restrict traversal, and os.Open
+
+      reads /etc/passwd. Successive requests target /etc/shadow, .env,
+
+      and TLS private keys.
+
+      '
+    example_payload: ../../../../etc/passwd
+    attacker_objective: Read sensitive server files including credentials, keys, and configuration
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-GO-002
+    - PT-GO-005
+    - PT-JS-001
+    - PT-PY-001
+- rule_id: PT-GO-002
+  title: filepath.Join with Unsanitized User Input
+  description: 'Detects usage of Go''s filepath.Join or path.Join where path segments originate from unsanitized user input.
+    While filepath.Join calls filepath.Clean internally to normalize separators and remove redundant elements, it does NOT
+    prevent traversal. filepath.Join("/base", "../../etc/passwd") correctly resolves to /etc/passwd if the process has access.
+    Unlike Python''s os.path.join, Go''s filepath.Join does not have the absolute path override behavior, but traversal sequences
+    still escape the base directory.
+
+    '
+  language: go
+  category: path_traversal
+  severity: High
+  confidence: 0.9
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - filepath-join
+  - golang
+  - server-side
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*[^)]*(?:r\s*\.\s*(?:URL\.Query\s*\(\s*\)\s*\.\s*Get|FormValue|PathValue)\s*\()
+    description: filepath.Join with HTTP request parameter
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*(?:\w+\s*,\s*){0,10}(?:filePath|fileName|userPath|userInput|inputPath|docPath)\s*[,\)]
+    description: filepath.Join with common user-controlled variable names
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*(?:baseDir|uploadDir|rootDir|staticDir|dataDir)\s*,\s*(?:r\s*\.\s*(?:URL\.Query|FormValue)|mux\.Vars|chi\.URLParam|c\.(?:Param|Query)|ctx\.(?:Param|Query))
+    description: filepath.Join with base directory and router parameter
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*[^)]*(?:vars|params|query|form)\s*\[\s*"[^"]*"\s*\]
+    description: filepath.Join with map access for parameters
+  - type: regex
+    pattern: path\.Join\s*\(\s*[^)]*(?:r\s*\.\s*(?:URL\.Query|FormValue)|filePath|fileName|userPath|userInput)\b
+    description: path.Join (URL path package) with user-controlled input
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*[^)]*(?:c\.Param\s*\(|c\.Query\s*\(|ctx\.Param\s*\(|ctx\.Query\s*\()
+    description: filepath.Join with Gin/Echo framework parameters
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*[^)]*(?:req\.(?:URL|Form|PostForm|Header))
+    description: filepath.Join with raw request URL, form, or header data
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*\w+\s*,\s*\w+\s*\)[\s\S]{0,50}(?:os\.(?:Open|Create|ReadFile|Stat)|ioutil\.ReadFile)
+    description: filepath.Join result immediately used in file operations
+  anti_patterns:
+  - filepath\.Clean\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - if\s+strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."\s*\)
+  - if\s+!strings\.HasPrefix\s*\(
+  - filepath\.Base\s*\(
+  - securejoin\.SecureJoin\s*\(
+  - filepath\.EvalSymlinks\s*\(
+  - filepath\.Join\s*\(\s*"[^"]*"\s*,\s*"[^"]*"\s*\)
+  - if\s+filepath\.IsAbs\s*\(
+  - allowedPaths\[\w+\]
+  - path\.Clean\s*\([^)]+\)[\s\S]{0,50}HasPrefix
+  - strings\.ReplaceAll\s*\(\s*\w+\s*,\s*"\.\."\s*,
+  - if\s+\w+\s*==\s*filepath\.Base\s*\(\s*\w+\s*\)
+  - filepath\.Rel\s*\([^)]+\)[\s\S]{0,100}HasPrefix\s*\(\s*\w+\s*,\s*"\.\."
+  - validatePath\s*\(
+  bypass_variants:
+  - description: URL-encoded traversal in path segments
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Double encoding to bypass net/http decode
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte injection
+    pattern: (?:%00|\\x00)
+  - description: Backslash on Windows Go runtime
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  - description: Path with redundant current-directory dots
+    pattern: (?:\.\/)+\.\.\/+
+  evasion_indicators:
+  - URL encoding in HTTP parameters
+  - Double encoding to bypass single decode
+  - Backslash on Windows
+  - Redundant ./ segments before traversal
+  - Encoded path separators
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - r.URL.Query().Get('file') -> filepath.Join -> os.Open
+  - mux.Vars(r)['name'] -> filepath.Join -> os.ReadFile
+  - c.Param('path') -> filepath.Join -> http.ServeFile
+  - r.FormValue('dir') -> filepath.Join -> os.ReadDir
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Traversal through filepath.Join escapes intended base directories to access any file readable by the
+      Go process
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.URL.Query().Get('file')
+    sink: filepath.Join(baseDir, userInput)
+    through: direct parameter pass
+  - source: mux.Vars(r)['name']
+    sink: filepath.Join(uploadsDir, name)
+    through: router variable extraction
+  - source: c.Param('path')
+    sink: filepath.Join(staticDir, path)
+    through: Gin parameter binding
+  impact: 'An attacker escapes the intended directory by injecting traversal
+
+    sequences through filepath.Join. Since Go''s filepath.Join normalizes
+
+    but does not constrain traversal, the resolved path can access any
+
+    file on the filesystem. This enables reading application configuration,
+
+    database credentials, TLS keys, and source code. Write operations can
+
+    modify binary executables, configuration, or deploy backdoors.
+
+    '
+  remediation: "1. Validate the resolved path stays within the base directory:\n\n   base, _ := filepath.Abs(baseDir)\n  \
+    \ target, _ := filepath.Abs(filepath.Join(base, userInput))\n   if !strings.HasPrefix(target, base+string(os.PathSeparator))\
+    \ {\n       http.Error(w, \"Forbidden\", http.StatusForbidden)\n       return\n   }\n\n2. Use filepath.Base() for filename-only\
+    \ operations:\n\n   safeName := filepath.Base(userInput)\n   fullPath := filepath.Join(uploadsDir, safeName)\n\n3. Use\
+    \ github.com/cyphar/filepath-securejoin:\n\n   safePath, err := securejoin.SecureJoin(baseDir, userInput)\n\n4. Reject\
+    \ inputs containing '..' or path separators.\n5. Use file ID mappings instead of raw paths.\n"
+  references:
+  - https://pkg.go.dev/path/filepath#Join
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://github.com/cyphar/filepath-securejoin
+  context_awareness:
+    surrounding_context_patterns:
+    - func\s+\w+\s*\(\s*w\s+http\.ResponseWriter
+    - func\s+\w+\s*\(\s*c\s+\*gin\.Context
+    - func\s+\w+\s*\(\s*ctx\s+echo\.Context
+    - http\.HandleFunc\s*\(
+    taint_source_indicators:
+    - r\.URL\.Query\(\)\.Get\s*\(
+    - r\.FormValue\s*\(
+    - mux\.Vars\s*\(
+    - c\.Param\s*\(
+    - c\.Query\s*\(
+    - chi\.URLParam\s*\(
+    taint_sink_indicators:
+    - filepath\.Join\s*\(
+    - path\.Join\s*\(
+    sanitization_patterns:
+    - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}HasPrefix
+    - filepath\.Base\s*\(
+    - securejoin\.SecureJoin\s*\(
+    - strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Go API handler at /download/{filename} uses filepath.Join(docsDir,
+
+      vars["filename"]) to resolve file paths. The attacker sends a request
+
+      to /download/..%2f..%2f..%2fetc%2fpasswd. Go''s net/http decodes the
+
+      URL, filepath.Join resolves to /etc/passwd, and os.Open reads the file.
+
+      The response exposes the system user listing.
+
+      '
+    example_payload: ..%2f..%2f..%2fetc%2fpasswd
+    attacker_objective: Escape the intended base directory to access arbitrary files through filepath.Join
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-GO-001
+    - PT-GO-003
+    - PT-JS-002
+    - PT-PY-002
+- rule_id: PT-GO-003
+  title: http.ServeFile Path Traversal
+  description: 'Detects path traversal vulnerabilities in Go''s http.ServeFile function where the file path is constructed
+    using user-controlled input. While http.ServeFile includes basic protection by cleaning the URL path with path.Clean,
+    it does NOT protect against traversal when the file path argument itself is derived from user input through other means,
+    such as query parameters, router variables, or custom path parsing. This pattern is frequently found in custom file serving
+    handlers in Go web applications.
+
+    '
+  language: go
+  category: path_traversal
+  severity: High
+  confidence: 0.89
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - http-serve-file
+  - golang
+  - static-files
+  - cwe-22
+  - owasp-a01
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*(?:filepath\.Join\s*\(\s*[^)]*(?:r\.|req\.|param|input|user))
+    description: http.ServeFile with filepath.Join containing user input
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*(?:r\s*\.\s*(?:URL\.Query\s*\(\s*\)\s*\.\s*Get|FormValue|PathValue)\s*\()
+    description: http.ServeFile with direct request parameter
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*(?:filePath|fileName|userPath|docPath|file)\s*\)
+    description: http.ServeFile with common user-controlled variable
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*(?:fmt\.Sprintf\s*\(\s*"[^"]*"\s*,\s*[^)]*(?:r\.|param|input|user))
+    description: http.ServeFile with fmt.Sprintf interpolating user data
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*(?:[^)]*\+\s*(?:r\.|req\.|param|fileName|userInput))
+    description: http.ServeFile with string concatenation of user data
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*(?:mux\.Vars\s*\(\s*r\s*\)\s*\[\s*|chi\.URLParam\s*\(|c\.Param\s*\(|ctx\.Param\s*\()
+    description: http.ServeFile with router framework parameter extraction
+  - type: regex
+    pattern: http\.ServeContent\s*\(\s*w\s*,\s*r\s*,\s*[^,]+,\s*[^,]+,\s*(?:os\.Open\s*\(\s*[^)]*(?:filePath|fileName|userPath|r\.))
+    description: http.ServeContent with os.Open using user-controlled path
+  - type: regex
+    pattern: http\.ServeFile\s*\(\s*\w+\s*,\s*\w+\s*,\s*(?:path)\s*\)[\s\S]{0,5}$
+    description: http.ServeFile with generic path variable at end of handler
+  anti_patterns:
+  - filepath\.Clean\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - if\s+strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."\s*\)
+  - if\s+!strings\.HasPrefix\s*\(
+  - filepath\.Base\s*\(
+  - securejoin\.SecureJoin\s*\(
+  - http\.ServeFile\s*\(\s*w\s*,\s*r\s*,\s*"[^"]*"\s*\)
+  - http\.StripPrefix\s*\(\s*"[^"]*"\s*,\s*http\.FileServer
+  - if\s+filepath\.IsAbs\s*\(
+  - validatePath\s*\(
+  - sanitizePath\s*\(
+  - allowedFiles\[\w+\]
+  - filepath\.EvalSymlinks\s*\(
+  - strings\.ReplaceAll\s*\(\s*\w+\s*,\s*"\.\."\s*,
+  - filepath\.Rel\s*\([^)]+\)[\s\S]{0,100}HasPrefix\s*\(\s*\w+\s*,\s*"\.\."
+  bypass_variants:
+  - description: URL-encoded traversal in request parameter
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Double encoding to bypass net/http URL decode
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte in file path
+    pattern: (?:%00|\\x00)
+  - description: Backslash on Windows Go
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  - description: Path with encoded query components
+    pattern: (?:\?.*(?:%2e%2e|\.\.)[%\/\\\\])
+  evasion_indicators:
+  - URL encoding in file path parameters
+  - Double encoding to bypass HTTP decoding
+  - Backslash on Windows
+  - Encoded path in query string
+  - Path length manipulation
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - r.URL.Query().Get('file') -> filepath.Join -> http.ServeFile
+  - mux.Vars(r)['name'] -> filepath.Join -> http.ServeFile
+  - r.FormValue('doc') -> http.ServeFile
+  - chi.URLParam(r, 'path') -> http.ServeFile
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: http.ServeFile with user-controlled paths serves any file readable by the Go process
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.URL.Query().Get('file')
+    sink: http.ServeFile(w, r, filepath.Join(dir, file))
+    through: query parameter to filepath.Join
+  - source: mux.Vars(r)['name']
+    sink: http.ServeFile(w, r, path)
+    through: router variable extraction
+  - source: r.FormValue('document')
+    sink: http.ServeFile(w, r, filePath)
+    through: form value assignment
+  impact: 'An attacker can download arbitrary files from the server through
+
+    http.ServeFile by injecting traversal sequences into the path parameter.
+
+    Sensitive targets include application configuration, database connection
+
+    strings, TLS private keys, credentials files, and Go source code. On
+
+    Linux deployments, /proc/self/environ reveals environment variables
+
+    containing secrets. The http.ServeFile function properly handles MIME
+
+    types and range requests, making it efficient for attackers to exfiltrate
+
+    large files.
+
+    '
+  remediation: "1. Validate paths before passing to http.ServeFile:\n\n   safePath, err := filepath.Abs(filepath.Join(docRoot,\
+    \ userInput))\n   if err != nil || !strings.HasPrefix(safePath, filepath.Clean(docRoot)+string(os.PathSeparator)) {\n\
+    \       http.Error(w, \"Forbidden\", http.StatusForbidden)\n       return\n   }\n   http.ServeFile(w, r, safePath)\n\n\
+    2. Use http.FileServer with http.Dir for directory-constrained serving:\n\n   http.Handle(\"/static/\", http.StripPrefix(\"\
+    /static/\", http.FileServer(http.Dir(\"./public\"))))\n\n3. Use filepath.Base() for single-file serving.\n4. Implement\
+    \ file ID mappings instead of path parameters.\n5. Use securejoin for safe path construction.\n"
+  references:
+  - https://pkg.go.dev/net/http#ServeFile
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - func\s+\w+\s*\(\s*w\s+http\.ResponseWriter
+    - http\.HandleFunc\s*\(
+    - r\.HandleFunc\s*\(
+    - mux\.HandleFunc\s*\(
+    taint_source_indicators:
+    - r\.URL\.Query\(\)\.Get\s*\(
+    - r\.FormValue\s*\(
+    - mux\.Vars\s*\(
+    - chi\.URLParam\s*\(
+    - c\.Param\s*\(
+    taint_sink_indicators:
+    - http\.ServeFile\s*\(
+    - http\.ServeContent\s*\(
+    sanitization_patterns:
+    - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}HasPrefix
+    - filepath\.Base\s*\(
+    - strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."
+    - securejoin\.SecureJoin\s*\(
+  severity_scoring:
+    severity_weight: 8
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Go handler at /serve?file=intro.pdf calls http.ServeFile(w, r,
+
+      filepath.Join(docsDir, r.URL.Query().Get("file"))). The attacker sends
+
+      GET /serve?file=../../../etc/passwd. filepath.Join resolves to /etc/passwd,
+
+      and http.ServeFile sends the file with proper Content-Type and
+
+      Content-Length headers. The response contains the UNIX password file.
+
+      '
+    example_payload: ../../../etc/passwd
+    attacker_objective: Download arbitrary files from the server through http.ServeFile
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-GO-001
+    - PT-GO-002
+    - PT-GO-006
+    - PT-JS-003
+- rule_id: PT-GO-004
+  title: ioutil.ReadFile / os.ReadFile with User-Controlled Input
+  description: 'Detects usage of Go''s ioutil.ReadFile (deprecated) or os.ReadFile (Go 1.16+) where the file path originates
+    from user-controlled input. These functions read an entire file into memory and are commonly used for configuration loading,
+    template rendering, and data processing. When the path is derived from HTTP parameters, router variables, or form data
+    without validation, attackers can read arbitrary files. The simplicity of these one-liner file reads makes them especially
+    common in quick handlers vulnerable to traversal.
+
+    '
+  language: go
+  category: path_traversal
+  severity: High
+  confidence: 0.91
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - file-read
+  - ioutil
+  - os-readfile
+  - golang
+  - server-side
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:r\s*\.\s*(?:URL\.Query\s*\(\s*\)\s*\.\s*Get|FormValue|PathValue)\s*\()
+    description: ReadFile with HTTP request parameter
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:filePath|fileName|userPath|inputPath|docPath|targetFile)\s*\)
+    description: ReadFile with common user-controlled variable names
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:filepath\.Join\s*\(\s*[^)]*(?:r\.|req\.|param|input|user))
+    description: ReadFile with filepath.Join containing user input
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:fmt\.Sprintf\s*\(\s*"[^"]*"\s*,\s*[^)]*(?:r\.|param|input|user))
+    description: ReadFile with fmt.Sprintf interpolating user data
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:mux\.Vars\s*\(\s*r\s*\)\s*\[\s*|chi\.URLParam\s*\(|c\.Param\s*\(|c\.Query\s*\(|ctx\.Param\s*\(|ctx\.Query\s*\()
+    description: ReadFile with router framework parameter extraction
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:\w+\s*\+\s*(?:r\.|req\.|param|fileName|userInput))
+    description: ReadFile with string concatenation of user data
+  - type: regex
+    pattern: ioutil\.ReadAll\s*\(\s*(?:os\.Open\s*\(\s*[^)]*(?:filePath|fileName|userPath|r\.))
+    description: ioutil.ReadAll wrapping os.Open with user-controlled path
+  - type: regex
+    pattern: (?:ioutil|os)\.ReadFile\s*\(\s*(?:path)\s*\)[\s\S]{0,30}(?:json\.Unmarshal|yaml\.Unmarshal|template\.Parse|w\.Write)
+    description: ReadFile with generic path variable followed by common processing
+  anti_patterns:
+  - filepath\.Clean\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix\s*\(
+  - if\s+strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."\s*\)
+  - if\s+!strings\.HasPrefix\s*\(
+  - filepath\.Base\s*\(
+  - securejoin\.SecureJoin\s*\(
+  - (?:ioutil|os)\.ReadFile\s*\(\s*"[^"]*"\s*\)
+  - if\s+filepath\.IsAbs\s*\(
+  - allowedFiles\[\w+\]
+  - validatePath\s*\(
+  - sanitizePath\s*\(
+  - filepath\.EvalSymlinks\s*\(
+  - filepath\.Rel\s*\([^)]+\)[\s\S]{0,100}HasPrefix\s*\(\s*\w+\s*,\s*"\.\."
+  - io\.LimitReader\s*\(
+  - whitelist\s*\[\s*\w+\s*\]
+  bypass_variants:
+  - description: URL-encoded traversal
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Double URL encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte injection
+    pattern: (?:%00|\\x00)
+  - description: Backslash on Windows Go
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  - description: Absolute path injection
+    pattern: (?:^\/|^[A-Za-z]:\\\\)
+  evasion_indicators:
+  - URL-encoded traversal in HTTP parameters
+  - Double encoding to bypass decode
+  - Null byte injection
+  - Backslash on Windows
+  - Absolute path injection
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - r.URL.Query().Get('file') -> os.ReadFile()
+  - mux.Vars(r)['name'] -> filepath.Join -> os.ReadFile()
+  - c.Query('config') -> os.ReadFile() -> json.Unmarshal
+  - r.FormValue('template') -> ioutil.ReadFile() -> template.Parse
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: ReadFile reads entire file contents into memory, enabling immediate exfiltration of credentials and
+      keys
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: r.URL.Query().Get('file')
+    sink: os.ReadFile(filePath)
+    through: direct parameter or filepath.Join
+  - source: mux.Vars(r)['config']
+    sink: ioutil.ReadFile(configPath)
+    through: router variable to variable assignment
+  - source: c.Query('template')
+    sink: os.ReadFile(filepath.Join(tplDir, name))
+    through: Gin query parameter
+  impact: 'ReadFile reads the entire file into memory and returns it as a byte
+
+    slice, making it trivial for an attacker to exfiltrate complete file
+
+    contents in a single request. High-value targets include: Go application
+
+    configuration files, .env and environment files, TLS private keys and
+
+    certificates, database credential files, SSH private keys, /proc/self/environ
+
+    for environment variable exposure, and application source code. The
+
+    memory-efficient read makes even large files like database dumps
+
+    exfiltrable.
+
+    '
+  remediation: "1. Validate path before reading:\n\n   base, _ := filepath.Abs(dataDir)\n   target, _ := filepath.Abs(filepath.Join(base,\
+    \ userInput))\n   if !strings.HasPrefix(target, base+string(os.PathSeparator)) {\n       http.Error(w, \"Forbidden\",\
+    \ http.StatusForbidden)\n       return\n   }\n   data, err := os.ReadFile(target)\n\n2. Use filepath.Base() for filename-only\
+    \ reads:\n\n   safeName := filepath.Base(userInput)\n   data, err := os.ReadFile(filepath.Join(dataDir, safeName))\n\n\
+    3. Use securejoin for safe path construction.\n4. Implement file allowlists or ID-based lookups.\n5. Set file size limits\
+    \ with io.LimitReader on os.Open.\n"
+  references:
+  - https://pkg.go.dev/os#ReadFile
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  context_awareness:
+    surrounding_context_patterns:
+    - func\s+\w+\s*\(\s*w\s+http\.ResponseWriter
+    - func\s+\w+\s*\(\s*c\s+\*gin\.Context
+    - func\s+\w+\s*\(\s*ctx\s+echo\.Context
+    - http\.HandleFunc\s*\(
+    taint_source_indicators:
+    - r\.URL\.Query\(\)\.Get\s*\(
+    - r\.FormValue\s*\(
+    - mux\.Vars\s*\(
+    - c\.Param\s*\(
+    - c\.Query\s*\(
+    - chi\.URLParam\s*\(
+    taint_sink_indicators:
+    - os\.ReadFile\s*\(
+    - ioutil\.ReadFile\s*\(
+    sanitization_patterns:
+    - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}HasPrefix
+    - filepath\.Base\s*\(
+    - securejoin\.SecureJoin\s*\(
+    - strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Go API handler at GET /api/config?name=app.json reads configuration
+
+      files using data, _ := os.ReadFile(filepath.Join(configDir,
+
+      r.URL.Query().Get("name"))). The attacker sends GET
+
+      /api/config?name=../../../etc/shadow. The os.ReadFile call resolves
+
+      the traversal and reads the shadow password file. The entire file
+
+      contents are returned in the HTTP response, exposing hashed passwords
+
+      for all system accounts.
+
+      '
+    example_payload: ../../../etc/shadow
+    attacker_objective: Read complete file contents including sensitive system and application configuration files
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-GO-001
+    - PT-GO-002
+    - PT-JS-001
+- rule_id: PT-GO-005
+  title: archive/zip Extraction Path Traversal (ZIP Slip)
+  description: 'Detects ZIP Slip vulnerabilities when extracting ZIP or TAR archives using Go''s archive/zip or archive/tar
+    packages without validating that extracted file paths remain within the target directory. Go''s archive packages do not
+    prevent path traversal by default. An attacker can craft malicious archives with entries containing ../../ paths that
+    write files to arbitrary filesystem locations during extraction, leading to remote code execution via binary or script
+    overwrite.
+
+    '
+  language: go
+  category: path_traversal
+  severity: High
+  confidence: 0.91
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - zip-slip
+  - archive-extraction
+  - archive-zip
+  - archive-tar
+  - golang
+  - rce-potential
+  - cwe-22
+  - owasp-a01
+  detection_layer: 2
+  attack_surface_type: api
+  patterns:
+  - type: regex
+    pattern: zip\.OpenReader\s*\(\s*(?:filePath|uploadPath|archivePath|userInput|zipPath|file)\b
+    description: zip.OpenReader with user-controlled path
+  - type: regex
+    pattern: zip\.NewReader\s*\(\s*(?:r\.|req\.|file|reader|body|upload)\b
+    description: zip.NewReader with user-provided reader
+  - type: regex
+    pattern: (?:f|entry|file)\s*\.\s*Name\b[\s\S]{0,300}(?:os\.(?:Create|OpenFile|MkdirAll)\s*\(\s*(?:filepath\.Join|path\.Join|fmt\.Sprintf|target|dest))
+    description: ZIP entry Name used in file creation without validation
+  - type: regex
+    pattern: filepath\.Join\s*\(\s*(?:destDir|outputDir|extractDir|targetDir)\s*,\s*(?:f|entry|file|header)\s*\.\s*Name\s*\)
+    description: filepath.Join with destination directory and entry name
+  - type: regex
+    pattern: tar\.NewReader\s*\(\s*(?:r\.|req\.|file|reader|body|upload)\b
+    description: tar.NewReader with user-provided reader
+  - type: regex
+    pattern: (?:header|hdr)\s*\.\s*Name\b[\s\S]{0,300}(?:os\.(?:Create|OpenFile|MkdirAll)\s*\(\s*(?:filepath\.Join|path\.Join|target|dest))
+    description: TAR header Name used in file creation without validation
+  - type: regex
+    pattern: for\s+_\s*,\s*(?:f|file)\s+:=\s+range\s+\w+\.File\s*\{[\s\S]{0,500}(?:os\.Create|os\.OpenFile|io\.Copy)
+    description: Range over zip.File slice with file operations in loop
+  - type: regex
+    pattern: for\s*\{[\s\S]{0,100}(?:tar|zip)[\s\S]{0,200}(?:header|entry|f)\.\s*Name[\s\S]{0,200}(?:os\.Create|os\.OpenFile|io\.Copy)
+    description: Extraction loop reading archive entries and writing files
+  anti_patterns:
+  - if\s+strings\.Contains\s*\(\s*(?:f|entry|file|header)\s*\.\s*Name\s*,\s*"\.\."\s*\)
+  - if\s+!strings\.HasPrefix\s*\(\s*\w+\s*,\s*(?:destDir|targetDir|outputDir)
+  - filepath\.Clean\s*\(\s*(?:f|entry|file)\s*\.\s*Name\s*\)[\s\S]{0,100}strings\.HasPrefix
+  - filepath\.Abs\s*\([^)]+\)[\s\S]{0,100}strings\.HasPrefix
+  - securejoin\.SecureJoin\s*\(
+  - filepath\.Rel\s*\([^)]+\)[\s\S]{0,100}HasPrefix\s*\(\s*\w+\s*,\s*"\.\."
+  - if\s+filepath\.IsAbs\s*\(\s*(?:f|entry|file|header)\s*\.\s*Name\s*\)
+  - filepath\.EvalSymlinks\s*\(
+  - return\s+fmt\.Errorf\s*\(\s*"[^"]*(?:traversal|malicious|invalid path)[^"]*"
+  - log\.(?:Fatal|Warn|Error)\s*\(\s*"[^"]*(?:traversal|zip slip)[^"]*"
+  - if\s+strings\.HasPrefix\s*\(\s*\w+\s*,\s*string\s*\(\s*os\.PathSeparator\s*\)\s*\)
+  - sanitizeEntryName\s*\(
+  - validateArchiveEntry\s*\(
+  - filepath\.Base\s*\(\s*(?:f|entry|file|header)\s*\.\s*Name\s*\)
+  - if\s+header\.Typeflag\s*==\s*tar\.TypeSymlink
+  bypass_variants:
+  - description: Archive entry with URL-encoded traversal path
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Archive entry with double encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Archive entry with null byte
+    pattern: (?:%00|\\x00)
+  - description: Archive entry with absolute path
+    pattern: (?:^\/|^[A-Za-z]:\\\\)
+  - description: Archive entry with backslash separators for Windows
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  evasion_indicators:
+  - Archive entries with relative traversal paths
+  - Archive entries with absolute paths
+  - Mixed path separators in entry names
+  - Symbolic link entries pointing outside directory
+  - Nested archives containing traversal entries
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - uploaded file -> zip.NewReader -> f.Name -> os.Create(filepath.Join(dest, name))
+  - file path -> zip.OpenReader -> range r.File -> io.Copy
+  - uploaded archive -> tar.NewReader -> header.Name -> os.Create
+  - request body -> zip.NewReader -> entry.Name -> os.OpenFile
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: ZIP Slip writes arbitrary files enabling RCE through binary overwrite, cron injection, or Go source
+      modification
+  business_logic_indicator:
+    financial_impact: true
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-uploaded ZIP/TAR file
+    sink: os.Create(filepath.Join(destDir, f.Name))
+    through: archive entry Name field
+  - source: archive entry header.Name
+    sink: os.OpenFile(target, os.O_WRONLY|os.O_CREATE)
+    through: extraction loop
+  - source: uploaded archive
+    sink: io.Copy(outFile, rc)
+    through: zip.File.Open() to file write
+  impact: 'ZIP Slip in Go enables writing arbitrary files during archive extraction.
+
+    Go binaries often run as system services with elevated privileges.
+
+    Exploitation scenarios include: overwriting the Go binary itself for
+
+    persistent RCE, writing to system cron directories for scheduled
+
+    execution, replacing systemd service units, modifying /etc/passwd or
+
+    authorized_keys for persistent access, and deploying reverse shells.
+
+    Container environments are also vulnerable if the extraction directory
+
+    shares a mount with sensitive paths.
+
+    '
+  remediation: "1. Validate every entry path before extraction:\n\n   func safeExtract(destDir string, f *zip.File) error\
+    \ {\n       target := filepath.Join(destDir, f.Name)\n       realDest, _ := filepath.Abs(destDir)\n       realTarget,\
+    \ _ := filepath.Abs(target)\n       if !strings.HasPrefix(realTarget, realDest+string(os.PathSeparator)) {\n         \
+    \  return fmt.Errorf(\"zip slip detected: %s\", f.Name)\n       }\n       // Safe to extract\n       return nil\n   }\n\
+    \n2. Use github.com/cyphar/filepath-securejoin:\n\n   safePath, err := securejoin.SecureJoin(destDir, f.Name)\n\n3. Reject\
+    \ entries with absolute paths or '..' components.\n4. Check for and skip symbolic links in archives.\n5. Extract to a\
+    \ temporary directory and validate before moving.\n"
+  references:
+  - https://snyk.io/research/zip-slip-vulnerability
+  - https://pkg.go.dev/archive/zip
+  - https://cwe.mitre.org/data/definitions/22.html
+  context_awareness:
+    surrounding_context_patterns:
+    - import\s+"archive/zip"
+    - import\s+"archive/tar"
+    - func\s+\w+\s*\(\s*w\s+http\.ResponseWriter
+    - func\s+\w+(?:Extract|Unzip|Decompress)\s*\(
+    taint_source_indicators:
+    - r\.Body
+    - r\.FormFile\s*\(
+    - f\.Name
+    - header\.Name
+    - entry\.Name
+    taint_sink_indicators:
+    - os\.Create\s*\(
+    - os\.OpenFile\s*\(
+    - os\.MkdirAll\s*\(
+    - io\.Copy\s*\(
+    sanitization_patterns:
+    - strings\.HasPrefix\s*\(\s*\w+\s*,\s*(?:destDir|outputDir)
+    - strings\.Contains\s*\(\s*\w+\s*,\s*"\.\."
+    - filepath\.Base\s*\(\s*(?:f|entry|file|header)\.Name
+    - securejoin\.SecureJoin\s*\(
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An attacker creates a ZIP archive with an entry named
+
+      ../../../usr/local/bin/myservice (the Go binary name). The malicious
+
+      entry contains a backdoored version of the service. When a file
+
+      processing handler extracts the ZIP using range r.File with
+
+      os.Create(filepath.Join(destDir, f.Name)), the binary is overwritten.
+
+      The next service restart or systemd reload executes the attacker''s
+
+      backdoored binary with service credentials.
+
+      '
+    example_payload: ../../../usr/local/bin/myservice
+    attacker_objective: Write arbitrary files outside the extraction directory to achieve remote code execution
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - PT-GO-001
+    - PT-JS-005
+    - PT-PY-005
+    - PT-JAVA-005
+    - PT-PHP-003
+- rule_id: PT-GO-006
+  title: net/http.FileServer Directory Escape
+  description: 'Detects path traversal vulnerabilities in Go''s http.FileServer and http.Dir configuration. While http.FileServer
+    with http.Dir provides basic path cleaning, certain configurations can be exploited: using a custom http.FileSystem implementation
+    without proper validation, combining http.StripPrefix with incorrect prefix patterns, or passing user-controlled values
+    to http.Dir. Additionally, http.FileServer exposes directory listings by default, which aids attackers in reconnaissance.
+    Symlink traversal within the served directory can also escape the intended scope.
+
+    '
+  language: go
+  category: path_traversal
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  tags:
+  - path-traversal
+  - file-server
+  - http-dir
+  - directory-listing
+  - golang
+  - static-files
+  - cwe-22
+  - owasp-a01
+  detection_layer: 3
+  attack_surface_type: web
+  patterns:
+  - type: regex
+    pattern: http\.FileServer\s*\(\s*http\.Dir\s*\(\s*(?:r\s*\.\s*(?:URL\.Query|FormValue)|filePath|userPath|userInput|param)\b
+    description: http.FileServer with http.Dir using user-controlled root
+  - type: regex
+    pattern: http\.Dir\s*\(\s*(?:r\s*\.\s*(?:URL\.Query|FormValue)|os\.Getenv|config|settings)\s*[\(\[]
+    description: http.Dir with dynamic/user-influenced root directory
+  - type: regex
+    pattern: http\.StripPrefix\s*\(\s*""\s*,
+    description: http.StripPrefix with empty prefix (no stripping)
+  - type: regex
+    pattern: http\.FileServer\s*\(\s*(?:customFS|myFS|userFS|dynamicFS)\s*\)
+    description: http.FileServer with custom FileSystem that may lack validation
+  - type: regex
+    pattern: func\s*\(\s*\w+\s+\w+\s*\)\s*Open\s*\(\s*name\s+string\s*\)\s*\(\s*http\.File[\s\S]{0,500}(?:os\.Open|filepath\.Join)(?![\s\S]{0,100}HasPrefix)
+    description: Custom FileSystem Open method without path validation
+  - type: regex
+    pattern: http\.FileServer\s*\(\s*http\.Dir\s*\(\s*(?:filepath\.Join\s*\(\s*[^)]*(?:r\.|req\.|param|input|user))
+    description: http.FileServer with http.Dir root from filepath.Join with user input
+  - type: regex
+    pattern: http\.Handle\s*\(\s*"/"\s*,\s*http\.FileServer\s*\(\s*http\.Dir\s*\(\s*"\.\/"
+    description: http.FileServer serving project root (exposes source code)
+  - type: regex
+    pattern: http\.FileServer\s*\(\s*http\.FS\s*\(\s*(?:os\.DirFS\s*\(\s*(?:userDir|param|input|r\.))
+    description: http.FileServer with os.DirFS using user-controlled directory
+  anti_patterns:
+  - http\.FileServer\s*\(\s*http\.Dir\s*\(\s*"[^"]*"\s*\)\s*\)
+  - http\.StripPrefix\s*\(\s*"[^"]+"\s*,\s*http\.FileServer
+  - noDirectoryListing\s*\(
+  - if\s+strings\.Contains\s*\(\s*r\.URL\.Path\s*,\s*"\.\."\s*\)
+  - func\s*\(\s*\w+\s+\w+\s*\)\s*Open\s*\([^)]*\)[\s\S]{0,300}strings\.HasPrefix
+  - neuteredFileSystem
+  - noDirListing
+  - type\s+\w+\s+struct\s*\{\s*http\.FileSystem\s*\}
+  - http\.Dir\s*\(\s*filepath\.Clean\s*\(
+  - if\s+info\.IsDir\s*\(\s*\)\s*\{[\s\S]{0,100}http\.NotFound
+  - http\.FileServer\s*\(\s*http\.FS\s*\(\s*embed\.
+  - securejoin\.SecureJoin\s*\(
+  - if\s+!strings\.HasPrefix\s*\(\s*name
+  - r\.URL\.Path\s*=\s*path\.Clean\s*\(\s*r\.URL\.Path\s*\)
+  - //go:embed
+  bypass_variants:
+  - description: URL-encoded traversal in HTTP path
+    pattern: (?:%2e%2e%2f|%2e%2e\/|\.\.%2f)
+  - description: Double encoding to bypass http.CleanPath
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - description: Null byte in URL path
+    pattern: (?:%00|\\x00)
+  - description: Backslash traversal on Windows
+    pattern: (?:\.\.\\\\|\.\.%5c)
+  - description: Symlink traversal within served directory
+    pattern: (?:symlink|ln\s+-s)
+  evasion_indicators:
+  - URL encoding in HTTP request path
+  - Double encoding to bypass CleanPath
+  - Symlink creation within served directory
+  - Backslash on Windows Go deployments
+  - Directory listing to discover file structure
+  encoding_variants:
+  - type: url_encoding
+    pattern: (?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)
+  - type: double_encoding
+    pattern: (?:%252e%252e%252f|%252e%252e%255c)
+  - type: null_byte
+    pattern: (?:%00|\\x00)
+  - type: unicode_encoding
+    pattern: (?:%c0%ae%c0%ae%c0%af)
+  multi_function_chain_patterns:
+  - user-controlled http.Dir root -> http.FileServer
+  - custom FileSystem.Open -> os.Open without validation
+  - dynamic StripPrefix -> http.FileServer
+  - config.rootDir -> http.Dir -> http.FileServer
+  privilege_context_flags:
+    requires_auth_context: false
+    admin_only_risk: false
+    escalation_vector: Directory escape through FileServer exposes server filesystem and enables reconnaissance for further
+      attacks
+  business_logic_indicator:
+    financial_impact: false
+    data_exposure_risk: true
+    compliance_relevant: true
+  probable_taint_paths:
+  - source: user-controlled directory path
+    sink: http.Dir(userPath)
+    through: configuration or request parameter
+  - source: HTTP request URL path
+    sink: custom FileSystem.Open(name)
+    through: http.FileServer routing
+  - source: symlink within served directory
+    sink: http.Dir Open()
+    through: filesystem symlink resolution
+  impact: 'Directory escape through http.FileServer enables access to files outside
+
+    the intended static file directory. Combined with default directory
+
+    listing, attackers can enumerate the server filesystem structure, identify
+
+    sensitive files, and download them. Custom FileSystem implementations
+
+    without proper validation are particularly dangerous as they bypass
+
+    http.Dir''s built-in cleaning. Symlink traversal within the served
+
+    directory can access any file on the filesystem even when http.Dir is
+
+    properly configured. This aids in reconnaissance and targeted
+
+    file exfiltration.
+
+    '
+  remediation: "1. Hardcode the http.Dir root to a static path:\n\n   fs := http.FileServer(http.Dir(\"/app/public\"))\n \
+    \  http.Handle(\"/static/\", http.StripPrefix(\"/static/\", fs))\n\n2. Disable directory listing with a custom FileSystem:\n\
+    \n   type neuteredFileSystem struct {\n       fs http.FileSystem\n   }\n   func (nfs neuteredFileSystem) Open(path string)\
+    \ (http.File, error) {\n       f, err := nfs.fs.Open(path)\n       if err != nil { return nil, err }\n       s, _ := f.Stat()\n\
+    \       if s.IsDir() {\n           index := filepath.Join(path, \"index.html\")\n           if _, err := nfs.fs.Open(index);\
+    \ err != nil {\n               closeErr := f.Close()\n               if closeErr != nil { return nil, closeErr }\n   \
+    \            return nil, os.ErrNotExist\n           }\n       }\n       return f, nil\n   }\n\n3. Use embed.FS for embedded\
+    \ static files (Go 1.16+).\n4. Never derive http.Dir root from user input.\n5. Remove or restrict symlinks within served\
+    \ directories.\n"
+  references:
+  - https://pkg.go.dev/net/http#FileServer
+  - https://pkg.go.dev/net/http#Dir
+  - https://cwe.mitre.org/data/definitions/22.html
+  context_awareness:
+    surrounding_context_patterns:
+    - func\s+main\s*\(
+    - http\.ListenAndServe\s*\(
+    - http\.Handle\s*\(
+    - mux\.\w+\s*\(
+    taint_source_indicators:
+    - r\.URL\.Path
+    - r\.URL\.Query\(\)
+    - os\.Getenv\s*\(
+    - config\.[\w.]+
+    taint_sink_indicators:
+    - http\.Dir\s*\(
+    - http\.FileServer\s*\(
+    - http\.StripPrefix\s*\(
+    - os\.DirFS\s*\(
+    sanitization_patterns:
+    - http\.StripPrefix\s*\(\s*"[^"]+"\s*,\s*http\.FileServer
+    - path\.Clean\s*\(
+    - \.IsDir\s*\(\s*\)[\s\S]{0,100}NotFound
+    - embed\.FS
+  severity_scoring:
+    severity_weight: 7
+    risk_score_formula_hint: severity_weight * confidence * (1 - sanitization_coverage)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Go application uses http.FileServer(http.Dir(configuredRoot)) where
+
+      configuredRoot comes from an environment variable set to the application
+
+      root. An attacker sends GET /../../etc/passwd. While http.Dir''s built-in
+
+      cleaning blocks simple traversal, a symlink placed inside the served
+
+      directory (e.g., by an earlier upload vulnerability) at
+
+      /app/public/link -> /etc/ allows GET /static/link/passwd to bypass
+
+      the directory restriction. Additionally, the default directory listing
+
+      reveals all files and subdirectories, aiding reconnaissance.
+
+      '
+    example_payload: ../../etc/passwd
+    attacker_objective: Escape the served directory to access arbitrary files and enumerate the filesystem through directory
+      listing
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: medium
+    sanitization_absence: high
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: false
+    related_rules:
+    - PT-GO-001
+    - PT-GO-003
+    - PT-JS-003
+    - PT-JS-006

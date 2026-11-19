@@ -1,0 +1,303 @@
+rules:
+- rule_id: TS-INJ-010
+  title: TypeScript SQL Injection via Template Literal
+  description: Detects SQL queries built with template literals in TypeScript
+  language: typescript
+  category: injection
+  severity: Critical
+  confidence: 95
+  cwe: 89
+  owasp: A03:2021
+  tags:
+  - sqli
+  - typescript
+  - template-literal
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: (?:query|execute|raw)\s*\(\s*`[^`]*(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*\$\{[^}]*\}
+  - type: regex
+    pattern: createQueryBuilder\s*\([^)]*\)\s*\.where\s*\(\s*`[^`]*\$\{
+  - type: regex
+    pattern: knex\.raw\s*\(\s*`[^`]*\$\{
+  anti_patterns:
+  - pattern: \$\{[^}]*(?:parseInt|Number|sanitize)
+    description: Input sanitized in template
+  - pattern: parameterized|prepared
+    description: Using prepared statements
+  impact: SQL injection through TypeScript template literals
+  remediation: Use parameterized queries with TypeORM, Prisma, or Knex parameter binding
+- rule_id: TS-INJ-011
+  title: TypeScript NoSQL Injection
+  description: Detects NoSQL injection in TypeScript MongoDB operations
+  language: typescript
+  category: injection
+  severity: High
+  confidence: 85
+  cwe: 943
+  owasp: A03:2021
+  tags:
+  - nosql
+  - typescript
+  - mongodb
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: find(?:One)?\s*\(\s*\{\s*\w+\s*:\s*(?:req\.(?:body|query|params)\.\w+|ctx\.\w+)
+  - type: regex
+    pattern: where\s*\(\s*\{\s*\w+\s*:\s*(?:req\.(?:body|query|params))
+  - type: regex
+    pattern: \$where\s*:\s*(?:req\.|ctx\.|input\.)
+  anti_patterns:
+  - pattern: typeof\s+\w+\s*===\s*["\x27]string["\x27]
+    description: Type checking applied
+  - pattern: mongo-sanitize|sanitize
+    description: Input sanitization
+  impact: NoSQL injection can bypass authentication or exfiltrate data
+  remediation: Validate input types, sanitize with mongo-sanitize, avoid $where operator
+- rule_id: TS-INJ-012
+  title: TypeScript Command Injection
+  description: Detects command injection via child_process in TypeScript
+  language: typescript
+  category: injection
+  severity: Critical
+  confidence: 90
+  cwe: 78
+  owasp: A03:2021
+  tags:
+  - cmdi
+  - typescript
+  - child-process
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: exec\s*\(\s*`[^`]*\$\{[^}]*(?:req\.|ctx\.|input|param|user)
+  - type: regex
+    pattern: execSync\s*\(\s*`[^`]*\$\{
+  - type: regex
+    pattern: spawn\s*\(\s*["\x27](?:sh|bash|cmd)["\x27]\s*,\s*\[[^\]]*`[^`]*\$\{
+  anti_patterns:
+  - pattern: execFile\s*\(
+    description: Using execFile without shell
+  - pattern: shell:\s*false
+    description: Shell execution disabled
+  impact: Command injection enables arbitrary code execution
+  remediation: Use execFile with argument arrays, avoid shell interpretation
+- rule_id: TS-AUTH-001
+  title: TypeScript JWT Without Verification
+  description: Detects JWT decoding without signature verification
+  language: typescript
+  category: auth
+  severity: Critical
+  confidence: 90
+  cwe: 347
+  owasp: A02:2021
+  tags:
+  - jwt
+  - typescript
+  - auth-bypass
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: jwt\.decode\s*\(\s*\w+\s*,\s*\{\s*complete:\s*true\s*\}\s*\)
+  - type: regex
+    pattern: jsonwebtoken\.decode\s*\(
+  - type: regex
+    pattern: atob\s*\(\s*\w+\.split\s*\(\s*["\x27]\.["\x27]\s*\)\s*\[\s*1\s*\]\s*\)
+  anti_patterns:
+  - pattern: jwt\.verify\s*\(
+    description: Using jwt.verify
+  - pattern: algorithms:\s*\[
+    description: Algorithm restriction specified
+  impact: JWT decode without verify allows forged tokens to bypass authentication
+  remediation: Always use jwt.verify() with algorithm restriction and strong secret/key
+- rule_id: TS-AUTH-002
+  title: TypeScript Insecure Session Configuration
+  description: Detects insecure session cookie settings in TypeScript web apps
+  language: typescript
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 614
+  owasp: A07:2021
+  tags:
+  - session
+  - typescript
+  - cookie
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: session\s*\(\s*\{[^}]*secure\s*:\s*false
+  - type: regex
+    pattern: session\s*\(\s*\{[^}]*httpOnly\s*:\s*false
+  - type: regex
+    pattern: cookie\s*:\s*\{[^}]*sameSite\s*:\s*["\x27]none["\x27][^}]*(?!secure\s*:\s*true)
+  anti_patterns:
+  - pattern: secure:\s*true[^}]*httpOnly:\s*true
+    description: Both security flags set
+  impact: Insecure cookies can be stolen via XSS or transmitted over unencrypted connections
+  remediation: 'Set secure: true, httpOnly: true, sameSite: ''strict'', and use HTTPS'
+- rule_id: TS-AUTH-003
+  title: TypeScript Hardcoded Credentials
+  description: Detects hardcoded secrets in TypeScript source code
+  language: typescript
+  category: auth
+  severity: High
+  confidence: 85
+  cwe: 798
+  owasp: A07:2021
+  tags:
+  - hardcoded-creds
+  - typescript
+  - secrets
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: const\s+\w*(?:password|secret|apiKey|api_key|token|privateKey)\w*\s*(?::\s*string\s*)?=\s*["\x27][^"\x27]{8,}["\x27]
+  - type: regex
+    pattern: export\s+const\s+\w*(?:PASSWORD|SECRET|API_KEY|TOKEN)\w*\s*=\s*["\x27][^"\x27]{8,}["\x27]
+  anti_patterns:
+  - pattern: process\.env\.
+    description: Reading from environment
+  - pattern: '["\x27]{2}'
+    description: Empty string placeholder
+  - pattern: placeholder|example|changeme
+    description: Placeholder value
+  impact: Hardcoded credentials in source code can be extracted from repositories
+  remediation: Use environment variables (process.env) or secret management services
+- rule_id: TS-CRYPTO-001
+  title: TypeScript Weak Cryptography
+  description: Detects weak hashing or encryption in TypeScript
+  language: typescript
+  category: crypto
+  severity: High
+  confidence: 90
+  cwe: 327
+  owasp: A02:2021
+  tags:
+  - crypto
+  - typescript
+  - weak-algorithm
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: createHash\s*\(\s*["\x27](?:md5|sha1)["\x27]\s*\)
+  - type: regex
+    pattern: createCipher\s*\(\s*["\x27](?:des|rc4|blowfish)
+  - type: regex
+    pattern: CryptoJS\.(?:MD5|SHA1|DES|RC4)\s*\(
+  anti_patterns:
+  - pattern: sha256|sha384|sha512|aes-256-gcm
+    description: Using strong algorithms
+  impact: Weak algorithms can be broken, compromising data integrity
+  remediation: Use sha256+ for hashing, aes-256-gcm for encryption, bcrypt/argon2 for passwords
+- rule_id: TS-XSS-001
+  title: TypeScript React dangerouslySetInnerHTML
+  description: Detects use of dangerouslySetInnerHTML with user input in TypeScript React
+  language: typescript
+  category: xss
+  severity: High
+  confidence: 85
+  cwe: 79
+  owasp: A03:2021
+  tags:
+  - xss
+  - typescript
+  - react
+  - dangerouslySetInnerHTML
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?:props\.|state\.|data\.|response\.)
+  - type: regex
+    pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*\w+\s*\}
+  anti_patterns:
+  - pattern: DOMPurify\.sanitize|sanitizeHtml
+    description: HTML sanitization applied
+  - pattern: dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*["\x27]
+    description: Static HTML content
+  impact: Cross-site scripting through unsanitized HTML injection in React components
+  remediation: Use DOMPurify.sanitize() before setting innerHTML, prefer JSX text content
+- rule_id: TS-SSRF-001
+  title: TypeScript Server-Side Request Forgery
+  description: Detects SSRF vulnerabilities in TypeScript server-side code
+  language: typescript
+  category: ssrf
+  severity: High
+  confidence: 80
+  cwe: 918
+  owasp: A10:2021
+  tags:
+  - ssrf
+  - typescript
+  - axios
+  - fetch
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: axios\.get\s*\(\s*(?:req\.\w+\.\w+|`[^`]*\$\{)
+  - type: regex
+    pattern: fetch\s*\(\s*(?:req\.\w+\.\w+|`[^`]*\$\{[^}]*req\.)
+  - type: regex
+    pattern: got\s*\(\s*(?:req\.(?:body|query|params)\.\w+|`[^`]*\$\{)
+  anti_patterns:
+  - pattern: isAllowedUrl|validateUrl|whitelist
+    description: URL validation present
+  impact: SSRF allows access to internal services and cloud metadata
+  remediation: Validate URLs against allowlist, block internal IP ranges
+- rule_id: TS-DESER-001
+  title: TypeScript Unsafe Type Assertion
+  description: Detects unsafe type assertions on external data in TypeScript
+  language: typescript
+  category: injection
+  severity: Medium
+  confidence: 75
+  cwe: 20
+  owasp: A03:2021
+  tags:
+  - type-safety
+  - typescript
+  - validation
+  detection_layer: 2
+  patterns:
+  - type: regex
+    pattern: JSON\.parse\s*\([^)]*\)\s+as\s+\w+
+  - type: regex
+    pattern: <\w+>\s*JSON\.parse\s*\(
+  - type: regex
+    pattern: req\.body\s+as\s+\w+(?!.*(?:validate|parse|schema))
+  anti_patterns:
+  - pattern: zod|yup|joi|class-validator
+    description: Runtime validation library
+  - pattern: validate|parse|safeParse
+    description: Schema validation applied
+  impact: Unvalidated type assertions can lead to runtime type confusion
+  remediation: Use Zod, Yup, or class-validator for runtime type validation of external data
+- rule_id: TS-PT-001
+  title: TypeScript Path Traversal
+  description: Detects path traversal in TypeScript file operations
+  language: typescript
+  category: path_traversal
+  severity: High
+  confidence: 85
+  cwe: 22
+  owasp: A01:2021
+  tags:
+  - path-traversal
+  - typescript
+  - lfi
+  detection_layer: 1
+  patterns:
+  - type: regex
+    pattern: readFileSync\s*\(\s*(?:req\.\w+\.\w+|`[^`]*\$\{)
+  - type: regex
+    pattern: path\.join\s*\(\s*\w+\s*,\s*(?:req\.\w+\.\w+|params\.\w+)
+  - type: regex
+    pattern: createReadStream\s*\(\s*(?:req\.\w+|`[^`]*\$\{)
+  anti_patterns:
+  - pattern: path\.resolve.*\.startsWith
+    description: Path normalization with prefix check
+  - pattern: path\.normalize
+    description: Path normalization
+  impact: Path traversal allows reading arbitrary files from the server
+  remediation: Use path.resolve() and verify result starts with expected base directory

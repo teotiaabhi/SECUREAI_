@@ -1,0 +1,379 @@
+rules:
+- rule_id: SUPPLY-SEC-001
+  title: Typosquatting Package Name
+  description: 'Detects common typosquatting patterns in package names.
+
+    '
+  language: javascript
+  category: devops
+  severity: Critical
+  confidence: 0.82
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 3
+  tags:
+  - supply-chain
+  - typosquatting
+  - npm
+  patterns:
+  - type: regex
+    pattern: '"(?:lodashs|loadash|lodash-es-core|req-uest|crossenv|cross-env\.js|event-stream2|colors\.js|babelcli|babel-clit)"'
+  anti_patterns:
+  - lodash
+  - cross-env
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-002
+  title: Postinstall Script Execution
+  description: 'Detects npm packages with postinstall scripts that execute binaries.
+
+    '
+  language: javascript
+  category: devops
+  severity: High
+  confidence: 0.8
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - postinstall
+  - npm
+  patterns:
+  - type: regex
+    pattern: '"(?:postinstall|preinstall|install)":\s*"(?:node|sh|bash|python|curl|wget)\b'
+  anti_patterns:
+  - node-gyp
+  - husky
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-003
+  title: GitHub Actions Token Exfiltration
+  description: 'Detects patterns that exfiltrate GitHub tokens or secrets.
+
+    '
+  language: github_actions
+  category: secrets
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - token-exfil
+  - github-actions
+  patterns:
+  - type: regex
+    pattern: curl\s+.*-d\s+.*\$\{\{\s*secrets\.
+  - type: regex
+    pattern: curl\s+.*\$\{\{\s*github\.token\s*\}\}
+  - type: regex
+    pattern: wget\s+.*\?.*\$\{\{\s*secrets\.
+  anti_patterns:
+  - GITHUB_API
+  - api.github.com
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: SUPPLY-SEC-004
+  title: Dependency Confusion Attack Vector
+  description: 'Detects private package names that could be claimed on public registries.
+
+    '
+  language: javascript
+  category: devops
+  severity: High
+  confidence: 0.75
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 2
+  tags:
+  - supply-chain
+  - dependency-confusion
+  patterns:
+  - type: regex
+    pattern: '"@(?!types/|babel/|angular/|vue/|react-|testing-library/)\w+/\w+":\s*"(?:\^|~|>=)'
+  anti_patterns:
+  - registry
+  - publishConfig
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-005
+  title: Python setup.py Malicious Install
+  description: 'Detects setup.py with code execution during install.
+
+    '
+  language: python
+  category: devops
+  severity: High
+  confidence: 0.82
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - setup-py
+  - python
+  patterns:
+  - type: regex
+    pattern: class\s+\w*(?:Install|PostInstall)\w*.*cmdclass
+  - type: regex
+    pattern: cmdclass\s*=\s*\{.*["\x27]install["\x27]
+  anti_patterns:
+  - build_ext
+  - compile
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-006
+  title: Docker Image From Unknown Registry
+  description: 'Detects Docker images from untrusted or unknown registries.
+
+    '
+  language: dockerfile
+  category: devops
+  severity: High
+  confidence: 0.78
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - docker
+  - registry
+  patterns:
+  - type: regex
+    pattern: FROM\s+(?!docker\.io|ghcr\.io|gcr\.io|mcr\.microsoft\.com|public\.ecr\.aws|registry\.access\.redhat\.com)[\w.-]+\.\w+/
+  anti_patterns:
+  - docker.io
+  - ecr
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-007
+  title: Terraform Module From Untrusted Source
+  description: 'Detects Terraform modules loaded from untrusted sources.
+
+    '
+  language: terraform
+  category: devops
+  severity: High
+  confidence: 0.8
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - terraform
+  - module
+  patterns:
+  - type: regex
+    pattern: source\s*=\s*"(?:git::|github\.com/|https?://)[^"]*"
+  anti_patterns:
+  - registry.terraform.io
+  - hashicorp/
+  - ref=
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-008
+  title: Maven Repository Without Checksum Verification
+  description: 'Detects Maven repositories configured without verification.
+
+    '
+  language: xml
+  category: devops
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-345
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - maven
+  - checksum
+  patterns:
+  - type: regex
+    pattern: <checksumPolicy>ignore</checksumPolicy>
+  - type: regex
+    pattern: <releases>\s*<enabled>true</enabled>\s*</releases>
+  anti_patterns:
+  - checksumPolicy>fail
+  - checksumPolicy>warn
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-009
+  title: Pip Install from URL
+  description: 'Detects pip installing packages directly from URLs.
+
+    '
+  language: python
+  category: devops
+  severity: Medium
+  confidence: 0.82
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - pip
+  - url
+  patterns:
+  - type: regex
+    pattern: pip\s+install\s+(?:--extra-index-url|--index-url|--find-links)\s+https?://
+  - type: regex
+    pattern: pip\s+install\s+https?://
+  anti_patterns:
+  - pypi.org
+  - --hash
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-010
+  title: Go Module Replace with Local Path
+  description: 'Detects Go module replace directives pointing to external or local paths.
+
+    '
+  language: go
+  category: devops
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-829
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - go-modules
+  - replace
+  patterns:
+  - type: regex
+    pattern: replace\s+\S+\s+=>\s+(?:\.\.?/|/)
+  anti_patterns:
+  - '# temporary'
+  - // local
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-011
+  title: CI/CD Pipeline Secret Injection
+  description: 'Detects secrets being injected into CI pipeline via commit messages or branch names.
+
+    '
+  language: github_actions
+  category: secrets
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 2
+  tags:
+  - supply-chain
+  - ci-cd
+  - injection
+  patterns:
+  - type: regex
+    pattern: \$\{\{\s*github\.event\.(?:head_commit\.message|commits\[\d+\]\.message)
+  - type: regex
+    pattern: \$\{\{\s*github\.event\.(?:pull_request\.body|issue\.body)
+  anti_patterns:
+  - sanitize
+  - escape
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: SUPPLY-SEC-012
+  title: Container Escape via Mounted Docker Socket
+  description: 'Detects Docker socket mounted inside containers.
+
+    '
+  language: kubernetes
+  category: devops
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - docker-socket
+  - container-escape
+  patterns:
+  - type: regex
+    pattern: /var/run/docker\.sock
+  - type: regex
+    pattern: docker\.sock
+  anti_patterns:
+  - '# CI/CD only'
+  - 'readOnly: true'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-013
+  title: Helm Values Rendered Without Escaping
+  description: 'Detects Helm template rendering user values without escaping.
+
+    '
+  language: helm
+  category: devops
+  severity: High
+  confidence: 0.85
+  cwe: CWE-94
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - helm
+  - template-injection
+  patterns:
+  - type: regex
+    pattern: \{\{\s*\.Values\.\w+\s*\}\}(?!\s*\|)
+  anti_patterns:
+  - '| quote'
+  - '| toYaml'
+  - '| b64enc'
+  - '| nindent'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-014
+  title: Serverless IAM Wildcard Permissions
+  description: 'Detects serverless functions with wildcard IAM permissions.
+
+    '
+  language: yaml
+  category: devops
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - supply-chain
+  - serverless
+  - iam
+  patterns:
+  - type: regex
+    pattern: Action:\s*["\x27]?\*["\x27]?\s*$
+  - type: regex
+    pattern: Resource:\s*["\x27]?\*["\x27]?\s*$
+  anti_patterns:
+  - 'Condition:'
+  - '# restricted'
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging
+- rule_id: SUPPLY-SEC-015
+  title: Lock File Tampering Indicator
+  description: 'Detects inconsistencies suggesting lock file manipulation.
+
+    '
+  language: javascript
+  category: devops
+  severity: High
+  confidence: 0.75
+  cwe: CWE-345
+  owasp: A08:2021-Software-and-Data-Integrity-Failures
+  detection_layer: 3
+  tags:
+  - supply-chain
+  - lockfile
+  - integrity
+  patterns:
+  - type: regex
+    pattern: '"resolved":\s*"https?://(?!registry\.npmjs\.org|registry\.yarnpkg\.com)'
+  anti_patterns:
+  - registry.npmjs.org
+  - registry.yarnpkg.com
+  impact: Infrastructure misconfigurations can expose systems to attack and data breaches
+  remediation: Follow security hardening guides, implement least privilege, enable audit logging

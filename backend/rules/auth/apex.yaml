@@ -1,0 +1,260 @@
+rules:
+- rule_id: APEX-AUTH-001
+  title: Missing FLS Check
+  description: 'Detects field-level security bypass in Apex CRUD operations.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - apex
+  - fls
+  - field-security
+  patterns:
+  - type: regex
+    pattern: (?:insert|update|delete|upsert)\s+\w+
+  anti_patterns:
+  - isAccessible()
+  - isCreateable()
+  - isUpdateable()
+  - isDeletable()
+  - Schema.sObjectType
+  - stripInaccessible
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-AUTH-002
+  title: Object-Level Security Bypass
+  description: 'Detects SOQL queries without object-level permission checks.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.82
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - apex
+  - ols
+  - object-security
+  patterns:
+  - type: regex
+    pattern: \[SELECT\s+.*FROM\s+\w+\b
+  - type: regex
+    pattern: Database\.query\s*\(
+  anti_patterns:
+  - WITH SECURITY_ENFORCED
+  - isAccessible()
+  - USER_MODE
+  - stripInaccessible
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-AUTH-003
+  title: Running Apex Without Sharing
+  description: 'Detects classes declared without sharing enforcement.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.88
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - apex
+  - sharing
+  - record-access
+  patterns:
+  - type: regex
+    pattern: class\s+\w+\s*\{
+  - type: regex
+    pattern: without\s+sharing
+  anti_patterns:
+  - with sharing
+  - inherited sharing
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-CRYPTO-001
+  title: Weak Encryption in Apex
+  description: 'Detects deprecated or weak crypto algorithms.
+
+    '
+  language: apex
+  category: crypto
+  severity: High
+  confidence: 0.88
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - apex
+  - crypto
+  - weak-algorithm
+  patterns:
+  - type: regex
+    pattern: Crypto\.encrypt\s*\(\s*["\x27](?:DES|DESede|ECB)["\x27]
+  - type: regex
+    pattern: EncodingUtil\.convertToHex\s*\(\s*Crypto\.generateDigest\s*\(\s*["\x27]MD5["\x27]
+  anti_patterns:
+  - AES256
+  - SHA256
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: APEX-CRYPTO-002
+  title: Hardcoded Encryption Key
+  description: 'Detects hardcoded encryption keys in Apex code.
+
+    '
+  language: apex
+  category: crypto
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-321
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - apex
+  - crypto
+  - hardcoded-key
+  patterns:
+  - type: regex
+    pattern: Blob\.valueOf\s*\(\s*["\x27][A-Za-z0-9+/=]{16,}["\x27]\s*\)
+  - type: regex
+    pattern: EncodingUtil\.base64Decode\s*\(\s*["\x27][A-Za-z0-9+/=]{16,}["\x27]\s*\)
+  anti_patterns:
+  - Custom_Setting
+  - Metadata
+  - NamedCredential
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: APEX-SEC-001
+  title: Lightning Component Aura Enabled Without Auth
+  description: 'Detects AuraEnabled methods without permission checks.
+
+    '
+  language: apex
+  category: auth
+  severity: High
+  confidence: 0.8
+  cwe: CWE-862
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - apex
+  - aura
+  - lightning
+  patterns:
+  - type: regex
+    pattern: '@AuraEnabled\b'
+  anti_patterns:
+  - FeatureManagement
+  - hasPermission
+  - Schema.sObjectType
+  - isAccessible
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-SEC-002
+  title: Callout Without Certificate Verification
+  description: 'Detects HTTP callouts without proper certificate validation.
+
+    '
+  language: apex
+  category: framework_misuse
+  severity: High
+  confidence: 0.82
+  cwe: CWE-295
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - apex
+  - callout
+  - certificate
+  patterns:
+  - type: regex
+    pattern: Http\s+\w+\s*=\s*new\s+Http\s*\(
+  - type: regex
+    pattern: HttpRequest\s+\w+\s*=\s*new\s+HttpRequest\s*\(
+  anti_patterns:
+  - setClientCertificateName
+  - Named Credential
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: APEX-SEC-003
+  title: Debug Log Sensitive Data
+  description: 'Detects logging of sensitive information in debug statements.
+
+    '
+  language: apex
+  category: secrets
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - apex
+  - debug
+  - logging
+  patterns:
+  - type: regex
+    pattern: System\.debug\s*\(.*(?:password|secret|token|key|credential|ssn)
+  anti_patterns:
+  - mask
+  - '****'
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: APEX-SEC-004
+  title: Platform Event Without Filtering
+  description: 'Detects platform event publishing without field filtering.
+
+    '
+  language: apex
+  category: auth
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-200
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - apex
+  - platform-event
+  - data-exposure
+  patterns:
+  - type: regex
+    pattern: EventBus\.publish\s*\(
+  anti_patterns:
+  - stripInaccessible
+  - isAccessible
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: APEX-SEC-005
+  title: Unescaped Merge Field in Email Template
+  description: 'Detects merge fields in email templates without escaping.
+
+    '
+  language: apex
+  category: xss
+  severity: Medium
+  confidence: 0.78
+  cwe: CWE-79
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - apex
+  - email
+  - xss
+  patterns:
+  - type: regex
+    pattern: setHtmlBody\s*\(.*(?:\+|\{)
+  anti_patterns:
+  - htmlEncode
+  - escapeHtml4
+  impact: Cross-site scripting enables session hijacking, credential theft, and website defacement
+  remediation: Apply context-aware output encoding and use Content Security Policy headers

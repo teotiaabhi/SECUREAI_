@@ -1,0 +1,1299 @@
+# ============================================================================
+# SSRF Detection Rules - JavaScript / Node.js
+# Ruleset Version: 3.0.0
+# Last Updated: 2025-01-15
+# Category: Server-Side Request Forgery (CWE-918)
+# Language: JavaScript / Node.js
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # SSRF-JS-001: fetch/axios/got with user-controlled URL
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JS-001"
+    title: "HTTP Client with User-Controlled URL (fetch/axios/got)"
+    description: >
+      Detects usage of popular Node.js HTTP client libraries (fetch, axios, got,
+      node-fetch, undici) where the target URL is derived from user-controlled
+      input such as query parameters, request body fields, or HTTP headers.
+      An attacker can leverage this to perform Server-Side Request Forgery,
+      reaching internal services, cloud metadata endpoints, or other restricted
+      resources from the server context.
+    language: javascript
+    category: ssrf
+    severity: High
+    confidence: 0.92
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - fetch
+      - axios
+      - got
+      - node-fetch
+      - undici
+      - user-input
+      - http-client
+      - server-side
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'fetch\s*\(\s*(req\.(query|body|params|headers)\s*[\.\[])'
+        description: "fetch() called with request parameter as URL"
+      - type: regex
+        pattern: 'axios\s*\.\s*(get|post|put|delete|patch|head|options|request)\s*\(\s*(req\.(query|body|params|headers)\s*[\.\[])'
+        description: "axios HTTP method with user-controlled URL from request object"
+      - type: regex
+        pattern: 'got\s*\(\s*(req\.(query|body|params|headers)\s*[\.\[])'
+        description: "got() called with user-controlled URL"
+      - type: regex
+        pattern: '(fetch|axios|got|needle|superagent|undici\.request)\s*\(\s*[`\x27"]?\s*\$\{.*?(req\.(query|body|params)|userInput|url|uri|endpoint|target|destination)'
+        description: "HTTP client with template literal containing user input"
+      - type: regex
+        pattern: '(const|let|var)\s+\w*(url|uri|endpoint|target|link|href|dest)\w*\s*=\s*req\.(query|body|params|headers)\b.*\n.*?(fetch|axios|got|request|needle)\s*\('
+        description: "Variable assigned from request used shortly after in HTTP client"
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*req\.(query|body|params)\s*[\.\[].*?\)\s*;\s*.*?(fetch|axios|got)\s*\('
+        description: "URL constructed from user input then passed to HTTP client"
+      - type: regex
+        pattern: '(node-fetch|cross-fetch|isomorphic-fetch)\s*\(\s*(?:req\.(?:query|body|params)[\.\[]|ctx\.(?:query|request\.body)[\.\[])'
+        description: "Popular fetch polyfills with user-controlled URL"
+      - type: regex
+        pattern: 'undici\s*\.\s*(request|fetch|stream|pipeline)\s*\(\s*(?:req\.(?:query|body|params)|ctx\.(?:query|request))\s*[\.\[]'
+        description: "Undici HTTP client with user-controlled URL input"
+    anti_patterns:
+      - 'fetch\s*\(\s*[`\x27"](https?://(?:api\.|www\.)[a-zA-Z0-9]+\.(?:com|org|io|net))[`\x27"]'
+      - 'axios\s*\.\s*get\s*\(\s*[`\x27"]/api/'
+      - 'fetch\s*\(\s*[`\x27"]/(?:api|static|assets|public)/'
+      - 'new\s+URL\s*\(\s*[`\x27"]https?://(?:localhost|127\.0\.0\.1):\d+/api/'
+      - 'axios\s*\.\s*create\s*\(\s*\{\s*baseURL\s*:\s*[`\x27"]https?://(?:api\.|internal\.)'
+      - 'process\.env\.\w+(?:URL|ENDPOINT|HOST|BASE)'
+      - 'config\s*\.\s*(?:api|service|backend)\s*\.\s*(?:url|endpoint|base)'
+      - '\.defaults\.baseURL\s*='
+      - 'fetch\s*\(\s*(?:API_URL|BASE_URL|SERVICE_URL|ENDPOINT)\s*\+\s*[`\x27"]/'
+      - 'const\s+\w+\s*=\s*require\s*\(\s*[`\x27"](?:jest|mocha|chai|sinon|nock)'
+      - 'describe\s*\(\s*[`\x27"].*[`\x27"]\s*,\s*(?:function|\(\s*\))\s*(?:=>)?\s*\{'
+      - 'it\s*\(\s*[`\x27"].*[`\x27"]\s*,\s*(?:function|\(\s*\))\s*(?:=>)?\s*\{'
+      - '(?:mock|stub|fake|spy)\s*\(\s*(?:fetch|axios|got)'
+      - 'nock\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\(\s*[`\x27"](?:axios|node-fetch|got)'
+    bypass_variants:
+      - description: "Unicode normalization bypass for URL validation"
+        pattern: '(?:url|uri|endpoint)\s*=\s*.*?(?:normalize|NFC|NFD|NFKC|NFKD|replace\s*\(\s*/[\\\\]u)'
+      - description: "URL encoding bypass to evade pattern matching"
+        pattern: '(?:encodeURI|encodeURIComponent|escape)\s*\(\s*(?:req\.|ctx\.|params\.|query\.)'
+      - description: "Protocol-relative URL bypass (//internal-host)"
+        pattern: '(?:url|uri|endpoint)\s*=\s*[`\x27"]//[`\x27"]\s*\+\s*(?:req\.|userInput|ctx\.)'
+      - description: "IPv6 address notation bypass ([::1] or [::])"
+        pattern: '(?:url|uri)\s*=.*?\[\s*::(?:1|ffff:\d+\.\d+\.\d+\.\d+)?\s*\]'
+      - description: "URL fragment or auth section bypass (user@host)"
+        pattern: '(?:url|uri)\s*=.*?(?:@|#).*?(?:req\.|userInput|ctx\.)'
+    evasion_indicators:
+      - "URL shortener service redirection"
+      - "HTTP 3xx redirect chain to internal resource"
+      - "DNS CNAME record pointing to internal IP"
+      - "Protocol smuggling via HTTP/0.9 or gopher://"
+      - "IPv4-mapped IPv6 address (::ffff:127.0.0.1)"
+      - "Decimal or octal IP address notation"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%25(?:30|31|32|37)|%(?:30|31|32|37))\d'
+      - type: "unicode_encoding"
+        pattern: '(?:\\u(?:0030|0031|0032|0039|FF10|FF19))'
+      - type: "double_encoding"
+        pattern: '%25(?:32|33|36|37)(?:%25)?[0-9A-Fa-f]'
+      - type: "mixed_encoding"
+        pattern: '(?:%[0-9A-Fa-f]{2}){2,}.*(?:127|169|172|192|10)\.'
+    multi_function_chain_patterns:
+      - "req.query -> url.parse() -> http.request()"
+      - "req.body.url -> new URL() -> fetch()"
+      - "ctx.request.body -> axios.get()"
+      - "req.params -> got() -> response.pipe()"
+      - "express.Router -> req.query.url -> node-fetch()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Server-side network access enables lateral movement and cloud metadata theft"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.url"
+        sink: "fetch(url)"
+        through: "direct assignment or string concatenation"
+      - source: "req.body.endpoint"
+        sink: "axios.get(endpoint)"
+        through: "variable assignment from request body"
+      - source: "req.params.target"
+        sink: "got(target)"
+        through: "route parameter extraction"
+    impact: |
+      - Access to internal services (databases, caches, admin panels) not exposed to the internet.
+      - Retrieval of cloud provider metadata credentials (AWS IAM, GCP service accounts).
+      - Port scanning and service enumeration of internal network infrastructure.
+      - Exfiltration of sensitive data from internal APIs and microservices.
+      - Potential for chaining with other vulnerabilities (RCE, auth bypass) via internal endpoints.
+    remediation: |
+      1. Implement a strict URL allowlist for permitted destination hosts and protocols:
+         ```javascript
+         const ALLOWED_HOSTS = new Set(['api.example.com', 'cdn.example.com']);
+         const ALLOWED_PROTOCOLS = new Set(['https:']);
+
+         function validateUrl(userUrl) {
+           const parsed = new URL(userUrl);
+           if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
+             throw new Error('Protocol not allowed');
+           }
+           if (!ALLOWED_HOSTS.has(parsed.hostname)) {
+             throw new Error('Host not allowed');
+           }
+           // Resolve DNS and verify the IP is not internal
+           const addresses = await dns.resolve4(parsed.hostname);
+           for (const addr of addresses) {
+             if (isPrivateIP(addr)) {
+               throw new Error('Internal IP not allowed');
+             }
+           }
+           return parsed.toString();
+         }
+         ```
+      2. Use a dedicated SSRF protection library (e.g., ssrf-req-filter).
+      3. Resolve DNS before making requests and validate resolved IPs are not RFC1918/loopback.
+      4. Disable HTTP redirects or validate each redirect destination.
+      5. Deploy network-level segmentation to limit the server's outbound access.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+      - "https://portswigger.net/web-security/ssrf"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(get|post|put|delete|patch)\s*\('
+        - 'router\.(get|post|put|delete|patch)\s*\('
+        - 'async\s+(?:function\s+)?\w+\s*\(req\s*,\s*res'
+        - 'exports\.\w+\s*=\s*async\s*\(req\s*,'
+      taint_source_indicators:
+        - 'req\.query\.\w+'
+        - 'req\.body\.\w+'
+        - 'req\.params\.\w+'
+        - 'req\.headers\[.*?\]'
+        - 'ctx\.request\.body\.\w+'
+        - 'ctx\.query\.\w+'
+      taint_sink_indicators:
+        - 'fetch\s*\('
+        - 'axios\s*\.\s*(get|post|put|delete|request)\s*\('
+        - 'got\s*\('
+        - 'http\.request\s*\('
+        - 'https\.request\s*\('
+        - 'undici\.request\s*\('
+      sanitization_patterns:
+        - 'isPrivateIP\s*\('
+        - 'isInternalIP\s*\('
+        - 'validateUrl\s*\('
+        - 'allowlist.*(?:includes|has)\s*\('
+        - 'whitelist.*(?:includes|has)\s*\('
+        - 'ssrf.*filter'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + privilege_escalation_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker sends a crafted request to a proxy endpoint:
+        GET /api/proxy?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+        The server-side code executes: fetch(req.query.url)
+        This retrieves AWS IAM temporary credentials from the EC2 metadata service,
+        which the attacker uses to access S3 buckets, DynamoDB tables, and other AWS resources.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/admin-role"
+      attacker_objective: "Steal cloud infrastructure credentials and gain unauthorized access to internal services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JS-004"
+        - "SSRF-JS-005"
+        - "SSRF-JS-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JS-002: DNS Rebinding via request library
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JS-002"
+    title: "DNS Rebinding Attack via HTTP Request Library"
+    description: >
+      Detects patterns susceptible to DNS rebinding attacks where an attacker
+      uses a domain that initially resolves to a public IP to pass validation,
+      then rapidly switches DNS resolution to an internal IP address. This
+      bypasses hostname-based SSRF protections by exploiting the time gap
+      between DNS validation and the actual HTTP connection. Commonly targets
+      the deprecated `request` library, http/https modules, and any HTTP
+      client that does not pin DNS resolution.
+    language: javascript
+    category: ssrf
+    severity: High
+    confidence: 0.88
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - dns-rebinding
+      - request-library
+      - toctou
+      - dns-pinning
+      - http-module
+      - time-of-check
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'request\s*\(\s*\{[^}]*url\s*:\s*(?:req\.|ctx\.|params\.|userInput|data\.)'
+        description: "Deprecated request library with user-controlled URL in options"
+      - type: regex
+        pattern: 'dns\s*\.\s*(?:resolve|lookup)\s*\(.*?\)\s*(?:\.then|,\s*(?:function|\())[^;]*?(?:fetch|axios|got|request|http\.request)\s*\('
+        description: "DNS pre-validation followed by HTTP request (TOCTOU-vulnerable)"
+      - type: regex
+        pattern: '(?:dns\.resolve4?|dns\.lookup)\s*\(.*?(?:hostname|host|domain|url).*?\)[\s\S]{0,200}(?:isPrivate|isInternal|isLocal)[\s\S]{0,200}(?:fetch|axios|got|http\.request)\s*\('
+        description: "DNS check then private IP check then request pattern"
+      - type: regex
+        pattern: 'http[s]?\s*\.\s*(?:request|get)\s*\(\s*(?:\{[^}]*hostname\s*:\s*(?:req\.|userInput|data\.)|(?:req\.|userInput|data\.))'
+        description: "Node http/https module request with user-controlled hostname"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(host|domain|hostname)\w*\s*=\s*(?:new\s+URL|url\.parse)\s*\([^)]*(?:req\.|ctx\.|userInput)'
+        description: "Hostname extracted from user URL for separate DNS validation"
+      - type: regex
+        pattern: 'request\s*\.\s*(?:get|post|put|del|head|patch)\s*\(\s*(?:req\.|ctx\.|data\.)'
+        description: "Request library convenience methods with user-controlled input"
+      - type: regex
+        pattern: '(?:setInterval|setTimeout)\s*\([^)]*(?:dns\.resolve|dns\.lookup)[^)]*\)\s*.*?(?:fetch|request|axios|got)\s*\('
+        description: "Periodic DNS check with HTTP request indicating rebinding window"
+      - type: regex
+        pattern: 'needle\s*\(\s*[`\x27"]\w+[`\x27"]\s*,\s*(?:req\.|ctx\.|data\.|userInput)'
+        description: "Needle HTTP client with user-controlled URL"
+    anti_patterns:
+      - 'request\s*\(\s*\{[^}]*url\s*:\s*[`\x27"]https?://(?:api\.|www\.)[a-zA-Z0-9]+\.'
+      - 'dns\s*\.\s*resolve\s*\(\s*[`\x27"][a-zA-Z0-9\.\-]+\.[a-zA-Z]{2,}[`\x27"]'
+      - 'http[s]?\s*\.\s*request\s*\(\s*\{[^}]*hostname\s*:\s*[`\x27"](?:localhost|127\.0\.0\.1)[`\x27"]'
+      - 'request\s*\(\s*[`\x27"]https?://(?:api\.|cdn\.|www\.)'
+      - 'process\.env\.\w+(?:URL|HOST|ENDPOINT)'
+      - 'config\s*\.\s*(?:api|service)\s*\.\s*(?:url|host)'
+      - '(?:mock|stub|fake|nock)\s*\('
+      - 'jest\.mock\s*\(\s*[`\x27"](?:request|dns)'
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - '\.defaults\s*\.\s*(?:baseUrl|host)'
+      - 'const\s+\w+\s*=\s*require\s*\(\s*[`\x27"](?:sinon|chai|mocha|jest)'
+      - 'require\s*\(\s*[`\x27"]dns[`\x27"]\s*\)\s*;\s*(?://|/\*)\s*(?:test|mock)'
+      - 'nock\s*\(\s*[`\x27"]'
+      - 'sandbox\s*\.\s*stub\s*\('
+    bypass_variants:
+      - description: "Time-of-check to time-of-use (TOCTOU) via rapid DNS rebinding"
+        pattern: '(?:dns\.(?:resolve|lookup))[\s\S]{0,500}(?:fetch|request|axios|got|http\.(?:request|get))\s*\('
+      - description: "Multiple A/AAAA records with mixed public/private IPs"
+        pattern: '(?:dns\.resolve(?:4|6)?)\s*\([^)]+\)[\s\S]{0,200}(?:\[0\]|\.(?:address|addresses))'
+      - description: "DNS cache poisoning via short TTL records"
+        pattern: '(?:dns\.setServers|resolve\.conf|dns_cache|ttl\s*[=:]\s*0)'
+      - description: "Rebinding through service worker or browser-level DNS cache"
+        pattern: '(?:caches\.open|serviceWorker|navigator\.serviceWorker)[\s\S]{0,300}fetch\s*\('
+      - description: "IPv6 dual-stack rebinding with mapped addresses"
+        pattern: '(?:dns\.resolve6|AAAA)\s*\([^)]+\)[\s\S]{0,200}(?:::ffff:|fe80:)'
+    evasion_indicators:
+      - "Domain with TTL of 0 or near-zero DNS cache time"
+      - "Wildcard DNS records pointing to attacker-controlled nameserver"
+      - "Split-horizon DNS returning different IPs based on source"
+      - "Multiple A records alternating between public and private IPs"
+      - "Use of DNS-over-HTTPS to bypass local DNS filtering"
+    encoding_variants:
+      - type: "hostname_obfuscation"
+        pattern: '(?:0x[0-9A-Fa-f]+\.){0,3}0x[0-9A-Fa-f]+'
+      - type: "decimal_ip"
+        pattern: '(?:fetch|request|axios|got)\s*\(\s*[`\x27"]https?://\d{8,10}'
+      - type: "octal_ip"
+        pattern: '(?:fetch|request|axios|got)\s*\(\s*[`\x27"]https?://0[0-7]+\.'
+    multi_function_chain_patterns:
+      - "url.parse() -> dns.resolve() -> validate() -> request()"
+      - "new URL() -> dns.lookup() -> isPrivateIP() -> http.request()"
+      - "req.body.url -> hostname extraction -> DNS check -> fetch()"
+      - "user input -> URL construction -> DNS validation -> HTTP call -> redirect follow"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "DNS rebinding bypasses hostname validation to access internal services from server context"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.url"
+        sink: "request(options)"
+        through: "url.parse() -> dns.resolve() -> validation bypass -> HTTP request"
+      - source: "req.query.domain"
+        sink: "http.request({hostname: domain})"
+        through: "DNS lookup with TOCTOU vulnerability window"
+      - source: "req.params.target"
+        sink: "fetch(targetUrl)"
+        through: "hostname extraction and pre-flight DNS check without pinning"
+    impact: |
+      - Bypass of hostname-based URL validation and SSRF protections.
+      - Access to internal network services (databases, admin interfaces, cloud metadata).
+      - Exfiltration of data from services bound to loopback or internal interfaces.
+      - Compromise of cloud infrastructure credentials via metadata service access.
+      - Lateral movement across network segments not directly reachable from the internet.
+    remediation: |
+      1. Pin DNS resolution by resolving the hostname once and connecting to the resolved IP:
+         ```javascript
+         const dns = require('dns').promises;
+         const { isPrivateIP } = require('./network-utils');
+
+         async function safeFetch(userUrl) {
+           const parsed = new URL(userUrl);
+           const { address } = await dns.lookup(parsed.hostname);
+           if (isPrivateIP(address)) {
+             throw new Error('Resolved to private IP');
+           }
+           // Connect directly to resolved IP, set Host header
+           const safeUrl = new URL(parsed.pathname + parsed.search, `${parsed.protocol}//${address}:${parsed.port || ''}`);
+           return fetch(safeUrl.toString(), {
+             headers: { 'Host': parsed.hostname },
+             redirect: 'manual'  // prevent redirect-based rebinding
+           });
+         }
+         ```
+      2. Disable automatic redirect following in HTTP clients.
+      3. Implement DNS-level controls (internal DNS firewall, response policy zones).
+      4. Use network-level isolation to prevent server from reaching internal services.
+      5. Consider using a proxy service for all outbound requests with strict egress controls.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://crypto.stanford.edu/dns/"
+      - "https://portswigger.net/web-security/ssrf"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://github.com/brannondorsey/dns-rebind-toolkit"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(get|post|put|delete)\s*\('
+        - 'router\.\w+\s*\('
+        - 'async\s+function\s+\w+\s*\(req'
+        - 'exports\.\w+\s*='
+      taint_source_indicators:
+        - 'req\.query\.\w+'
+        - 'req\.body\.\w+'
+        - 'ctx\.request\.body'
+        - 'event\.(?:queryStringParameters|body)'
+      taint_sink_indicators:
+        - 'request\s*\('
+        - 'http\.request\s*\('
+        - 'https\.request\s*\('
+        - 'http\.get\s*\('
+        - 'fetch\s*\('
+      sanitization_patterns:
+        - 'dns\.lookup.*callback.*isPrivate'
+        - 'ssrf-req-filter'
+        - 'ssrf-agent'
+        - 'pinned.*dns'
+        - 'resolve.*then.*validate'
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 + toctou_window_factor)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker registers a domain (evil.attacker.com) with a custom DNS server
+        that alternates responses: first returning a public IP (1.2.3.4) to pass the
+        server's DNS validation, then returning 169.254.169.254 (AWS metadata) for
+        the actual HTTP connection. The application validates the hostname, sees a
+        public IP, allows the request, but by the time the TCP connection is made,
+        DNS resolves to the metadata service IP.
+      example_payload: "http://evil.attacker.com/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Bypass DNS-based SSRF validation to access internal services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JS-001"
+        - "SSRF-JS-004"
+        - "SSRF-JS-005"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JS-003: Internal Network Scanning via HTTP Client
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JS-003"
+    title: "Internal Network Scanning via HTTP Client"
+    description: >
+      Detects patterns where user-controlled input is used to construct requests
+      targeting internal network ranges (RFC1918, loopback, link-local). This
+      includes iterating over IP ranges, port scanning via HTTP requests, and
+      probing internal services from the server context. Attackers use SSRF
+      to map internal infrastructure, discover services, and identify
+      exploitable targets on the internal network.
+    language: javascript
+    category: ssrf
+    severity: High
+    confidence: 0.90
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - internal-network
+      - port-scanning
+      - reconnaissance
+      - rfc1918
+      - service-discovery
+      - infrastructure
+    detection_layer: 2
+    attack_surface_type: "internal"
+    patterns:
+      - type: regex
+        pattern: '(?:fetch|axios|got|request|http\.(?:request|get))\s*\(\s*[`\x27"]https?://(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+        description: "HTTP request to hardcoded RFC1918/loopback IP address"
+      - type: regex
+        pattern: '(?:for|while)\s*\([^)]*(?:ip|host|port|addr)[^)]*\)[\s\S]{0,300}(?:fetch|axios|got|request|http\.(?:request|get))\s*\('
+        description: "Loop iterating over network addresses with HTTP requests"
+      - type: regex
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://\$\{(?:ip|host|addr|target)\}(?::\$\{(?:port|p)\})?\/'
+        description: "Template literal URL with variable IP/host and optional variable port"
+      - type: regex
+        pattern: '(?:const|let|var)\s+(?:ports?|targets?|hosts?|ips?)\s*=\s*\[[\s\S]{0,500}\]\s*;[\s\S]{0,500}(?:fetch|axios|got|http\.request)\s*\('
+        description: "Array of ports/hosts defined before HTTP request loop"
+      - type: regex
+        pattern: 'Promise\.(?:all|allSettled|race)\s*\(\s*(?:\w+\.map|\[)[\s\S]{0,300}(?:fetch|axios|got)\s*\('
+        description: "Parallel HTTP requests via Promise.all indicating scanning behavior"
+      - type: regex
+        pattern: '(?:net|dgram)\s*\.\s*(?:createConnection|connect|createSocket)\s*\(\s*(?:\{[^}]*(?:host|port)\s*:\s*(?:req\.|userInput|data\.)|(?:req\.|userInput))'
+        description: "Raw TCP/UDP socket connection with user-controlled destination"
+      - type: regex
+        pattern: '(?:ip|host|addr)\s*(?:\+\+|=\s*\w+\s*\+\s*1|\.next\(\))[\s\S]{0,200}(?:fetch|axios|got|http\.request)\s*\('
+        description: "IP address incrementing pattern followed by HTTP request"
+      - type: regex
+        pattern: '(?:subnet|cidr|range|network)\s*[\.\[][\s\S]{0,200}(?:fetch|axios|got|http\.(?:request|get))\s*\('
+        description: "Network range or CIDR reference used with HTTP client"
+    anti_patterns:
+      - '(?:fetch|axios|got)\s*\(\s*[`\x27"]https?://(?:api\.|cdn\.|www\.)[a-zA-Z0-9]+'
+      - 'healthCheck\s*\(\s*\)'
+      - '(?:ping|health|heartbeat|status)(?:Check|Endpoint|Route)\s*='
+      - 'SERVICE_DISCOVERY_URL'
+      - 'consul\s*\.\s*(?:agent|catalog|health)\.'
+      - '(?:eureka|zookeeper|etcd|kubernetes)\s*\.\s*(?:register|discover|get)'
+      - 'k8s\s*\.\s*(?:api|core)\s*\.'
+      - 'process\.env\.(?:SERVICE|INTERNAL|BACKEND)'
+      - 'config\s*\.\s*(?:services|endpoints|hosts)\s*\['
+      - '\.env\.(?:local|development|test)'
+      - 'describe\s*\(\s*[`\x27"].*[`\x27"]\s*,'
+      - 'it\s*\(\s*[`\x27"].*[`\x27"]\s*,'
+      - 'jest\.mock\s*\('
+      - 'nock\s*\(\s*[`\x27"]'
+      - 'docker-compose\s*\.\s*(?:yml|yaml)'
+    bypass_variants:
+      - description: "Decimal IP format (e.g., http://2130706433 for 127.0.0.1)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://\d{8,10}[/`\x27"]'
+      - description: "IPv6 mapped IPv4 address (::ffff:127.0.0.1)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://\[::ffff:\d+\.\d+\.\d+\.\d+\]'
+      - description: "Octal IP notation (e.g., http://0177.0.0.1 for 127.0.0.1)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://0[0-7]+\.'
+      - description: "Shortened IP notation (e.g., http://127.1 for 127.0.0.1)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://(?:127\.1|10\.1|172\.16)\b'
+    evasion_indicators:
+      - "Use of decimal IP encoding to bypass regex filters"
+      - "Octal notation for IP address components"
+      - "IPv6 shorthand notation targeting internal ranges"
+      - "Hex-encoded IP addresses"
+      - "URL-encoded dots in IP addresses (%2e)"
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: 'https?://\d{8,10}'
+      - type: "octal_ip"
+        pattern: 'https?://0[0-7]{1,3}(?:\.0[0-7]{1,3}){0,3}'
+      - type: "hex_ip"
+        pattern: 'https?://0x[0-9a-fA-F]{1,8}'
+      - type: "url_encoded_dots"
+        pattern: 'https?://\d+%2[eE]\d+%2[eE]\d+%2[eE]\d+'
+    multi_function_chain_patterns:
+      - "user input -> IP list construction -> Promise.all(ips.map(fetch)) -> response analysis"
+      - "req.body.subnet -> CIDR expansion -> sequential HTTP probes"
+      - "req.query.host -> port list iteration -> net.connect() per port"
+      - "user-controlled range -> ip-range-generator -> parallel requests"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Internal network scanning enables service discovery and lateral movement planning"
+    business_logic_indicator:
+      financial_impact: false
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.target"
+        sink: "fetch(`http://${target}:${port}/`)"
+        through: "template literal construction with loop iteration"
+      - source: "req.query.ip"
+        sink: "axios.get(url)"
+        through: "URL construction with user-provided IP address"
+      - source: "req.body.subnet"
+        sink: "Promise.all(ips.map(ip => got(ip)))"
+        through: "CIDR expansion to IP list then parallel probing"
+    impact: |
+      - Mapping of internal network topology and service inventory.
+      - Discovery of unpatched or vulnerable internal services.
+      - Identification of database servers, caches, and admin interfaces.
+      - Information leakage via error messages, response times, and status codes.
+      - Foundation for more targeted attacks against discovered internal services.
+    remediation: |
+      1. Block all requests to RFC1918, loopback, and link-local addresses:
+         ```javascript
+         const ipaddr = require('ipaddr.js');
+
+         function isInternalIP(ip) {
+           try {
+             const addr = ipaddr.parse(ip);
+             const range = addr.range();
+             const blocked = ['private', 'loopback', 'linkLocal',
+                             'uniqueLocal', 'unspecified'];
+             return blocked.includes(range);
+           } catch (e) {
+             return true; // Block unparseable addresses
+           }
+         }
+         ```
+      2. Implement outbound request rate limiting per client.
+      3. Block requests to non-standard ports from user-facing endpoints.
+      4. Use network segmentation to prevent application servers from probing infrastructure.
+      5. Monitor and alert on unusual outbound connection patterns.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://portswigger.net/web-security/ssrf"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+      - "https://www.rfc-editor.org/rfc/rfc1918"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(get|post)\s*\(\s*[`\x27"]/(?:api|proxy|fetch|scan)'
+        - 'router\.\w+\s*\('
+        - 'async\s+function'
+        - 'exports\.\w+\s*='
+      taint_source_indicators:
+        - 'req\.body\.(?:ip|host|target|subnet|range|port)'
+        - 'req\.query\.(?:ip|host|target|addr)'
+        - 'req\.params\.(?:host|target)'
+        - 'event\.body'
+      taint_sink_indicators:
+        - 'fetch\s*\('
+        - 'axios\.\w+\s*\('
+        - 'got\s*\('
+        - 'http\.request\s*\('
+        - 'net\.connect\s*\('
+        - 'net\.createConnection\s*\('
+      sanitization_patterns:
+        - 'isInternalIP\s*\('
+        - 'isPrivateIP\s*\('
+        - 'ipaddr\.parse.*range'
+        - 'allowedHosts'
+        - 'ALLOWED_HOSTS'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * reconnaissance_value_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker provides a CIDR range via the application's URL fetch feature:
+        POST /api/check-url
+        Body: {"url": "http://192.168.1.1:8080/admin"}
+
+        The attacker iterates through common internal IPs and ports:
+        192.168.1.1:22, 192.168.1.1:80, 192.168.1.1:443, 192.168.1.1:3306, etc.
+        By analyzing response codes and timing, the attacker maps internal services.
+      example_payload: "http://192.168.1.1:6379/"
+      attacker_objective: "Map internal network topology and discover exploitable services"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JS-001"
+        - "SSRF-JS-004"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JS-004: Cloud Metadata Endpoint Access (169.254.169.254)
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JS-004"
+    title: "Cloud Metadata Endpoint Access (169.254.169.254)"
+    description: >
+      Detects attempts to access cloud provider metadata endpoints through
+      server-side HTTP requests. AWS, GCP, Azure, and other cloud providers
+      expose instance metadata at well-known IP addresses (169.254.169.254)
+      and hostnames. Successful exploitation yields temporary IAM credentials,
+      instance identity tokens, network configuration, and user-data scripts
+      that may contain secrets. This is the highest-impact SSRF target in
+      cloud-hosted applications.
+    language: javascript
+    category: ssrf
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - cloud-metadata
+      - aws
+      - gcp
+      - azure
+      - credential-theft
+      - imds
+      - iam
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:fetch|axios|got|request|http\.(?:request|get)|undici\.request)\s*\(\s*[`\x27"]https?://169\.254\.169\.254'
+        description: "Direct HTTP request to AWS/GCP metadata IP"
+      - type: regex
+        pattern: '(?:fetch|axios|got|request|http\.(?:request|get))\s*\(\s*[`\x27"]https?://metadata\.google\.internal'
+        description: "Direct HTTP request to GCP metadata hostname"
+      - type: regex
+        pattern: '(?:fetch|axios|got|request|http\.(?:request|get))\s*\(\s*[`\x27"]https?://169\.254\.169\.254/latest/(?:meta-data|user-data|dynamic|api/token)'
+        description: "AWS IMDSv1/v2 metadata endpoint paths"
+      - type: regex
+        pattern: '(?:fetch|axios|got|request)\s*\([^)]*(?:169\.254\.169\.254|metadata\.google\.internal|169\.254\.170\.2)'
+        description: "Cloud metadata IP in any position within HTTP client call"
+      - type: regex
+        pattern: 'headers\s*:\s*\{[^}]*[`\x27"]Metadata-Flavor[`\x27"]\s*:\s*[`\x27"]Google[`\x27"]'
+        description: "GCP metadata request header (Metadata-Flavor: Google)"
+      - type: regex
+        pattern: 'headers\s*:\s*\{[^}]*[`\x27"]X-aws-ec2-metadata-token[`\x27"]'
+        description: "AWS IMDSv2 token header in request"
+      - type: regex
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://(?:100\.100\.100\.200|169\.254\.170\.2)'
+        description: "Alibaba Cloud metadata or AWS ECS task metadata endpoint"
+      - type: regex
+        pattern: '(?:url|uri|endpoint|target)\s*(?:=|\+=|\.concat)\s*.*?(?:169\.254\.169\.254|metadata\.google\.internal|169\.254\.170\.2|100\.100\.100\.200)'
+        description: "Variable construction containing cloud metadata IPs"
+    anti_patterns:
+      - '(?:mock|stub|fake|nock)\s*\([`\x27"]https?://169\.254\.169\.254'
+      - 'jest\.mock.*169\.254'
+      - '(?://|/\*)\s*(?:TODO|FIXME|HACK|NOTE).*169\.254'
+      - 'describe\s*\(\s*[`\x27"].*metadata'
+      - 'it\s*\(\s*[`\x27"].*should\s+(?:block|reject|deny).*metadata'
+      - 'test\s*\(\s*[`\x27"].*(?:block|filter|prevent).*metadata'
+      - 'const\s+METADATA_BLOCKED'
+      - 'BLOCKED_IPS\s*=.*169\.254'
+      - 'DENY_LIST\s*=.*169\.254'
+      - '(?:aws-sdk|@aws-sdk)\s*(?:require|import)'
+      - 'new\s+(?:EC2|S3|Lambda|DynamoDB|STS)\s*\('
+      - 'AWS\.config\.'
+      - 'process\.env\.AWS_'
+      - '(?:cloud-metadata|imds).*(?:test|spec|mock)'
+      - 'nock\s*\(\s*[`\x27"]https?://169\.254'
+    bypass_variants:
+      - description: "Decimal IP encoding (2852039166 = 169.254.169.254)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://2852039166'
+      - description: "Hex IP encoding (0xa9fea9fe = 169.254.169.254)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://0xa9fea9fe'
+      - description: "Octal IP encoding (0251.0376.0251.0376)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://0251\.0376\.0251\.0376'
+      - description: "IPv6 mapped representation (::ffff:169.254.169.254)"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://\[::ffff:169\.254\.169\.254\]'
+      - description: "DNS rebinding via attacker domain resolving to 169.254.169.254"
+        pattern: '(?:fetch|axios|got|request)\s*\(\s*[`\x27"]https?://(?!(?:\d+\.){3}\d+)[a-zA-Z0-9\-]+\.(?:attacker|evil|rebind)'
+    evasion_indicators:
+      - "Redirect chain ending at 169.254.169.254"
+      - "DNS CNAME pointing to metadata IP"
+      - "URL shortener resolving to metadata endpoint"
+      - "Decimal/octal/hex IP encoding"
+      - "IPv6 mapped IPv4 metadata address"
+      - "HTTP redirect from external URL to metadata IP"
+      - "SSRF via PDF generation or image rendering libraries"
+    encoding_variants:
+      - type: "decimal_ip"
+        pattern: '(?:fetch|axios|got)\s*\(\s*[`\x27"]https?://285203916[4-9]'
+      - type: "hex_ip"
+        pattern: '(?:fetch|axios|got)\s*\(\s*[`\x27"]https?://0x[aA]9[fF][eE][aA]9[fF][eE]'
+      - type: "octal_ip"
+        pattern: '(?:fetch|axios|got)\s*\(\s*[`\x27"]https?://0+251\.0+376\.0+251\.0+376'
+      - type: "mixed_notation"
+        pattern: '(?:fetch|axios|got)\s*\(\s*[`\x27"]https?://(?:0x[aA]9|0251|169)[\.\x25]'
+    multi_function_chain_patterns:
+      - "user input -> URL construction -> fetch(url) -> metadata credential extraction"
+      - "SSRF via image URL -> ImageMagick/Sharp -> metadata endpoint"
+      - "webhook URL -> server-side validation -> redirect to metadata"
+      - "PDF generation URL -> headless browser -> metadata fetch"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Cloud metadata access yields IAM credentials enabling full cloud account compromise"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.query.url"
+        sink: "fetch('http://169.254.169.254/...')"
+        through: "insufficient URL validation allowing metadata IP"
+      - source: "req.body.imageUrl"
+        sink: "sharp(url) or imagemagick(url)"
+        through: "image processing library following URL to metadata"
+      - source: "req.body.webhookUrl"
+        sink: "axios.post(webhookUrl)"
+        through: "webhook URL pointing to or redirecting to metadata"
+    impact: |
+      - Theft of AWS IAM temporary credentials (AccessKeyId, SecretAccessKey, Token).
+      - Theft of GCP service account OAuth tokens with potentially project-wide access.
+      - Access to Azure Managed Identity tokens enabling subscription-level compromise.
+      - Retrieval of instance user-data containing bootstrap secrets and configuration.
+      - Full cloud account compromise through privilege escalation from stolen credentials.
+      - Data exfiltration from S3, GCS, Azure Blob via obtained credentials.
+    remediation: |
+      1. Block requests to metadata IP ranges at the application level:
+         ```javascript
+         const METADATA_IPS = ['169.254.169.254', '169.254.170.2',
+                               '100.100.100.200', 'fd00:ec2::254'];
+         const METADATA_HOSTS = ['metadata.google.internal',
+                                 'metadata.azure.com'];
+
+         function blockMetadataAccess(url) {
+           const parsed = new URL(url);
+           if (METADATA_IPS.includes(parsed.hostname) ||
+               METADATA_HOSTS.includes(parsed.hostname)) {
+             throw new Error('Metadata endpoint access blocked');
+           }
+           // Also resolve DNS and check the IP
+           const resolved = await dns.resolve4(parsed.hostname);
+           if (resolved.some(ip => METADATA_IPS.includes(ip))) {
+             throw new Error('DNS resolves to metadata IP');
+           }
+         }
+         ```
+      2. Enable IMDSv2 (Instance Metadata Service v2) on AWS EC2 to require token-based access.
+      3. Use GCP metadata concealment and restrict service account scopes.
+      4. Deploy network-level metadata endpoint protection (iptables, VPC firewall rules).
+      5. Implement egress filtering to block outbound requests to link-local addresses.
+    references:
+      - "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+      - "https://cloud.google.com/compute/docs/metadata/overview"
+      - "https://docs.microsoft.com/en-us/azure/virtual-machines/instance-metadata-service"
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://blog.appsecco.com/an-ssrf-privileged-aws-keys-and-the-capital-one-breach-4c3c2cded3af"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(get|post)\s*\('
+        - 'router\.\w+\s*\('
+        - 'async\s+function'
+        - 'exports\.\w+\s*='
+        - 'module\.exports'
+      taint_source_indicators:
+        - 'req\.query\.url'
+        - 'req\.body\.(?:url|imageUrl|webhookUrl|endpoint)'
+        - 'req\.params\.\w+'
+        - 'event\.body'
+      taint_sink_indicators:
+        - 'fetch\s*\('
+        - 'axios\.\w+\s*\('
+        - 'got\s*\('
+        - 'http\.(?:request|get)\s*\('
+        - 'request\s*\('
+      sanitization_patterns:
+        - 'blockMetadata'
+        - 'METADATA.*(?:BLOCK|DENY|FILTER)'
+        - 'isMetadataIP'
+        - '169\.254.*(?:block|deny|filter|reject)'
+        - 'imds.*(?:v2|token)'
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * cloud_exposure_multiplier"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker discovers a URL preview endpoint:
+        POST /api/preview
+        Body: {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"}
+
+        The server lists available IAM roles. The attacker then requests:
+        POST /api/preview
+        Body: {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-Admin-Role"}
+
+        This returns temporary AWS credentials (AccessKeyId, SecretAccessKey, Token)
+        valid for several hours, enabling the attacker to access AWS services
+        as the EC2 instance's IAM role.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-Admin-Role"
+      attacker_objective: "Steal cloud IAM credentials to compromise cloud infrastructure"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JS-001"
+        - "SSRF-JS-002"
+        - "SSRF-JS-003"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JS-005: URL Parser Differential Exploitation (WHATWG vs legacy)
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JS-005"
+    title: "URL Parser Differential Exploitation (WHATWG vs Legacy)"
+    description: >
+      Detects patterns where URL validation uses one parser (e.g., Node.js
+      legacy url.parse()) while the HTTP client uses a different parser
+      (e.g., WHATWG URL API or the underlying library parser). Parser
+      differentials allow attackers to craft URLs that pass validation in
+      one parser but resolve to a different target in another. This class
+      of vulnerability exploits inconsistencies in URL specification
+      interpretation between the legacy Node.js URL module and the modern
+      WHATWG URL standard.
+    language: javascript
+    category: ssrf
+    severity: High
+    confidence: 0.85
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - url-parsing
+      - parser-differential
+      - whatwg
+      - legacy-url
+      - bypass
+      - url-confusion
+    detection_layer: 3
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'url\s*\.\s*parse\s*\(\s*(?:req\.|ctx\.|userInput|data\.)[\s\S]{0,300}(?:fetch|axios|got|http\.request)\s*\('
+        description: "Legacy url.parse() used for validation before HTTP request"
+      - type: regex
+        pattern: 'new\s+URL\s*\(\s*(?:req\.|ctx\.|userInput)[\s\S]{0,300}url\s*\.\s*parse\s*\('
+        description: "Mixed usage of WHATWG URL and legacy url.parse on same input"
+      - type: regex
+        pattern: 'url\s*\.\s*parse\s*\([^)]+\)\s*\.\s*(?:hostname|host|protocol|pathname|port)[\s\S]{0,200}(?:fetch|axios|got|http\.request)\s*\('
+        description: "Legacy url.parse property extraction before HTTP request"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\{?\s*(?:hostname|host|protocol|pathname|port)\s*\}?\s*=\s*url\s*\.\s*parse\s*\('
+        description: "Destructuring url.parse result for validation"
+      - type: regex
+        pattern: 'require\s*\(\s*[`\x27"]url[`\x27"]\s*\)\s*\.\s*parse\s*\([\s\S]{0,500}(?:new\s+URL|fetch|axios|got)\s*\('
+        description: "Importing url module and using parse alongside modern URL API"
+      - type: regex
+        pattern: 'url\s*\.\s*parse\s*\([^)]+\)\s*\.\s*href\s*!==\s*new\s+URL\s*\([^)]+\)\s*\.\s*href'
+        description: "Explicit comparison between legacy and WHATWG URL parsing"
+      - type: regex
+        pattern: '(?:url\.parse|new\s+URL)\s*\([^)]+\)\s*\.\s*(?:hostname|host)\s*(?:===?|!==?|==)\s*[`\x27"][^`\x27"]+[`\x27"][\s\S]{0,300}(?:fetch|axios|got)\s*\('
+        description: "Hostname comparison after parsing used as gate before HTTP request"
+      - type: regex
+        pattern: 'url\s*\.\s*format\s*\(\s*url\s*\.\s*parse\s*\([^)]+\)\s*\)'
+        description: "url.format(url.parse()) round-trip that may alter URL semantics"
+    anti_patterns:
+      - 'new\s+URL\s*\(\s*[`\x27"]https?://[a-zA-Z0-9\-]+\.[a-z]{2,}/'
+      - 'url\s*\.\s*parse\s*\(\s*[`\x27"]https?://[a-zA-Z0-9\-]+\.[a-z]{2,}/'
+      - 'url\s*\.\s*parse\s*\(\s*(?:process\.env|config)\.'
+      - '(?:mock|stub|nock)\s*\('
+      - 'describe\s*\(\s*[`\x27"]'
+      - 'it\s*\(\s*[`\x27"]'
+      - 'jest\.mock\s*\('
+      - 'require\s*\(\s*[`\x27"](?:mocha|chai|sinon)'
+      - '\.defaults\.baseURL\s*='
+      - 'API_BASE_URL'
+      - 'new\s+URL\s*\(\s*path\s*,\s*BASE_URL\s*\)'
+      - 'url\.pathToFileURL\s*\('
+      - 'url\.fileURLToPath\s*\('
+      - 'import\.meta\.url'
+      - '(?://|/\*)\s*DEPRECATED.*url\.parse'
+    bypass_variants:
+      - description: "Backslash normalization differential (url.parse treats \\ as /)"
+        pattern: '(?:url|uri)\s*=.*?(?:\\\\|%5[cC]).*?(?:fetch|axios|got)\s*\('
+      - description: "Tab/newline in URL (WHATWG strips, legacy preserves)"
+        pattern: '(?:url|uri)\s*=.*?(?:%09|%0[aAdD]|\\t|\\n|\\r).*?(?:fetch|axios|got)\s*\('
+      - description: "Authority confusion via @ sign (user@host ambiguity)"
+        pattern: '(?:url|uri)\s*=.*?https?://[^/]*@[^/]*(?:169\.254|127\.0|10\.|192\.168|172\.(?:1[6-9]|2\d|3[01]))'
+      - description: "Fragment-based confusion (hash handling differences)"
+        pattern: '(?:url|uri)\s*=.*?#.*?(?:169\.254|127\.0|10\.|192\.168)'
+      - description: "Multiple protocol handlers parsed differently"
+        pattern: '(?:url|uri)\s*=.*?(?:javascript|data|file)://'
+    evasion_indicators:
+      - "Backslash in URL path (interpreted differently by parsers)"
+      - "Tab/newline/carriage return characters in URL components"
+      - "Credentials in URL (user:pass@host) with ambiguous parsing"
+      - "Encoded characters that normalize differently across parsers"
+      - "Multiple colons in URL scheme component"
+    encoding_variants:
+      - type: "backslash_normalization"
+        pattern: 'https?:(?:\\\\|%5[cC])(?:\\\\|%5[cC])'
+      - type: "whitespace_injection"
+        pattern: 'https?://[^/]*(?:%09|%0[aAdD]|\\t|\\n)[^/]*/'
+      - type: "authority_confusion"
+        pattern: 'https?://[^@]+@(?:169\.254|127\.|10\.|192\.168)'
+    multi_function_chain_patterns:
+      - "user input -> url.parse() for validation -> new URL() for request construction"
+      - "req.body.url -> url.parse().hostname check -> fetch(req.body.url)"
+      - "URL string -> legacy parse for allowlist check -> WHATWG parse for actual request"
+      - "url.parse() -> hostname extraction -> DNS resolution -> new URL() for fetch"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Parser differential allows bypassing URL validation to reach internal services"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.url"
+        sink: "fetch(url)"
+        through: "url.parse().hostname validation (bypassed) -> fetch(original URL)"
+      - source: "req.query.target"
+        sink: "axios.get(target)"
+        through: "legacy URL parse for allowlist check, WHATWG URL for actual request"
+      - source: "req.body.endpoint"
+        sink: "got(endpoint)"
+        through: "url.parse hostname extraction (confused) -> HTTP request"
+    impact: |
+      - Complete bypass of URL-based SSRF validation and allowlisting.
+      - Access to internal services by exploiting parser disagreement on the target host.
+      - Cloud metadata credential theft via requests that bypass hostname checks.
+      - Access to admin interfaces and internal APIs through URL confusion.
+      - Potential for request smuggling when parsers disagree on URL structure.
+    remediation: |
+      1. Use a single, consistent URL parser throughout the application (prefer WHATWG URL):
+         ```javascript
+         // ALWAYS use the WHATWG URL API consistently
+         function validateAndFetch(userUrl) {
+           let parsed;
+           try {
+             parsed = new URL(userUrl);
+           } catch (e) {
+             throw new Error('Invalid URL');
+           }
+
+           // Validate using the parsed result
+           if (!['http:', 'https:'].includes(parsed.protocol)) {
+             throw new Error('Invalid protocol');
+           }
+
+           // Use the parsed and normalized URL for the request
+           return fetch(parsed.toString());
+         }
+         ```
+      2. Never mix url.parse() and new URL() on the same input.
+      3. Use the canonical URL (parsed.toString()) for the actual request, not the original string.
+      4. Validate after full URL normalization, not on the raw input.
+      5. Consider using a dedicated URL validation library that handles edge cases.
+    references:
+      - "https://url.spec.whatwg.org/"
+      - "https://nodejs.org/api/url.html#url_url_strings_and_url_objects"
+      - "https://www.blackhat.com/docs/us-17/thursday/us-17-Tsai-A-New-Era-Of-SSRF-Exploiting-URL-Parser-In-Trending-Programming-Languages.pdf"
+      - "https://portswigger.net/web-security/ssrf"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'require\s*\(\s*[`\x27"]url[`\x27"]\s*\)'
+        - 'import\s+.*\s+from\s+[`\x27"]url[`\x27"]'
+        - 'url\s*\.\s*parse\s*\('
+        - 'new\s+URL\s*\('
+      taint_source_indicators:
+        - 'req\.(query|body|params)\.\w+'
+        - 'ctx\.request\.(body|query)\.\w+'
+        - 'event\.(?:queryStringParameters|body)'
+      taint_sink_indicators:
+        - 'fetch\s*\('
+        - 'axios\.\w+\s*\('
+        - 'got\s*\('
+        - 'http\.request\s*\('
+      sanitization_patterns:
+        - 'new\s+URL\s*\(.*\)\.toString\s*\(\)'
+        - 'url\.format\s*\(\s*new\s+URL'
+        - 'parsed\.(?:hostname|host)\s*===\s*allowed'
+        - 'WHATWG.*URL'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * parser_differential_complexity"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker crafts a URL that parses differently in url.parse() vs new URL():
+        Input: "http://example.com%0d%0a@169.254.169.254/latest/meta-data/"
+
+        url.parse() sees hostname as "example.com" (passes allowlist validation)
+        new URL() / actual HTTP client sees hostname as "169.254.169.254"
+
+        The application validates against url.parse().hostname ("example.com"),
+        approves the request, then the HTTP client connects to 169.254.169.254,
+        fetching cloud metadata credentials.
+      example_payload: "http://example.com\\@169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Bypass URL validation by exploiting parser inconsistencies"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JS-001"
+        - "SSRF-JS-004"
+        - "SSRF-JS-006"
+
+  # --------------------------------------------------------------------------
+  # SSRF-JS-006: Webhook URL Validation Bypass
+  # --------------------------------------------------------------------------
+  - rule_id: "SSRF-JS-006"
+    title: "Webhook URL Validation Bypass"
+    description: >
+      Detects insufficient validation of user-supplied webhook URLs that
+      the server will subsequently call back. Webhook endpoints are prime
+      SSRF targets because they inherently require the server to make
+      outbound HTTP requests to user-specified URLs. Attackers can register
+      webhook callbacks pointing to internal services, cloud metadata
+      endpoints, or other restricted resources, triggering server-side
+      requests on their behalf.
+    language: javascript
+    category: ssrf
+    severity: High
+    confidence: 0.87
+    cwe: CWE-918
+    owasp: "A10:2021-Server-Side Request Forgery"
+    tags:
+      - ssrf
+      - webhook
+      - callback
+      - url-validation
+      - outbound-request
+      - integration
+      - notification
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: '(?:webhook|callback|notify|hook|ping)(?:_?[Uu]rl|_?[Uu]ri|_?[Ee]ndpoint)\s*=\s*req\.(body|query|params)\s*[\.\[]'
+        description: "Webhook URL directly assigned from user request input"
+      - type: regex
+        pattern: '(?:fetch|axios|got|request|http\.request)\s*\(\s*(?:\w*(?:webhook|callback|notify|hook|ping)\w*)\s*[,)]'
+        description: "HTTP client called with a variable named webhook/callback"
+      - type: regex
+        pattern: '(?:const|let|var)\s+\w*(?:webhook|callback|hookUrl|notifyUrl|callbackUrl)\w*\s*=\s*(?:req\.|ctx\.|data\.|body\.|params\.)'
+        description: "Webhook URL variable assigned from user-controlled source"
+      - type: regex
+        pattern: '(?:createWebhook|registerWebhook|addWebhook|saveWebhook|updateWebhook|setCallback)\s*\([^)]*(?:req\.|ctx\.|body\.)'
+        description: "Webhook registration function receiving user input"
+      - type: regex
+        pattern: '(?:model|schema|entity)\s*\.\s*(?:create|save|update|findOneAndUpdate)\s*\([^)]*webhook(?:_?[Uu]rl|_?[Uu]ri)\s*:\s*(?:req\.|ctx\.|data\.)'
+        description: "Webhook URL persisted to database from user input"
+      - type: regex
+        pattern: 'await\s+(?:fetch|axios|got)\s*\(\s*\w+\.(?:webhook|callback|notify|hook)(?:_?[Uu]rl|_?[Uu]ri)'
+        description: "Async HTTP client called with stored webhook URL"
+      - type: regex
+        pattern: '(?:queue|worker|job|bull|agenda|bee)\s*\.\s*(?:add|process|create|enqueue)\s*\([^)]*(?:webhook|callback|notify|hook)(?:_?[Uu]rl)'
+        description: "Webhook URL passed to job queue for asynchronous delivery"
+      - type: regex
+        pattern: '(?:retry|deliver|send|dispatch|trigger|fire|emit)(?:Webhook|Callback|Hook|Notification)\s*\([^)]*(?:url|uri|endpoint)'
+        description: "Webhook delivery function with URL parameter"
+    anti_patterns:
+      - '(?:webhook|callback)(?:_?Url)\s*=\s*[`\x27"]https?://(?:api\.|hooks\.|www\.)'
+      - 'WEBHOOK_URL\s*=\s*process\.env\.'
+      - 'config\.\w*webhook\w*\s*=\s*[`\x27"]https?://'
+      - '(?:Stripe|Slack|GitHub|GitLab|Twilio|SendGrid)\s*\.\s*webhooks?\.'
+      - '@slack/webhook'
+      - 'stripe\.webhookEndpoints\.'
+      - 'github\..*webhooks'
+      - '(?:mock|stub|fake|nock)\s*\('
+      - 'describe\s*\(\s*[`\x27"].*[Ww]ebhook'
+      - 'it\s*\(\s*[`\x27"].*should'
+      - 'jest\.mock\s*\('
+      - 'test\s*\(\s*[`\x27"]'
+      - '(?://|/\*)\s*TODO.*webhook.*validation'
+      - 'ALLOWED_WEBHOOK_HOSTS'
+      - 'WEBHOOK_ALLOWLIST'
+    bypass_variants:
+      - description: "Redirect chain from allowed domain to internal IP"
+        pattern: '(?:webhook|callback).*(?:follow|redirect|maxRedirects|followRedirects)\s*:\s*(?:true|\d+)'
+      - description: "URL with authentication bypass (user@internalhost)"
+        pattern: '(?:webhook|callback).*https?://[^@]+@(?:169\.254|127\.|10\.|192\.168)'
+      - description: "Protocol downgrade from HTTPS to HTTP during redirect"
+        pattern: '(?:webhook|callback).*(?:rejectUnauthorized|strictSSL)\s*:\s*false'
+      - description: "Webhook URL update after initial validation"
+        pattern: '(?:update|patch|put)\s*\(\s*[`\x27"]/.*webhook.*[`\x27"][\s\S]{0,200}(?:url|uri|endpoint)\s*:\s*req\.'
+      - description: "Open redirect on allowed domain used as webhook destination"
+        pattern: '(?:webhook|callback).*https?://(?:allowed|trusted)\.[^/]+/(?:redirect|redir|goto|url)\?'
+    evasion_indicators:
+      - "Webhook URL update after initial registration passes validation"
+      - "Redirect chain from public to internal URL"
+      - "Use of URL shorteners as webhook destinations"
+      - "Protocol-relative URLs (//internal-host) as callback"
+      - "Async webhook delivery bypassing synchronous validation"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:webhook|callback).*%(?:25)?(?:31|36|37|38)'
+      - type: "unicode_normalization"
+        pattern: '(?:webhook|callback).*\\u(?:FF|00)[0-9A-Fa-f]{2}'
+      - type: "double_encoding"
+        pattern: '(?:webhook|callback).*%25(?:32|33|36|37)[0-9A-Fa-f]'
+    multi_function_chain_patterns:
+      - "req.body.webhookUrl -> validateUrl() -> db.save(webhookUrl) -> worker.deliver(webhookUrl)"
+      - "webhook registration -> URL validation -> storage -> async delivery"
+      - "user input -> webhook creation API -> queue job -> fetch(storedUrl)"
+      - "webhook URL update -> bypass initial validation -> trigger delivery"
+    privilege_context_flags:
+      requires_auth_context: true
+      admin_only_risk: false
+      escalation_vector: "Webhook callback grants server-initiated requests to attacker-chosen destinations"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "req.body.webhookUrl"
+        sink: "fetch(stored.webhookUrl)"
+        through: "database storage -> asynchronous job -> HTTP delivery"
+      - source: "req.body.callbackUrl"
+        sink: "axios.post(callbackUrl, payload)"
+        through: "registration API -> event trigger -> callback delivery"
+      - source: "req.body.notifyEndpoint"
+        sink: "got.post(notifyEndpoint)"
+        through: "notification setup -> event occurrence -> notification dispatch"
+    impact: |
+      - Server-side requests to internal services via registered webhook callbacks.
+      - Cloud metadata credential theft through webhook pointing to 169.254.169.254.
+      - Data exfiltration by configuring webhook to attacker-controlled server.
+      - Internal service scanning via webhook callbacks to internal IP ranges.
+      - Blind SSRF via webhook delivery with response data in error messages.
+    remediation: |
+      1. Implement strict webhook URL validation with DNS resolution check:
+         ```javascript
+         const dns = require('dns').promises;
+         const ALLOWED_PROTOCOLS = ['https:'];
+
+         async function validateWebhookUrl(webhookUrl) {
+           const parsed = new URL(webhookUrl);
+
+           // Enforce HTTPS only
+           if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
+             throw new Error('Webhook must use HTTPS');
+           }
+
+           // Resolve DNS and block internal IPs
+           const addresses = await dns.resolve4(parsed.hostname);
+           for (const ip of addresses) {
+             if (isPrivateOrReserved(ip)) {
+               throw new Error('Webhook cannot target internal addresses');
+             }
+           }
+
+           // Optionally: verify ownership with challenge-response
+           const challenge = crypto.randomBytes(32).toString('hex');
+           const response = await fetch(`${webhookUrl}?challenge=${challenge}`);
+           const body = await response.json();
+           if (body.challenge !== challenge) {
+             throw new Error('Webhook ownership verification failed');
+           }
+         }
+         ```
+      2. Disable HTTP redirect following for webhook deliveries.
+      3. Validate webhook URL at delivery time, not just at registration time.
+      4. Implement webhook ownership verification (challenge-response).
+      5. Use an egress proxy for all webhook deliveries with IP-based filtering.
+    references:
+      - "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/"
+      - "https://portswigger.net/web-security/ssrf"
+      - "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+      - "https://cwe.mitre.org/data/definitions/918.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'app\.(post|put|patch)\s*\(\s*[`\x27"]/.*webhook'
+        - 'router\.\w+\s*\(\s*[`\x27"]/.*(?:webhook|hook|callback)'
+        - 'async\s+function\s+.*(?:webhook|callback|hook)'
+        - '(?:Webhook|Hook|Callback)\s*(?:Controller|Handler|Service)'
+      taint_source_indicators:
+        - 'req\.body\.(?:webhook|callback|hook|notify)(?:Url|Uri|Endpoint)'
+        - 'req\.body\.url'
+        - 'data\.(?:webhook|callback)(?:Url|Uri)'
+        - 'params\.(?:webhook|callback)(?:Url|Uri)'
+      taint_sink_indicators:
+        - 'fetch\s*\(\s*\w+\.(?:webhook|callback)'
+        - 'axios\.\w+\s*\(\s*\w+\.(?:webhook|callback)'
+        - 'got\s*\(\s*\w+\.(?:webhook|callback)'
+        - 'deliverWebhook\s*\('
+      sanitization_patterns:
+        - 'validateWebhookUrl\s*\('
+        - 'isAllowedHost\s*\('
+        - 'ALLOWED_WEBHOOK_HOSTS'
+        - 'webhook.*allowlist'
+        - 'challenge.*response.*verify'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * async_amplification_factor"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker registers a webhook for order notifications:
+        POST /api/webhooks
+        Body: {"url": "https://attacker.com/hook", "events": ["order.created"]}
+
+        After validation passes (attacker.com is a valid public URL), the attacker
+        updates the webhook URL:
+        PATCH /api/webhooks/abc123
+        Body: {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"}
+
+        The update handler does not re-validate the URL. When the next order is
+        created, the server sends a POST to the metadata endpoint, and the response
+        (containing IAM credentials) is logged or forwarded to the attacker.
+      example_payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      attacker_objective: "Abuse webhook callback mechanism to access internal resources"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "SSRF-JS-001"
+        - "SSRF-JS-004"
+        - "SSRF-JS-005"

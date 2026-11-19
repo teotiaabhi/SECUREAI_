@@ -1,0 +1,1256 @@
+# ============================================================================
+# Path Traversal Detection Rules - Python
+# Language: Python
+# Rule IDs: PT-PY-001 through PT-PY-006
+# Schema Version: 3.0.0
+# Last Reviewed: 2025-01-15
+# ============================================================================
+
+rules:
+  # --------------------------------------------------------------------------
+  # PT-PY-001: open() with User-Controlled Path
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PY-001"
+    title: "open() with User-Controlled File Path"
+    description: >
+      Detects usage of Python's built-in open() function where the file path
+      argument originates from user-controlled input such as request parameters,
+      form data, URL route variables, or query strings. An attacker can inject
+      path traversal sequences like ../../etc/passwd to read or write arbitrary
+      files on the server filesystem, leading to exposure of sensitive data,
+      credentials, source code, or destructive file overwrites.
+    language: python
+    category: path_traversal
+    severity: Critical
+    confidence: 0.92
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - file-read
+      - file-write
+      - open-builtin
+      - python
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'open\s*\(\s*request\s*\.\s*(?:args|form|values|data|json)\s*(?:\.\s*get\s*\(\s*|\.|\[)'
+        description: "open() with Flask/Django request parameter direct access"
+      - type: regex
+        pattern: 'open\s*\(\s*(?:file_?path|file_?name|user_?path|input_?path|doc_?path|target_?file)\s*[,\)]'
+        description: "open() with common user-controlled variable names"
+      - type: regex
+        pattern: 'open\s*\(\s*f[''"][^''"]*\{(?:request|req|filename|filepath|user_input|path)[^}]*\}[^''"]*[''"]'
+        description: "open() with f-string interpolating user-controlled variables"
+      - type: regex
+        pattern: 'open\s*\(\s*os\.path\.join\s*\(\s*[^)]*(?:request|req)\s*\.'
+        description: "open() with os.path.join containing request data"
+      - type: regex
+        pattern: 'open\s*\(\s*(?:str\.format|[''"].*[''"]\.format)\s*\([^)]*(?:request|filename|filepath)'
+        description: "open() with str.format interpolating request data"
+      - type: regex
+        pattern: 'open\s*\(\s*[^)]*\+\s*(?:request\s*\.\s*(?:args|form|json|data)|filename|filepath|user_input)'
+        description: "open() with string concatenation using user-controlled values"
+      - type: regex
+        pattern: 'with\s+open\s*\(\s*(?:request|req|filename|filepath|file_path|user_path)\b'
+        description: "Context manager open() with user-controlled path"
+      - type: regex
+        pattern: 'Path\s*\(\s*(?:request|req|filename|filepath|user_input)\b[^)]*\)\s*\.\s*(?:read_text|read_bytes|write_text|write_bytes|open)\s*\('
+        description: "pathlib.Path with user-controlled input followed by read/write operations"
+    anti_patterns:
+      - 'os\.path\.abspath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.realpath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.commonprefix\s*\(\s*\['
+      - 'if\s+[''"]\.\.[''"]\s+in\s+'
+      - 'if\s+not\s+\w+\s*\.\s*startswith\s*\(\s*(?:base_dir|allowed_dir|root_dir|UPLOAD_DIR)'
+      - 'secure_filename\s*\('
+      - 'os\.path\.basename\s*\('
+      - 'Path\s*\([^)]+\)\s*\.\s*resolve\s*\(\s*\)\s*\.\s*(?:is_relative_to|relative_to)\s*\('
+      - 'if\s+os\.path\.isabs\s*\('
+      - 'allowed_files\s*=\s*(?:\{|\[)'
+      - 'ALLOWED_EXTENSIONS\s*='
+      - 'sanitize_(?:path|filename|input)\s*\('
+      - 'bleach\.\s*clean\s*\('
+      - 'open\s*\(\s*[''"][^''"]*[''"]\s*[,\)]'
+      - 'if\s+not\s+os\.path\.exists\s*\(\s*base_dir'
+    bypass_variants:
+      - description: "URL-encoded dot-dot-slash traversal"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c)'
+      - description: "Double URL-encoded traversal"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection to bypass extension checks"
+        pattern: '(?:%00|\\x00|\\0)(?:\.(?:txt|py|conf|log))?$'
+      - description: "Unicode normalization bypass"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae%e0%80%ae%e0%80%af)'
+      - description: "Backslash traversal on Windows Python"
+        pattern: '(?:\.\.\\\\|\.\.%5c|\.\.%5C)'
+    evasion_indicators:
+      - "URL-encoded traversal sequences in request parameters"
+      - "Double encoding to bypass WSGI/framework URL decode"
+      - "Null byte injection before file extension"
+      - "Unicode normalization exploits in Python 3 string handling"
+      - "Mixed slash direction on Windows deployments"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae|%e0%80%ae|\\u002e\\u002e)'
+    multi_function_chain_patterns:
+      - "request.args.get('file') -> open()"
+      - "request.form['path'] -> os.path.join -> open()"
+      - "request.json['filename'] -> f-string -> open()"
+      - "request.data -> string concat -> open()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Arbitrary file read exposes credentials, keys, and secrets enabling full system compromise"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('file')"
+        sink: "open()"
+        through: "direct parameter pass or variable assignment"
+      - source: "request.form['path']"
+        sink: "open()"
+        through: "os.path.join or string formatting"
+      - source: "request.json['filename']"
+        sink: "open()"
+        through: "f-string interpolation"
+    impact: |
+      Successful exploitation allows an attacker to read arbitrary files from the
+      server filesystem, including /etc/passwd, /etc/shadow, application source
+      code, database configuration files, API keys, private keys, and session
+      secrets. When open() is used in write mode, attackers can overwrite
+      configuration files, inject malicious code into Python modules, or corrupt
+      application data. This leads to full information disclosure, credential
+      theft, and potential remote code execution through code injection.
+    remediation: |
+      1. Validate resolved paths against a base directory:
+
+         import os
+         base_dir = os.path.abspath('/app/uploads')
+         requested = os.path.abspath(os.path.join(base_dir, user_input))
+         if not requested.startswith(base_dir + os.sep):
+             abort(403)
+         with open(requested, 'r') as f:
+             content = f.read()
+
+      2. Use os.path.basename() for filename-only access:
+
+         safe_name = os.path.basename(user_input)
+         filepath = os.path.join(upload_dir, safe_name)
+
+      3. Use pathlib with is_relative_to() (Python 3.9+):
+
+         from pathlib import Path
+         base = Path('/app/uploads').resolve()
+         target = (base / user_input).resolve()
+         if not target.is_relative_to(base):
+             abort(403)
+
+      4. Maintain an allowlist of accessible files.
+      5. Never pass raw user input directly to open().
+    references:
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+      - "https://docs.python.org/3/library/os.path.html"
+      - "https://docs.python.org/3/library/pathlib.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*(?:request|req)\s*'
+        - '@api_view\s*\('
+        - 'class\s+\w+View\s*\('
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\s*\['
+        - 'request\.json\s*\['
+        - 'request\.data'
+        - 'request\.GET\.get\s*\('
+        - 'request\.POST\.get\s*\('
+      taint_sink_indicators:
+        - 'open\s*\('
+        - 'Path\s*\([^)]+\)\s*\.open\s*\('
+        - 'io\.open\s*\('
+        - 'codecs\.open\s*\('
+      sanitization_patterns:
+        - 'os\.path\.abspath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.realpath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.basename\s*\('
+        - 'secure_filename\s*\('
+        - '\.is_relative_to\s*\('
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask endpoint at /read-file accepts a query parameter 'name'.
+        The handler calls open(request.args.get('name'), 'r').read() without
+        validation. The attacker sends GET /read-file?name=../../../../etc/passwd.
+        The open() call resolves the traversal and returns the contents of
+        /etc/passwd. Successive requests target /proc/self/environ, .env files,
+        and private keys for full server compromise.
+      example_payload: "../../../../etc/passwd"
+      attacker_objective: "Read arbitrary server files including credentials, keys, and application source code"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PY-002"
+        - "PT-PY-005"
+        - "PT-JS-001"
+        - "PT-JAVA-001"
+
+  # --------------------------------------------------------------------------
+  # PT-PY-002: os.path.join with User-Controlled Segments
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PY-002"
+    title: "os.path.join with User-Controlled Path Segments"
+    description: >
+      Detects usage of os.path.join where one or more path segments originate
+      from user input. A critical Python-specific behavior makes this especially
+      dangerous: if any segment is an absolute path, os.path.join discards all
+      preceding segments. For example, os.path.join('/safe/dir', '/etc/passwd')
+      returns '/etc/passwd'. Even without absolute paths, traversal sequences
+      like ../../ can escape the intended directory. Developers often
+      mistakenly assume os.path.join provides path safety.
+    language: python
+    category: path_traversal
+    severity: High
+    confidence: 0.91
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - os-path-join
+      - python
+      - server-side
+      - cwe-22
+      - owasp-a01
+      - dangerous-default
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*[^)]*request\s*\.\s*(?:args|form|values|data|json|GET|POST)\s*(?:\.\s*get\s*\(\s*|\.|\[)'
+        description: "os.path.join with Flask/Django request parameter"
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*[^)]*(?:file_?path|file_?name|user_?path|user_?input|input_?path|target_?path)\s*[,\)]'
+        description: "os.path.join with common user-controlled variable names"
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*(?:BASE_DIR|UPLOAD_DIR|MEDIA_ROOT|STATIC_ROOT|base_dir|upload_dir)\s*,\s*(?:request|req|filename|filepath|user_input)\b'
+        description: "os.path.join with base directory constant and user-controlled segment"
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*(?:settings|config|app\.config)\s*\[\s*[''"][^''"]+[''"]\s*\]\s*,\s*(?:request|req|filename)\b'
+        description: "os.path.join with config setting and user-controlled segment"
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*[^)]*\*\s*(?:parts|segments|components|path_parts)\s*\)'
+        description: "os.path.join with splatted user-controlled path parts list"
+      - type: regex
+        pattern: 'Path\s*\(\s*(?:base_dir|BASE_DIR|upload_dir)\s*\)\s*\/\s*(?:request|req|filename|filepath|user_input)\b'
+        description: "pathlib Path division operator with user-controlled segment"
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*[^)]*(?:kwargs|args)\s*(?:\.\s*get\s*\(\s*|\.|\[)\s*[''"](?:path|file|dir|name)[''"]'
+        description: "os.path.join with kwargs/args dictionary path-related keys"
+      - type: regex
+        pattern: 'os\.path\.join\s*\(\s*[^)]*(?:data|payload|params|body)\s*(?:\.\s*get\s*\(\s*|\.|\[)\s*[''"](?:path|file|filename|dir)'
+        description: "os.path.join with parsed request body data"
+    anti_patterns:
+      - 'os\.path\.abspath\s*\(\s*os\.path\.join\s*\([^)]+\)\s*\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.realpath\s*\(\s*os\.path\.join\s*\([^)]+\)\s*\)\s*\.\s*startswith\s*\('
+      - 'if\s+[''"]\.\.[''"]\s+in\s+\w+'
+      - 'if\s+not\s+\w+\s*\.\s*startswith\s*\('
+      - 'if\s+os\.path\.isabs\s*\(\s*(?:user_input|filename|filepath|request)\b'
+      - 'secure_filename\s*\('
+      - 'os\.path\.basename\s*\('
+      - 'sanitize_(?:path|filename|input)\s*\('
+      - 'os\.path\.normpath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'if\s+os\.path\.commonprefix\s*\(\s*\['
+      - 'Path\s*\([^)]+\)\s*\.\s*resolve\s*\(\s*\)\s*\.\s*is_relative_to\s*\('
+      - 'allowed_(?:paths|files|dirs)\s*='
+      - 'WHITELIST\s*='
+      - '\.\s*strip\s*\(\s*[''"][./\\\\][''"]\s*\)'
+      - 'if\s+os\.sep\s+in\s+\w+'
+    bypass_variants:
+      - description: "Absolute path injection overriding os.path.join base"
+        pattern: '(?:^\/|^[A-Za-z]:\\\\)'
+      - description: "URL-encoded traversal sequences"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f|%2e%2e%5c)'
+      - description: "Double URL-encoded traversal"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection to truncate path"
+        pattern: '(?:%00|\\x00|\\0)'
+      - description: "Backslash variant for Windows os.path.join"
+        pattern: '(?:\.\.\\\\|\.\.%5c|\.\.%5C)'
+    evasion_indicators:
+      - "Absolute path as segment to discard intended base directory"
+      - "URL-encoded traversal in web framework parameters"
+      - "Double encoding to bypass WSGI decode"
+      - "Null byte before extension to truncate validation"
+      - "Windows backslash on cross-platform deployments"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00|\\0)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "request.args.get('file') -> os.path.join -> open()"
+      - "request.form['dir'] -> os.path.join -> os.listdir()"
+      - "request.json['path'] -> os.path.join -> shutil.copy()"
+      - "kwargs['filename'] -> os.path.join -> send_file()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Absolute path injection in os.path.join completely ignores the base directory, enabling access to any file"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('file')"
+        sink: "os.path.join(base_dir, user_input)"
+        through: "direct parameter or variable assignment"
+      - source: "request.form['path']"
+        sink: "os.path.join(UPLOAD_DIR, user_input)"
+        through: "form field extraction"
+      - source: "request.json['filename']"
+        sink: "os.path.join(settings.MEDIA_ROOT, user_input)"
+        through: "JSON body parsing"
+    impact: |
+      Exploitation of os.path.join with user-controlled segments can bypass any
+      intended directory restriction. The absolute path behavior is especially
+      dangerous as it silently discards the base directory. This enables
+      arbitrary file read/write, leading to credential theft, source code
+      exposure, configuration manipulation, and potential remote code execution
+      through file overwrite. In Django applications, this can expose settings.py
+      containing SECRET_KEY and database credentials.
+    remediation: |
+      1. Validate resolved paths against the intended base:
+
+         import os
+         base_dir = os.path.abspath(UPLOAD_DIR)
+         full_path = os.path.abspath(os.path.join(base_dir, user_input))
+         if not full_path.startswith(base_dir + os.sep):
+             raise PermissionError("Path traversal detected")
+
+      2. Reject absolute paths from user input:
+
+         if os.path.isabs(user_input):
+             raise ValueError("Absolute paths not allowed")
+
+      3. Use os.path.basename() for filename-only access.
+      4. Strip leading slashes and '..' before joining.
+      5. Use pathlib.Path.is_relative_to() for validation.
+    references:
+      - "https://docs.python.org/3/library/os.path.html#os.path.join"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request\s*'
+        - '@api_view\s*\('
+        - 'class\s+\w+View\s*\('
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\s*\['
+        - 'request\.json\s*\['
+        - 'request\.GET\.get\s*\('
+        - 'request\.POST\.get\s*\('
+      taint_sink_indicators:
+        - 'os\.path\.join\s*\('
+        - 'Path\s*\([^)]+\)\s*\/'
+      sanitization_patterns:
+        - 'os\.path\.abspath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.realpath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.basename\s*\('
+        - 'os\.path\.isabs\s*\('
+        - 'secure_filename\s*\('
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django view builds a file path with os.path.join(settings.MEDIA_ROOT,
+        request.GET.get('doc')). The attacker sends ?doc=/etc/passwd. Because
+        os.path.join discards all preceding components when given an absolute path,
+        the result is simply '/etc/passwd'. The open() call returns the system
+        password file. A traversal variant ?doc=../../../etc/passwd works even if
+        the input is not absolute.
+      example_payload: "/etc/passwd"
+      attacker_objective: "Bypass base directory restriction using absolute path injection or relative traversal to access arbitrary files"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PY-001"
+        - "PT-PY-003"
+        - "PT-JS-002"
+
+  # --------------------------------------------------------------------------
+  # PT-PY-003: Flask send_file / send_from_directory Bypass
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PY-003"
+    title: "Flask send_file / send_from_directory Path Traversal Bypass"
+    description: >
+      Detects insecure usage of Flask's send_file() and send_from_directory()
+      functions where user-controlled input is passed without adequate
+      validation. While send_from_directory includes basic traversal protection,
+      it can be bypassed in certain configurations. Direct use of send_file()
+      with user input is always dangerous. This rule also covers custom file
+      serving handlers that replicate send_file behavior without its protections.
+    language: python
+    category: path_traversal
+    severity: High
+    confidence: 0.89
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - flask
+      - send-file
+      - send-from-directory
+      - python
+      - web-framework
+      - cwe-22
+      - owasp-a01
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'send_file\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data)\s*(?:\.\s*get\s*\(\s*|\.|\[))'
+        description: "send_file() called with Flask request parameter directly"
+      - type: regex
+        pattern: 'send_file\s*\(\s*os\.path\.join\s*\(\s*[^)]*(?:request|req)\s*\.'
+        description: "send_file() with os.path.join containing request data"
+      - type: regex
+        pattern: 'send_file\s*\(\s*(?:file_?path|file_?name|user_?path|doc_?path|target)\s*[,\)]'
+        description: "send_file() with common user-controlled variable names"
+      - type: regex
+        pattern: 'send_file\s*\(\s*f[''"][^''"]*\{(?:request|filename|filepath|user_input|name)[^}]*\}[^''"]*[''"]'
+        description: "send_file() with f-string interpolating user-controlled variable"
+      - type: regex
+        pattern: 'send_from_directory\s*\(\s*(?:request\s*\.\s*(?:args|form|json)\s*(?:\.\s*get\s*\(\s*|\.|\[))\s*,'
+        description: "send_from_directory() with user-controlled directory argument"
+      - type: regex
+        pattern: 'send_from_directory\s*\(\s*[^,]+,\s*(?:request\s*\.\s*(?:args|form|json)\s*(?:\.\s*get\s*\(\s*|\.|\[))'
+        description: "send_from_directory() with user-controlled filename argument"
+      - type: regex
+        pattern: 'send_from_directory\s*\(\s*[^,]+,\s*(?:file_?name|user_?file|doc_?name|target_?file)\s*[,\)]'
+        description: "send_from_directory() with common user-controlled filename variables"
+      - type: regex
+        pattern: 'send_file\s*\(\s*(?:Path|pathlib\.Path)\s*\(\s*[^)]*(?:request|req|filename|filepath|user_input)\b'
+        description: "send_file() with pathlib.Path using user-controlled input"
+    anti_patterns:
+      - 'send_from_directory\s*\(\s*[''"][^''"]+[''"]\s*,\s*[''"][^''"]+[''"]\s*[,\)]'
+      - 'secure_filename\s*\(\s*(?:request|req|filename)\b'
+      - 'os\.path\.basename\s*\(\s*(?:request|req|filename)\b'
+      - 'if\s+[''"]\.\.[''"]\s+in\s+'
+      - 'os\.path\.abspath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.realpath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'allowed_extensions\s*='
+      - 'if\s+not\s+\w+\s*\.\s*endswith\s*\('
+      - 'sanitize_(?:path|filename)\s*\('
+      - 'ALLOWED_EXTENSIONS\s*\.\s*(?:__contains__|issuperset)'
+      - 'if\s+\w+\s+not\s+in\s+allowed_files'
+      - 'safe_join\s*\('
+      - 'abort\s*\(\s*(?:403|404)\s*\)'
+      - 'send_file\s*\(\s*[''"][^''"]*[''"]\s*[,\)]'
+      - 'Path\s*\([^)]+\)\s*\.\s*resolve\s*\(\s*\)\s*\.\s*is_relative_to'
+    bypass_variants:
+      - description: "URL-encoded traversal in Flask route parameter"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass Werkzeug URL decode"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection to bypass extension filter"
+        pattern: '(?:%00|\\x00)(?:\.(?:pdf|docx|txt|csv))?$'
+      - description: "Backslash on Windows Flask deployments"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+      - description: "Path with encoded slashes bypassing route matching"
+        pattern: '(?:%2F|%5C)\.\.(?:%2F|%5C)'
+    evasion_indicators:
+      - "URL-encoded traversal in Flask route parameters"
+      - "Double encoding to bypass Werkzeug automatic decode"
+      - "Null byte before file extension to bypass type checking"
+      - "Backslash on Windows Flask deployments"
+      - "Host header manipulation combined with path traversal"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00)(?:\.\w+)?$'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "request.args.get('file') -> send_file()"
+      - "request.args.get('name') -> os.path.join -> send_file()"
+      - "request.form['doc'] -> send_from_directory(dir, filename)"
+      - "url_param -> f-string -> send_file()"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Flask file download endpoints can serve any file readable by the application process"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('file')"
+        sink: "send_file()"
+        through: "direct parameter or os.path.join"
+      - source: "request.form['document']"
+        sink: "send_from_directory()"
+        through: "variable assignment"
+      - source: "route parameter <filename>"
+        sink: "send_file()"
+        through: "f-string interpolation"
+    impact: |
+      Successful exploitation allows an attacker to download arbitrary files from
+      the server through Flask file serving endpoints. This includes application
+      configuration (settings.py, .env), database credentials, private keys,
+      source code revealing additional vulnerabilities, and other users' uploaded
+      files. In production Flask deployments, this can expose the SECRET_KEY
+      enabling session forgery and CSRF bypass.
+    remediation: |
+      1. Always use secure_filename() for user-provided filenames:
+
+         from werkzeug.utils import secure_filename
+         safe_name = secure_filename(request.args.get('file'))
+         return send_from_directory(app.config['UPLOAD_FOLDER'], safe_name)
+
+      2. Validate paths after resolution:
+
+         import os
+         base = os.path.abspath(app.config['UPLOAD_FOLDER'])
+         requested = os.path.abspath(os.path.join(base, user_input))
+         if not requested.startswith(base + os.sep):
+             abort(403)
+         return send_file(requested)
+
+      3. Use Flask safe_join() for path construction.
+      4. Maintain allowlists of downloadable files.
+      5. Avoid send_file() with user input; prefer send_from_directory().
+    references:
+      - "https://flask.palletsprojects.com/en/latest/api/#flask.send_file"
+      - "https://flask.palletsprojects.com/en/latest/api/#flask.send_from_directory"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\(\s*[''"].*(?:download|file|doc|serve|get)'
+        - '@\w+\.route\s*\('
+        - 'def\s+\w+\s*\(\s*(?:\w+\s*,?\s*)*\)\s*:'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\s*\['
+        - 'request\.json\s*\['
+        - 'request\.view_args\s*\['
+      taint_sink_indicators:
+        - 'send_file\s*\('
+        - 'send_from_directory\s*\('
+      sanitization_patterns:
+        - 'secure_filename\s*\('
+        - 'os\.path\.basename\s*\('
+        - 'safe_join\s*\('
+        - '\.startswith\s*\(\s*(?:base_dir|UPLOAD)'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask application has a download endpoint:
+        @app.route('/download/<path:filename>')
+        def download(filename):
+            return send_file(os.path.join(UPLOAD_DIR, filename))
+
+        The attacker requests GET /download/../../app/settings.py. The os.path.join
+        resolves to the settings file, and send_file returns it. The attacker
+        obtains the SECRET_KEY, database credentials, and API keys from the
+        application settings.
+      example_payload: "../../app/settings.py"
+      attacker_objective: "Download sensitive application files through Flask file serving endpoints"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PY-001"
+        - "PT-PY-002"
+        - "PT-PY-004"
+        - "PT-JS-003"
+
+  # --------------------------------------------------------------------------
+  # PT-PY-004: Django FileResponse Path Traversal
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PY-004"
+    title: "Django FileResponse Path Traversal"
+    description: >
+      Detects path traversal vulnerabilities in Django applications using
+      FileResponse, HttpResponse with file content, or StreamingHttpResponse
+      where the file path originates from user input. Django does not provide
+      built-in path traversal protection in FileResponse, making it critical
+      to validate file paths before serving. This includes views that construct
+      file paths from URL parameters, query strings, or POST data for document
+      download functionality.
+    language: python
+    category: path_traversal
+    severity: High
+    confidence: 0.88
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - django
+      - file-response
+      - http-response
+      - python
+      - web-framework
+      - cwe-22
+      - owasp-a01
+    detection_layer: 3
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'FileResponse\s*\(\s*(?:open\s*\(\s*)?(?:request\s*\.\s*(?:GET|POST|data|query_params)\s*(?:\.\s*get\s*\(\s*|\.|\[))'
+        description: "FileResponse with Django request parameter"
+      - type: regex
+        pattern: 'FileResponse\s*\(\s*(?:open\s*\(\s*)?os\.path\.join\s*\(\s*[^)]*(?:request|req)\s*\.'
+        description: "FileResponse with os.path.join containing request data"
+      - type: regex
+        pattern: 'FileResponse\s*\(\s*(?:open\s*\(\s*)?(?:file_?path|file_?name|user_?path|doc_?path|target)\s*[,\)]'
+        description: "FileResponse with common user-controlled path variable names"
+      - type: regex
+        pattern: 'FileResponse\s*\(\s*(?:open\s*\(\s*)?f[''"][^''"]*\{(?:request|filename|filepath|pk|slug|doc_id)[^}]*\}'
+        description: "FileResponse with f-string interpolating user-controlled variable"
+      - type: regex
+        pattern: 'HttpResponse\s*\(\s*(?:open\s*\(\s*[^)]*(?:request|req|filename|filepath|user_input))'
+        description: "HttpResponse serving file content with user-controlled path"
+      - type: regex
+        pattern: 'StreamingHttpResponse\s*\(\s*(?:open|FileWrapper)\s*\(\s*[^)]*(?:request|req|filename|filepath)\b'
+        description: "StreamingHttpResponse with user-controlled file path"
+      - type: regex
+        pattern: 'FileResponse\s*\(\s*(?:open\s*\(\s*)?(?:kwargs|args|self\.kwargs)\s*(?:\.\s*get\s*\(\s*|\.|\[)\s*[''"](?:path|file|pk|slug)'
+        description: "FileResponse with URL kwargs for path construction"
+      - type: regex
+        pattern: '(?:content_type|content-type)\s*=.*\n.*FileResponse\s*\(\s*(?:open\s*\(\s*)?(?!(?:[''"][^''"]+[''"]))[^)]*(?:path|file|name)\w*\s*[,\)]'
+        description: "FileResponse with content-type header and user-controlled path"
+    anti_patterns:
+      - 'os\.path\.abspath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.realpath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'if\s+[''"]\.\.[''"]\s+in\s+'
+      - 'if\s+not\s+\w+\s*\.\s*startswith\s*\(\s*(?:settings|MEDIA_ROOT|BASE_DIR)'
+      - 'os\.path\.basename\s*\('
+      - 'secure_filename\s*\('
+      - 'get_object_or_404\s*\(\s*\w+\s*,\s*pk\s*='
+      - 'Document\.objects\.get\s*\('
+      - 'FileModel\.objects\.filter\s*\('
+      - 'if\s+not\s+os\.path\.exists\s*\('
+      - 'sanitize_(?:path|filename)\s*\('
+      - 'ALLOWED_EXTENSIONS\s*='
+      - 'raise\s+(?:PermissionDenied|Http404|SuspiciousFileOperation)'
+      - 'FileResponse\s*\(\s*[''"][^''"]*[''"]\s*[,\)]'
+      - 'Path\s*\([^)]+\)\s*\.\s*resolve\s*\(\s*\)\s*\.\s*is_relative_to'
+    bypass_variants:
+      - description: "URL-encoded traversal in Django URL parameter"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass Django URL decode"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection in file path"
+        pattern: '(?:%00|\\x00)(?:\.(?:pdf|docx|xlsx))?$'
+      - description: "Absolute path injection via os.path.join behavior"
+        pattern: '(?:^\/|^[A-Za-z]:\\\\)'
+      - description: "Backslash on Windows Django deployments"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "URL-encoded traversal in Django URL parameters"
+      - "Double encoding bypassing middleware decode"
+      - "Null byte before expected extension"
+      - "Absolute path injection via os.path.join"
+      - "Backslash on Windows Django servers"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00)(?:\.\w+)?$'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "request.GET.get('file') -> os.path.join -> FileResponse"
+      - "kwargs['filename'] -> os.path.join -> open() -> HttpResponse"
+      - "request.POST['path'] -> FileResponse(open())"
+      - "URL path parameter -> f-string -> FileResponse"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "FileResponse serves any file accessible to the Django process user, potentially including settings.py with SECRET_KEY"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.GET.get('file')"
+        sink: "FileResponse(open(path))"
+        through: "os.path.join or f-string"
+      - source: "kwargs['filename']"
+        sink: "FileResponse()"
+        through: "URL pattern capture and variable"
+      - source: "request.POST['document']"
+        sink: "StreamingHttpResponse(open(path))"
+        through: "form data extraction"
+    impact: |
+      An attacker can download arbitrary files through Django file serving views,
+      including settings.py (exposing SECRET_KEY, database credentials, and API
+      keys), environment files, application source code, database files (SQLite),
+      and other sensitive data. With SECRET_KEY exposure, the attacker can forge
+      session cookies, CSRF tokens, and signed data, leading to full
+      authentication bypass and privilege escalation.
+    remediation: |
+      1. Validate file paths against the intended base directory:
+
+         import os
+         from django.conf import settings
+
+         base = os.path.abspath(settings.MEDIA_ROOT)
+         requested = os.path.abspath(os.path.join(base, user_input))
+         if not requested.startswith(base + os.sep):
+             raise PermissionDenied("Path traversal detected")
+         return FileResponse(open(requested, 'rb'))
+
+      2. Use database lookups instead of direct path construction:
+
+         doc = get_object_or_404(Document, pk=doc_id, owner=request.user)
+         return FileResponse(open(doc.file.path, 'rb'))
+
+      3. Use Django's built-in SuspiciousFileOperation protection.
+      4. Validate filenames with os.path.basename().
+      5. Restrict file serving to authenticated users with ownership checks.
+    references:
+      - "https://docs.djangoproject.com/en/stable/ref/request-response/#fileresponse-objects"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'def\s+\w+\s*\(\s*request\s*'
+        - 'class\s+\w+View\s*\('
+        - '@api_view\s*\('
+        - 'urlpatterns\s*='
+      taint_source_indicators:
+        - 'request\.GET\.get\s*\('
+        - 'request\.POST\.get\s*\('
+        - 'request\.data\s*\['
+        - 'request\.query_params\s*\['
+        - 'kwargs\s*\['
+        - 'self\.kwargs\s*\['
+      taint_sink_indicators:
+        - 'FileResponse\s*\('
+        - 'HttpResponse\s*\([^)]*open\s*\('
+        - 'StreamingHttpResponse\s*\('
+      sanitization_patterns:
+        - 'os\.path\.abspath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.basename\s*\('
+        - 'get_object_or_404\s*\('
+        - 'SuspiciousFileOperation'
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django view serves user documents at /api/docs/?file=report.pdf using
+        FileResponse(open(os.path.join(DOCS_DIR, request.GET.get('file')), 'rb')).
+        The attacker sends GET /api/docs/?file=../../../app/settings.py. The
+        os.path.join resolves the traversal, and FileResponse returns Django's
+        settings.py containing SECRET_KEY='s3cr3t_k3y', database credentials,
+        and third-party API keys.
+      example_payload: "../../../app/settings.py"
+      attacker_objective: "Exfiltrate Django settings.py and application secrets through FileResponse endpoints"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PY-001"
+        - "PT-PY-002"
+        - "PT-PY-003"
+        - "PT-JAVA-003"
+
+  # --------------------------------------------------------------------------
+  # PT-PY-005: ZIP Slip via zipfile Module
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PY-005"
+    title: "ZIP Slip via Python zipfile Module"
+    description: >
+      Detects ZIP Slip vulnerabilities when using Python's zipfile module to
+      extract archives without validating that extracted file paths remain within
+      the target directory. The zipfile.extractall() and zipfile.extract()
+      methods do not prevent path traversal by default in older Python versions,
+      and maliciously crafted ZIP files can contain entries with ../../ paths
+      that write files outside the extraction directory. While Python 3.12+
+      added protections, many deployments use older versions.
+    language: python
+    category: path_traversal
+    severity: High
+    confidence: 0.90
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - zip-slip
+      - archive-extraction
+      - zipfile
+      - python
+      - rce-potential
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'ZipFile\s*\(\s*(?:request|req|file_?path|upload_?path|archive_?path|zip_?path|user_input)\b'
+        description: "ZipFile constructor with user-controlled path"
+      - type: regex
+        pattern: '\.extractall\s*\(\s*(?:request\s*\.\s*(?:args|form|json)\s*(?:\.\s*get\s*\(\s*|\.|\[)|extract_?dir|output_?dir|dest_?dir|target_?dir)'
+        description: "extractall() with user-controlled or common destination variable"
+      - type: regex
+        pattern: '\.extract\s*\(\s*(?:member|entry|info|name)\s*(?:,\s*(?:path\s*=\s*)?(?:extract_?dir|output_?dir|dest_?dir|target_?dir))'
+        description: "extract() with common destination variables"
+      - type: regex
+        pattern: 'for\s+\w+\s+in\s+\w+\s*\.\s*(?:infolist|namelist)\s*\(\s*\)\s*:[\s\S]{0,300}(?:open\s*\(\s*os\.path\.join|write|shutil\.copy)'
+        description: "Manual extraction loop iterating ZIP entries and writing files"
+      - type: regex
+        pattern: '\.extractall\s*\(\s*\)\s*(?:;|\s*$)'
+        description: "extractall() with no arguments (extracts to cwd)"
+      - type: regex
+        pattern: '(?:open|write|copy)\s*\(\s*(?:os\.path\.join\s*\([^)]*)?(?:info|entry|member|zi)\s*\.\s*filename'
+        description: "ZipInfo filename used directly in file write/copy operation without validation"
+      - type: regex
+        pattern: 'with\s+zipfile\.ZipFile\s*\(\s*(?:request\.files|uploaded_file|file_obj|archive)\b'
+        description: "Context manager ZipFile with uploaded file object"
+      - type: regex
+        pattern: '\.extractall\s*\(\s*(?:os\.path\.join\s*\(\s*[^)]*(?:request|req)\s*\.)'
+        description: "extractall() with os.path.join using request data for destination"
+    anti_patterns:
+      - 'if\s+[''"]\.\.[''"]\s+in\s+\w+\s*\.\s*(?:filename|name)'
+      - 'os\.path\.abspath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.realpath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.basename\s*\(\s*\w+\s*\.\s*filename\s*\)'
+      - 'if\s+\w+\s*\.\s*filename\s*\.\s*startswith\s*\(\s*[''"](?:\/|\\\\|\.\.)[''"]'
+      - 'Path\s*\([^)]+\)\s*\.\s*resolve\s*\(\s*\)\s*\.\s*is_relative_to'
+      - 'os\.path\.commonprefix\s*\('
+      - 'sanitize_(?:path|filename|entry)\s*\('
+      - 'if\s+os\.path\.isabs\s*\(\s*\w+\s*\.\s*filename'
+      - 'raise\s+(?:ValueError|SecurityError|BadZipFile)'
+      - 'zipfile\.is_zipfile\s*\('
+      - '\.filename\s*\.\s*replace\s*\(\s*[''"]\.\.[''"]\s*,'
+      - 'logging\.warning\s*\(\s*[^)]*(?:traversal|malicious|suspicious)'
+      - 'Path\s*\([^)]+\)\s*\.\s*relative_to\s*\('
+      - 'if\s+not\s+\w+\s*\.\s*filename\s*\.\s*startswith'
+    bypass_variants:
+      - description: "ZIP entry with URL-encoded traversal path"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "ZIP entry with double-encoded traversal"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "ZIP entry with null byte in filename"
+        pattern: '(?:%00|\\x00)(?:\.\w+)?'
+      - description: "ZIP entry with absolute path"
+        pattern: '(?:^\/|^[A-Za-z]:\\\\)'
+      - description: "ZIP entries with symlink targets outside directory"
+        pattern: '(?:\.\.\/|\.\.\\\\)+'
+    evasion_indicators:
+      - "ZIP entries with relative traversal paths"
+      - "ZIP entries with absolute paths"
+      - "Symbolic links in ZIP targeting external paths"
+      - "Mixed slash separators in ZIP entry names"
+      - "Nested ZIP archives containing traversal entries"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "uploaded file -> ZipFile(file) -> extractall()"
+      - "uploaded file -> ZipFile(file) -> infolist() -> extract()"
+      - "user path -> ZipFile(path) -> extractall(user_dest)"
+      - "file object -> ZipFile(obj) -> for entry: open(join(dest, entry.filename))"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "ZIP Slip writes arbitrary files enabling RCE through code overwrite, cron injection, or SSH key replacement"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "uploaded ZIP file"
+        sink: "zipfile.extractall()"
+        through: "ZipFile constructor with uploaded file"
+      - source: "ZIP entry filename"
+        sink: "open(os.path.join(dest, entry.filename), 'wb')"
+        through: "manual extraction loop"
+      - source: "user-provided archive path"
+        sink: "zipfile.extract(member, dest)"
+        through: "ZipFile with filesystem path"
+    impact: |
+      ZIP Slip in Python enables writing arbitrary files during archive extraction.
+      Exploitation scenarios include: overwriting application source code for
+      backdoor injection, placing WSGI/ASGI handler files for web shell access,
+      modifying Django/Flask settings for configuration injection, overwriting
+      crontab or systemd service files for persistent access, and replacing SSH
+      authorized_keys for remote login. Python versions before 3.12 are
+      particularly vulnerable as zipfile does not validate entry paths.
+    remediation: |
+      1. Validate each entry path before extraction:
+
+         import zipfile, os
+
+         def safe_extract(zip_path, dest_dir):
+             dest = os.path.abspath(dest_dir)
+             with zipfile.ZipFile(zip_path) as zf:
+                 for info in zf.infolist():
+                     target = os.path.abspath(os.path.join(dest, info.filename))
+                     if not target.startswith(dest + os.sep):
+                         raise ValueError(f"Traversal detected: {info.filename}")
+                 zf.extractall(dest)
+
+      2. Use os.path.basename() for flat extraction:
+
+         for info in zf.infolist():
+             safe_name = os.path.basename(info.filename)
+             if safe_name:
+                 target = os.path.join(dest_dir, safe_name)
+                 with open(target, 'wb') as f:
+                     f.write(zf.read(info.filename))
+
+      3. Upgrade to Python 3.12+ which includes built-in protection.
+      4. Extract to a temporary directory and validate before moving.
+    references:
+      - "https://snyk.io/research/zip-slip-vulnerability"
+      - "https://docs.python.org/3/library/zipfile.html"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+    context_awareness:
+      surrounding_context_patterns:
+        - 'import\s+zipfile'
+        - 'from\s+zipfile\s+import'
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+      taint_source_indicators:
+        - 'request\.files\s*\['
+        - 'uploaded_file'
+        - 'file_?path'
+        - 'archive_?path'
+      taint_sink_indicators:
+        - '\.extractall\s*\('
+        - '\.extract\s*\('
+        - 'open\s*\(\s*os\.path\.join\s*\([^)]*entry'
+      sanitization_patterns:
+        - 'os\.path\.abspath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.basename\s*\(\s*\w+\.filename'
+        - '\.\..*in.*filename'
+        - 'is_relative_to\s*\('
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        An attacker crafts a ZIP file with an entry named
+        ../../../app/wsgi.py containing malicious Python code. A file processing
+        endpoint accepts ZIP uploads and calls zipfile.extractall(upload_dir).
+        The malicious entry is extracted to /app/wsgi.py, overwriting the WSGI
+        application entry point. The next HTTP request triggers the attacker's
+        WSGI handler, establishing a reverse shell with the web server's
+        privileges.
+      example_payload: "../../../app/wsgi.py"
+      attacker_objective: "Write arbitrary files outside extraction directory to achieve remote code execution through code overwrite"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PY-001"
+        - "PT-JS-005"
+        - "PT-JAVA-005"
+        - "PT-GO-005"
+        - "PT-PHP-003"
+
+  # --------------------------------------------------------------------------
+  # PT-PY-006: shutil.copy with User-Controlled Paths
+  # --------------------------------------------------------------------------
+  - rule_id: "PT-PY-006"
+    title: "shutil.copy with User-Controlled Paths"
+    description: >
+      Detects usage of shutil.copy, shutil.copy2, shutil.copyfile, shutil.move,
+      and shutil.copytree where source or destination paths incorporate
+      user-controlled input. An attacker can inject path traversal sequences to
+      copy sensitive files to accessible locations (for exfiltration), overwrite
+      critical files with attacker-controlled content, or move files to achieve
+      denial of service or code execution. The shutil module performs no path
+      validation internally.
+    language: python
+    category: path_traversal
+    severity: High
+    confidence: 0.87
+    cwe: CWE-22
+    owasp: "A01:2021-Broken-Access-Control"
+    tags:
+      - path-traversal
+      - shutil
+      - file-copy
+      - file-move
+      - python
+      - server-side
+      - cwe-22
+      - owasp-a01
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*(?:request\s*\.\s*(?:args|form|json|data)\s*(?:\.\s*get\s*\(\s*|\.|\[))'
+        description: "shutil copy/move with request parameter as source"
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*[^,]+,\s*(?:request\s*\.\s*(?:args|form|json|data)\s*(?:\.\s*get\s*\(\s*|\.|\[))'
+        description: "shutil copy/move with request parameter as destination"
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*[^,]*(?:file_?path|user_?path|src_?path|source_?path)\s*,'
+        description: "shutil copy/move with common user-controlled source variable"
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*[^,]+,\s*[^)]*(?:file_?path|user_?path|dest_?path|target_?path)\s*\)'
+        description: "shutil copy/move with common user-controlled destination variable"
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*os\.path\.join\s*\([^)]*(?:request|req)\s*\.'
+        description: "shutil copy/move with os.path.join containing request data"
+      - type: regex
+        pattern: 'shutil\s*\.\s*copytree\s*\(\s*(?:request\s*\.\s*(?:args|form|json)|src_?dir|source_?dir|user_?dir)\b'
+        description: "shutil.copytree with user-controlled source directory"
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*f[''"][^''"]*\{(?:request|filename|filepath|user_input)[^}]*\}'
+        description: "shutil copy/move with f-string interpolation of user data"
+      - type: regex
+        pattern: 'shutil\s*\.\s*(?:copy2?|copyfile|move)\s*\(\s*[^)]*\+\s*(?:request|filename|filepath|user_input)\b'
+        description: "shutil copy/move with string concatenation of user data"
+    anti_patterns:
+      - 'os\.path\.abspath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'os\.path\.realpath\s*\([^)]+\)\s*\.\s*startswith\s*\('
+      - 'if\s+[''"]\.\.[''"]\s+in\s+'
+      - 'if\s+not\s+\w+\s*\.\s*startswith\s*\('
+      - 'os\.path\.basename\s*\('
+      - 'secure_filename\s*\('
+      - 'sanitize_(?:path|filename|input)\s*\('
+      - 'if\s+os\.path\.isabs\s*\('
+      - 'Path\s*\([^)]+\)\s*\.\s*resolve\s*\(\s*\)\s*\.\s*is_relative_to'
+      - 'allowed_(?:paths|dirs|files)\s*='
+      - 'shutil\.\w+\s*\(\s*[''"][^''"]+[''"]\s*,\s*[''"][^''"]+[''"]\s*\)'
+      - 'os\.path\.commonprefix\s*\(\s*\['
+      - 'raise\s+(?:PermissionDenied|ValueError|SecurityError)'
+      - 'os\.access\s*\(\s*\w+\s*,\s*os\.R_OK'
+      - 'os\.path\.normpath\s*\([^)]+\)\s*\.\s*startswith'
+    bypass_variants:
+      - description: "URL-encoded traversal in source or destination path"
+        pattern: '(?:%2e%2e%2f|%2e%2e\/|\.\.%2f)'
+      - description: "Double encoding to bypass decode filters"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - description: "Null byte injection in path"
+        pattern: '(?:%00|\\x00)(?:\.\w+)?$'
+      - description: "Absolute path overriding os.path.join"
+        pattern: '(?:^\/|^[A-Za-z]:\\\\)'
+      - description: "Backslash traversal on Windows"
+        pattern: '(?:\.\.\\\\|\.\.%5c)'
+    evasion_indicators:
+      - "URL-encoded traversal in copy source or destination"
+      - "Absolute path injection to override base directory"
+      - "Double encoding to bypass URL decode"
+      - "Null byte in path to truncate extension"
+      - "Backslash variants on Windows systems"
+    encoding_variants:
+      - type: "url_encoding"
+        pattern: '(?:%2e%2e%2f|%2e%2e%5c|\.\.%2f|\.\.%5c)'
+      - type: "double_encoding"
+        pattern: '(?:%252e%252e%252f|%252e%252e%255c)'
+      - type: "null_byte"
+        pattern: '(?:%00|\\x00)'
+      - type: "unicode_encoding"
+        pattern: '(?:%c0%ae%c0%ae%c0%af|%e0%80%ae)'
+    multi_function_chain_patterns:
+      - "request.args.get('src') -> shutil.copy(src, dest)"
+      - "request.form['dest'] -> os.path.join -> shutil.copy"
+      - "request.json['source'] -> shutil.move(source, archive_dir)"
+      - "request.args -> shutil.copytree(src_dir, dest_dir)"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Copying sensitive files to accessible locations or overwriting critical files enables data theft and code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "request.args.get('source')"
+        sink: "shutil.copy(source, dest)"
+        through: "direct parameter or os.path.join"
+      - source: "request.form['destination']"
+        sink: "shutil.copy(src, destination)"
+        through: "form field extraction"
+      - source: "request.json['path']"
+        sink: "shutil.move(path, archive_dir)"
+        through: "JSON body parsing"
+    impact: |
+      Exploitation of shutil operations with user-controlled paths enables
+      multiple attack scenarios: copying /etc/shadow or settings.py to a web-
+      accessible directory for download, overwriting application code with
+      malicious files, moving critical files to cause denial of service, and
+      copying web shells into document roots for persistent backdoor access.
+      The bidirectional nature (both source and destination controlled) makes
+      this especially versatile for attackers.
+    remediation: |
+      1. Validate both source and destination against allowed directories:
+
+         import os, shutil
+
+         def safe_copy(src_input, dst_input, allowed_src, allowed_dst):
+             src = os.path.abspath(os.path.join(allowed_src, src_input))
+             dst = os.path.abspath(os.path.join(allowed_dst, dst_input))
+             if not src.startswith(allowed_src + os.sep):
+                 raise PermissionError("Source traversal detected")
+             if not dst.startswith(allowed_dst + os.sep):
+                 raise PermissionError("Destination traversal detected")
+             shutil.copy2(src, dst)
+
+      2. Use os.path.basename() for filename-only operations.
+      3. Implement file ID mappings instead of accepting raw paths.
+      4. Run file operations in chroot or container isolation.
+      5. Log all file copy/move operations for audit trail.
+    references:
+      - "https://docs.python.org/3/library/shutil.html"
+      - "https://cwe.mitre.org/data/definitions/22.html"
+      - "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    context_awareness:
+      surrounding_context_patterns:
+        - '@app\.route\s*\('
+        - 'def\s+\w+\s*\(\s*request'
+        - '@api_view\s*\('
+        - 'import\s+shutil'
+      taint_source_indicators:
+        - 'request\.args\.get\s*\('
+        - 'request\.form\s*\['
+        - 'request\.json\s*\['
+        - 'request\.GET\.get\s*\('
+        - 'request\.POST\.get\s*\('
+      taint_sink_indicators:
+        - 'shutil\.copy\s*\('
+        - 'shutil\.copy2\s*\('
+        - 'shutil\.copyfile\s*\('
+        - 'shutil\.move\s*\('
+        - 'shutil\.copytree\s*\('
+      sanitization_patterns:
+        - 'os\.path\.abspath\s*\([^)]+\)\s*\.startswith'
+        - 'os\.path\.basename\s*\('
+        - 'secure_filename\s*\('
+        - '\.is_relative_to\s*\('
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (1 - sanitization_coverage)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A file management API allows copying files between user directories.
+        The endpoint accepts source and destination parameters:
+        shutil.copy(request.json['source'], request.json['destination']).
+        The attacker sends {"source": "../../../../etc/passwd",
+        "destination": "../../../../var/www/html/passwd.txt"}, copying the
+        system password file to a web-accessible location for download.
+      example_payload: "../../../../etc/passwd"
+      attacker_objective: "Copy sensitive files to accessible locations or overwrite critical application files"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "PT-PY-001"
+        - "PT-PY-002"
+        - "PT-PY-003"

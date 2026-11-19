@@ -1,0 +1,252 @@
+rules:
+- rule_id: TSQL-AUTH-001
+  title: Guest Account Enabled
+  description: 'Detects granting permissions to the guest account.
+
+    '
+  language: tsql
+  category: auth
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - tsql
+  - guest
+  - access-control
+  patterns:
+  - type: regex
+    pattern: GRANT\s+\w+\s+TO\s+guest\b
+  - type: regex
+    pattern: ALTER\s+USER\s+guest\s+WITH\s+LOGIN
+  anti_patterns:
+  - REVOKE
+  - DENY
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: TSQL-AUTH-002
+  title: SA Account Usage
+  description: 'Detects queries running under the SA system administrator account.
+
+    '
+  language: tsql
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - tsql
+  - sa
+  - sysadmin
+  patterns:
+  - type: regex
+    pattern: EXECUTE\s+AS\s+LOGIN\s*=\s*["\x27]sa["\x27]
+  - type: regex
+    pattern: ALTER\s+LOGIN\s+sa\s+ENABLE
+  anti_patterns:
+  - DISABLE
+  - -- audit
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: TSQL-CRYPTO-001
+  title: Transparent Data Encryption Disabled
+  description: 'Detects databases without Transparent Data Encryption.
+
+    '
+  language: tsql
+  category: crypto
+  severity: High
+  confidence: 0.8
+  cwe: CWE-311
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 2
+  tags:
+  - tsql
+  - tde
+  - encryption
+  patterns:
+  - type: regex
+    pattern: SET\s+ENCRYPTION\s+OFF
+  anti_patterns:
+  - SET ENCRYPTION ON
+  - CREATE DATABASE ENCRYPTION KEY
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: TSQL-CRYPTO-002
+  title: Weak Encryption Algorithm in SQL
+  description: 'Detects deprecated encryption algorithms.
+
+    '
+  language: tsql
+  category: crypto
+  severity: High
+  confidence: 0.88
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - tsql
+  - crypto
+  - weak-algorithm
+  patterns:
+  - type: regex
+    pattern: ALGORITHM\s*=\s*(?:DES|TRIPLE_DES|RC[24]|DESX)\b
+  - type: regex
+    pattern: EncryptByPassPhrase\s*\(
+  anti_patterns:
+  - AES_256
+  - AES_128
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: TSQL-SEC-001
+  title: Cross-Database Ownership Chaining
+  description: 'Detects cross-database ownership chaining enabled.
+
+    '
+  language: tsql
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - tsql
+  - ownership-chaining
+  - cross-database
+  patterns:
+  - type: regex
+    pattern: SET\s+DB_CHAINING\s+ON
+  - type: regex
+    pattern: cross\s*db\s*ownership\s*chaining.*1
+  anti_patterns:
+  - 'OFF'
+  - '0'
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: TSQL-SEC-002
+  title: OLE Automation Enabled
+  description: 'Detects OLE Automation procedures being enabled.
+
+    '
+  language: tsql
+  category: rce
+  severity: High
+  confidence: 0.88
+  cwe: CWE-78
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - tsql
+  - ole-automation
+  - rce
+  patterns:
+  - type: regex
+    pattern: sp_configure\s+["\x27]Ole\s+Automation\s+Procedures["\x27]\s*,\s*1
+  anti_patterns:
+  - ', 0'
+  - DISABLE
+  impact: Remote code execution enables complete system compromise and lateral movement
+  remediation: Avoid dynamic code execution, sandbox untrusted input, use allowlists
+- rule_id: TSQL-SEC-003
+  title: SQL Agent Job with sysadmin
+  description: 'Detects SQL Agent jobs running with sysadmin privileges.
+
+    '
+  language: tsql
+  category: auth
+  severity: High
+  confidence: 0.82
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - tsql
+  - sql-agent
+  - sysadmin
+  patterns:
+  - type: regex
+    pattern: sp_add_jobstep.*@subsystem\s*=\s*["\x27]CmdExec["\x27]
+  - type: regex
+    pattern: sp_add_jobstep.*@subsystem\s*=\s*["\x27]PowerShell["\x27]
+  anti_patterns:
+  - '@proxy_id'
+  - '@proxy_name'
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: TSQL-SEC-004
+  title: Sensitive Data Without Column Encryption
+  description: 'Detects columns storing sensitive data without encryption.
+
+    '
+  language: tsql
+  category: crypto
+  severity: Medium
+  confidence: 0.75
+  cwe: CWE-312
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 2
+  tags:
+  - tsql
+  - column-encryption
+  - sensitive-data
+  patterns:
+  - type: regex
+    pattern: CREATE\s+TABLE.*\b(?:SSN|SocialSecurity|CreditCard|CardNumber|Password)\s+(?:VARCHAR|NVARCHAR|CHAR)
+  anti_patterns:
+  - ENCRYPTED WITH
+  - COLUMN_ENCRYPTION_KEY
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: TSQL-SEC-005
+  title: Audit Trail Disabled
+  description: 'Detects disabling of SQL Server audit.
+
+    '
+  language: tsql
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-778
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - tsql
+  - audit
+  - logging
+  patterns:
+  - type: regex
+    pattern: ALTER\s+SERVER\s+AUDIT\s+\w+\s+WITH\s*\(\s*STATE\s*=\s*OFF
+  - type: regex
+    pattern: DROP\s+SERVER\s+AUDIT\b
+  anti_patterns:
+  - STATE = ON
+  - CREATE SERVER AUDIT
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: TSQL-SEC-006
+  title: Remote Admin Connections Enabled
+  description: 'Detects Dedicated Admin Connection enabled remotely.
+
+    '
+  language: tsql
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-284
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - tsql
+  - dac
+  - remote-admin
+  patterns:
+  - type: regex
+    pattern: sp_configure\s+["\x27]remote\s+admin\s+connections["\x27]\s*,\s*1
+  anti_patterns:
+  - ', 0'
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration

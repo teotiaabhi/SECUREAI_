@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────────────
+# .secureaiignore — SecureAI Code Analyzer exclusion rules
+# ──────────────────────────────────────────────────────────────────────
+# Syntax (similar to .gitignore):
+#   node_modules       Ignore directory/file named "node_modules" anywhere
+#   dist/              Ignore only directories named "dist"
+#   *.min.js           Ignore files matching the wildcard
+#   build/output/      Anchored path — only matches from scan root
+#   # comment          Lines starting with # are comments
+# ──────────────────────────────────────────────────────────────────────
+
+# ── Dependency / build directories ───────────────────────────────────
+node_modules
+dist
+build
+vendor
+.venv
+venv
+__pycache__
+
+# ── Version control ──────────────────────────────────────────────────
+.git
+.svn
+.hg
+
+# ── Minified / bundled / generated ───────────────────────────────────
+*.min.js
+*.min.css
+*.bundle.js
+*.chunk.js
+*.map
+
+# ── Lock files ───────────────────────────────────────────────────────
+*.lock
+package-lock.json
+yarn.lock
+Pipfile.lock
+poetry.lock
+
+# ── Test fixtures / snapshots ────────────────────────────────────────
+**/fixtures/
+**/snapshots/
+*.snap
+
+# ── IDE / editor ─────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

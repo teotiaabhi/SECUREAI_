@@ -1,0 +1,304 @@
+# ============================================================================
+# Business Logic Attack Rules
+# Rate Limiting Bypass, Payment Logic Flaws, Workflow Bypass, IDOR
+# Ruleset Version: 4.0.0
+# ============================================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # RATE LIMITING BYPASS
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "BIZ-RATE-001"
+    title: "Missing Rate Limiting on Authentication Endpoint"
+    description: >
+      Detects authentication/login endpoints without rate limiting decorators,
+      enabling brute-force credential attacks.
+    language: python
+    category: auth
+    severity: high
+    confidence: 0.82
+    cwe: CWE-307
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [rate-limiting, brute-force, authentication, business-logic]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:def\s+(?:login|authenticate|sign_in|signin)\s*\(|@(?:app|api|router)\.(?:post|route)\s*\([^)]{0,80}(?:/login|/auth|/signin|/token)\b)[^}]{0,1000}(?:check_password|verify_password|authenticate|login)'
+        description: "Login endpoint without rate limiting"
+        flags: [DOTALL]
+      - type: regex
+        pattern: '(?:def\s+(?:forgot_password|reset_password|send_otp|verify_otp)\s*\(|@(?:app|api|router)\.(?:post|route)\s*\([^)]{0,80}(?:/forgot|/reset|/otp)\b)'
+        description: "Password reset/OTP endpoint without rate limiting"
+    anti_patterns:
+      - "@ratelimit"
+      - "@rate_limit"
+      - "@limiter"
+      - "@throttle"
+      - "RateLimiter"
+      - "slowapi"
+      - "django-ratelimit"
+    remediation: >
+      Apply rate limiting:
+      Python/Flask: @limiter.limit("5/minute")
+      Django: @ratelimit(key='ip', rate='5/m')
+      FastAPI: use slowapi or custom middleware.
+      Add account lockout after N failures.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "High"
+
+  - rule_id: "BIZ-RATE-002"
+    title: "Missing Rate Limiting on Authentication Endpoint (Java)"
+    language: java
+    category: auth
+    severity: high
+    confidence: 0.82
+    cwe: CWE-307
+    owasp: "A07:2021-Identification and Authentication Failures"
+    tags: [rate-limiting, brute-force, authentication, java]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '@(?:Post|Request)Mapping\s*\(\s*[''"]?(?:/login|/auth|/signin|/token)\b[^}]{0,1500}(?:authenticate|checkPassword|verify)'
+        description: "Spring login endpoint without rate limiting"
+        flags: [DOTALL]
+    anti_patterns:
+      - "@RateLimiter"
+      - "RateLimiter"
+      - "Bucket4j"
+      - "Resilience4j"
+      - "@Throttle"
+    remediation: >
+      Use Resilience4j @RateLimiter or Bucket4j for Spring Boot.
+      Add account lockout logic.
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "High"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # PAYMENT / PRICE MANIPULATION
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "BIZ-PAY-001"
+    title: "Client-Controlled Price in Payment Processing"
+    description: >
+      Detects payment processing where price/amount comes directly from
+      user input (request body, query params) without server-side validation
+      against the product catalog or cart.
+    language: python
+    category: auth
+    severity: critical
+    confidence: 0.80
+    cwe: CWE-20
+    owasp: "A04:2021-Insecure Design"
+    tags: [payment, price-manipulation, business-logic, ecommerce]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:charge|create_payment|process_payment|create_order)[^)]{0,200}(?:request\.(?:data|json|POST|form))\s*(?:\[|\.get\s*\()[^\]]{0,60}(?:price|amount|total|cost|quantity)\b'
+        description: "Payment function using request data for price/amount"
+      - type: regex
+        pattern: '(?:stripe\.(?:Charge|PaymentIntent)\.create|paypal\.Payment\.create)[^)]{0,300}request\.\w+\s*(?:\[|\.get)\s*\([^)]{0,60}(?:amount|price)\b'
+        description: "Payment gateway called with client-controlled amount"
+        flags: [DOTALL]
+    anti_patterns:
+      - "get_price_from_db"
+      - "product.price"
+      - "cart.total"
+      - "validate_amount"
+      - "catalog"
+    remediation: >
+      Never trust client-provided prices. Always look up the price server-side:
+        product = Product.objects.get(id=request.data['product_id'])
+        amount = product.price * validated_quantity
+      Validate against the product catalog before charging.
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+    cross_rule_intelligence:
+      related_rules: ["AUTH-IDOR-001"]
+      high_impact_flag: true
+
+  - rule_id: "BIZ-PAY-002"
+    title: "Client-Controlled Price in Payment Processing (JavaScript)"
+    language: javascript
+    category: auth
+    severity: critical
+    confidence: 0.80
+    cwe: CWE-20
+    owasp: "A04:2021-Insecure Design"
+    tags: [payment, price-manipulation, business-logic, ecommerce, nodejs]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:stripe\.(?:charges|paymentIntents)\.create|paypal\.payment\.create)\s*\([^)]{0,400}req\.body\.(?:price|amount|total|cost)\b'
+        description: "Payment gateway with req.body amount"
+        flags: [DOTALL]
+      - type: regex
+        pattern: 'amount\s*:\s*(?:req\.body|req\.query|req\.params)\s*\.(?:amount|price|total)\b'
+        description: "Direct assignment of request param to amount field"
+    anti_patterns:
+      - "getPrice("
+      - "product.price"
+      - "calculateTotal"
+      - "cart.getTotal"
+    remediation: >
+      Fetch price from database:
+        const product = await Product.findById(req.body.productId);
+        const amount = product.price * validatedQuantity;
+    severity_scoring:
+      severity_weight: 9
+      exploitability_score: "High"
+
+  - rule_id: "BIZ-PAY-003"
+    title: "Negative Quantity or Negative Price Not Validated"
+    language: python
+    category: auth
+    severity: high
+    confidence: 0.75
+    cwe: CWE-20
+    owasp: "A04:2021-Insecure Design"
+    tags: [payment, quantity-validation, business-logic]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:quantity|qty|amount|count)\s*=\s*(?:int|float)\s*\(\s*request\.(?:data|json|POST|form)\s*(?:\[|\.get)'
+        description: "Quantity parsed from request without bounds validation"
+      - type: regex
+        pattern: '(?:order|cart|item)\.\w*(?:quantity|qty)\s*=\s*(?:int|float)\s*\([^)]{0,100}request\.'
+        description: "Cart quantity set from request without validation"
+    anti_patterns:
+      - "> 0"
+      - ">= 1"
+      - "MinValueValidator"
+      - "validate"
+      - "abs("
+    remediation: >
+      Always validate quantity > 0 and amount > 0:
+        quantity = int(request.data['quantity'])
+        if quantity <= 0 or quantity > MAX_QTY:
+            raise ValidationError("Invalid quantity")
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # WORKFLOW / STATE BYPASS
+  # ══════════════════════════════════════════════════════════════════════
+
+  - rule_id: "BIZ-FLOW-001"
+    title: "Missing Workflow State Validation (Step Skipping)"
+    description: >
+      Detects multi-step processes (checkout, onboarding, verification)
+      where the current step does not validate that previous steps
+      were completed, enabling step-skipping attacks.
+    language: python
+    category: auth
+    severity: high
+    confidence: 0.75
+    cwe: CWE-841
+    owasp: "A04:2021-Insecure Design"
+    tags: [workflow, state-bypass, step-skipping, business-logic]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:def\s+(?:checkout|confirm_order|finalize|complete_registration|verify_email)\s*\()[^}]{0,2000}(?:\.save\(\)|\.create\(|commit\(\))'
+        description: "Finalization endpoint without checking prior step status"
+        flags: [DOTALL]
+    anti_patterns:
+      - "status =="
+      - "state =="
+      - "step =="
+      - "is_verified"
+      - "is_confirmed"
+      - "workflow_state"
+      - "COMPLETED"
+    remediation: >
+      Enforce workflow state machine:
+        if order.status != OrderStatus.PAYMENT_CONFIRMED:
+            raise PermissionDenied("Previous step not completed")
+      Use a state machine library (django-fsm, transitions).
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  - rule_id: "BIZ-FLOW-002"
+    title: "Missing Workflow State Validation (JavaScript)"
+    language: javascript
+    category: auth
+    severity: high
+    confidence: 0.75
+    cwe: CWE-841
+    owasp: "A04:2021-Insecure Design"
+    tags: [workflow, state-bypass, step-skipping, business-logic, nodejs]
+    detection_layer: 3
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:router|app)\.(?:post|put)\s*\([^)]{0,100}(?:checkout|confirm|finalize|complete)[^}]{0,2000}\.save\s*\('
+        description: "Finalization route without state check"
+        flags: [DOTALL]
+    anti_patterns:
+      - "status ==="
+      - "state ==="
+      - "step ==="
+      - ".isCompleted"
+      - "workflow"
+      - "COMPLETED"
+    remediation: >
+      Validate workflow state:
+        if (order.status !== 'PAYMENT_CONFIRMED') {
+          return res.status(400).json({ error: 'Previous step not completed' });
+        }
+    severity_scoring:
+      severity_weight: 7
+      exploitability_score: "Medium"
+
+  - rule_id: "BIZ-FLOW-003"
+    title: "Coupon/Discount Code Applied Multiple Times"
+    language: python
+    category: auth
+    severity: medium
+    confidence: 0.72
+    cwe: CWE-799
+    owasp: "A04:2021-Insecure Design"
+    tags: [coupon, discount, business-logic, ecommerce]
+    detection_layer: 2
+    attack_surface_type: "api"
+    vulnerability_family: "business-logic"
+    patterns:
+      - type: regex
+        pattern: '(?:apply_discount|apply_coupon|use_coupon|redeem_coupon)[^}]{0,1000}(?:discount|coupon|promo)[^}]{0,300}(?:total|price|amount)\s*[-*=]'
+        description: "Coupon application without single-use check"
+        flags: [DOTALL]
+    anti_patterns:
+      - "is_used"
+      - "already_applied"
+      - "usage_count"
+      - "max_uses"
+      - "one_time"
+      - "redeemed"
+    remediation: >
+      Track coupon redemptions:
+        if coupon.is_used or coupon.usage_count >= coupon.max_uses:
+            raise ValidationError("Coupon already used")
+        coupon.usage_count += 1
+      Use database constraints for atomicity.
+    severity_scoring:
+      severity_weight: 6
+      exploitability_score: "Medium"

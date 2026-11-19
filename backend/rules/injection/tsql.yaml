@@ -1,0 +1,298 @@
+rules:
+- rule_id: TSQL-INJ-001
+  title: SQL Injection via Dynamic SQL (sp_executesql)
+  description: 'Detects dynamic SQL without parameterization in T-SQL.
+
+    '
+  language: tsql
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - dynamic-sql
+  - sp-executesql
+  patterns:
+  - type: regex
+    pattern: EXEC(?:UTE)?\s*\(\s*@\w+\s*\)
+  - type: regex
+    pattern: EXEC(?:UTE)?\s*\(\s*'[^']*'\s*\+\s*@\w+\s*\+\s*'[^']*'\s*\)
+  - type: regex
+    pattern: SET\s+@\w+\s*=\s*'(?:SELECT|INSERT|UPDATE|DELETE)\b.*'\s*\+\s*@\w+
+  - type: regex
+    pattern: EXEC(?:UTE)?\s+sp_executesql\s+@\w+(?!\s*,\s*N'@)
+  anti_patterns:
+  - sp_executesql.*,.*N'@
+  - QUOTENAME
+  - parameterized
+  impact: 'T-SQL injection can compromise the SQL Server database, access linked servers,
+
+    enable xp_cmdshell for OS command execution, and exfiltrate data.
+
+    '
+  remediation: "Use sp_executesql with parameters:\n  EXEC sp_executesql @sql, N'@id INT', @id = @user_id;\nUse QUOTENAME for identifiers:\n  SET @sql = 'SELECT * FROM ' + QUOTENAME(@tableName);\n"
+- rule_id: TSQL-INJ-002
+  title: Dangerous Stored Procedure Usage
+  description: 'Detects use of dangerous extended stored procedures.
+
+    '
+  language: tsql
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - command-injection
+  - xp-cmdshell
+  patterns:
+  - type: regex
+    pattern: EXEC(?:UTE)?\s+(?:master\.\.)?xp_cmdshell\b
+  - type: regex
+    pattern: EXEC(?:UTE)?\s+(?:master\.\.)?xp_regread\b
+  - type: regex
+    pattern: EXEC(?:UTE)?\s+(?:master\.\.)?xp_regwrite\b
+  - type: regex
+    pattern: EXEC(?:UTE)?\s+(?:master\.\.)?xp_dirtree\b
+  - type: regex
+    pattern: EXEC(?:UTE)?\s+(?:master\.\.)?xp_fileexist\b
+  - type: regex
+    pattern: sp_OACreate\b
+  anti_patterns:
+  - -- disabled
+  - -- audit
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: TSQL-INJ-003
+  title: SQL Injection via OPENROWSET/OPENDATASOURCE
+  description: 'Detects data access via OPENROWSET with dynamic connection strings.
+
+    '
+  language: tsql
+  category: injection
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - openrowset
+  patterns:
+  - type: regex
+    pattern: OPENROWSET\s*\(\s*'[^']*'\s*,\s*(?:@\w+|'[^']*'\s*\+)\b
+  - type: regex
+    pattern: OPENDATASOURCE\s*\(\s*'[^']*'\s*,\s*(?:@\w+|'[^']*'\s*\+)\b
+  - type: regex
+    pattern: OPENQUERY\s*\(\s*\w+\s*,\s*(?:@\w+|'[^']*'\s*\+)\b
+  anti_patterns:
+  - -- static
+  - QUOTENAME
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: TSQL-XAUTH-001
+  title: Excessive Database Privileges
+  description: 'Detects granting of excessive SQL Server privileges.
+
+    '
+  language: tsql
+  category: auth
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - excessive-privileges
+  patterns:
+  - type: regex
+    pattern: ALTER\s+ROLE\s+(?:db_owner|sysadmin)\s+ADD\s+MEMBER\b
+  - type: regex
+    pattern: EXEC\s+sp_addsrvrolemember\s+.*'sysadmin'
+  - type: regex
+    pattern: GRANT\s+CONTROL\s+(?:ON\s+)?(?:SERVER|DATABASE)\b
+  - type: regex
+    pattern: GRANT\s+(?:ALTER|IMPERSONATE)\s+ON\s+LOGIN\b
+  anti_patterns:
+  - -- migration
+  - REVOKE
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: TSQL-XAUTH-002
+  title: Hardcoded SQL Server Credentials
+  description: 'Detects hardcoded credentials in T-SQL scripts.
+
+    '
+  language: tsql
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: CREATE\s+LOGIN\s+\w+\s+WITH\s+PASSWORD\s*=\s*'[^']{4,}'
+  - type: regex
+    pattern: ALTER\s+LOGIN\s+\w+\s+WITH\s+PASSWORD\s*=\s*'[^']{4,}'
+  - type: regex
+    pattern: Password\s*=\s*[^;]{4,};
+  - type: regex
+    pattern: pwd\s*=\s*[^;]{4,};
+  anti_patterns:
+  - $(Password)
+  - SQLCMD
+  - :setvar
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: TSQL-XAUTH-003
+  title: Guest User Enabled
+  description: 'Detects enabling guest user access on databases.
+
+    '
+  language: tsql
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-284
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - guest-access
+  - misconfiguration
+  patterns:
+  - type: regex
+    pattern: GRANT\s+(?:CONNECT|SELECT|INSERT|UPDATE|DELETE|EXECUTE)\s+TO\s+guest\b
+  anti_patterns:
+  - REVOKE
+  - DENY
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: TSQL-XCRYPTO-001
+  title: Weak Encryption Algorithm
+  description: 'Detects use of weak encryption in SQL Server.
+
+    '
+  language: tsql
+  category: crypto
+  severity: High
+  confidence: 0.88
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-crypto
+  patterns:
+  - type: regex
+    pattern: HASHBYTES\s*\(\s*'(?:MD2|MD4|MD5|SHA1|SHA)'\b
+  - type: regex
+    pattern: EncryptByPassPhrase\s*\(
+  - type: regex
+    pattern: ALGORITHM\s*=\s*(?:DES|TRIPLE_DES|RC4|RC2)\b
+  anti_patterns:
+  - SHA2_256
+  - SHA2_512
+  - AES_256
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: TSQL-XSEC-001
+  title: Trustworthy Database Setting
+  description: 'Detects TRUSTWORTHY database setting which can lead to privilege escalation.
+
+    '
+  language: tsql
+  category: framework_misuse
+  severity: High
+  confidence: 0.92
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - trustworthy
+  - privilege-escalation
+  patterns:
+  - type: regex
+    pattern: ALTER\s+DATABASE\s+\w+\s+SET\s+TRUSTWORTHY\s+ON\b
+  anti_patterns:
+  - msdb
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: TSQL-XSEC-002
+  title: CLR Assembly Without SAFE Permission
+  description: 'Detects CLR assemblies with EXTERNAL_ACCESS or UNSAFE permissions.
+
+    '
+  language: tsql
+  category: framework_misuse
+  severity: High
+  confidence: 0.88
+  cwe: CWE-250
+  owasp: A05:2021-Security-Misconfiguration
+  detection_layer: 1
+  tags:
+  - clr
+  - assembly
+  - permissions
+  patterns:
+  - type: regex
+    pattern: CREATE\s+ASSEMBLY\s+.*WITH\s+PERMISSION_SET\s*=\s*(?:EXTERNAL_ACCESS|UNSAFE)\b
+  - type: regex
+    pattern: ALTER\s+ASSEMBLY\s+.*WITH\s+PERMISSION_SET\s*=\s*(?:EXTERNAL_ACCESS|UNSAFE)\b
+  anti_patterns:
+  - SAFE
+  impact: Framework misconfiguration can disable security controls and expose sensitive functionality
+  remediation: Follow framework security best practices, enable security features, review configuration
+- rule_id: TSQL-XSEC-003
+  title: Linked Server with Hardcoded Credentials
+  description: 'Detects linked server configurations with embedded credentials.
+
+    '
+  language: tsql
+  category: secrets
+  severity: High
+  confidence: 0.88
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - linked-server
+  - credentials
+  patterns:
+  - type: regex
+    pattern: sp_addlinkedsrvlogin.*@rmtpassword\s*=\s*N?'[^']{4,}'
+  - type: regex
+    pattern: EXEC\s+sp_addlinkedserver.*Provider\s*=\s*'[^']+'.*Password\s*=\s*'[^']{4,}'
+  anti_patterns:
+  - self_mapping
+  - -- placeholder
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately
+- rule_id: TSQL-XSEC-004
+  title: SQL Agent Job with Credentials
+  description: 'Detects SQL Agent jobs with embedded credentials.
+
+    '
+  language: tsql
+  category: secrets
+  severity: High
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - sql-agent
+  - credentials
+  patterns:
+  - type: regex
+    pattern: sp_add_jobstep.*@command\s*=\s*N?'[^']*(?:password|pwd)\s*=\s*[^']{4,}
+  anti_patterns:
+  - credential
+  - proxy
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately

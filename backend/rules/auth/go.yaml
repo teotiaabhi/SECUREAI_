@@ -1,0 +1,1259 @@
+rules:
+- rule_id: AUTH-GO-001
+  title: Hardcoded API Keys in Go Source
+  description: 'Detects hardcoded API keys, tokens, and secrets in Go source code including constant declarations, variable
+    assignments, and inline authentication values used in HTTP clients and service configurations.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-798
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - hardcoded-credentials
+  - api-keys
+  - secrets
+  - go
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: (?:apiKey|api_key|API_KEY|ApiKey)\s*(?:=|:=)\s*"[^"]{8,}"
+    description: Hardcoded API key assignment
+  - pattern: (?:secret|SECRET|Secret)\s*(?:=|:=)\s*"[^"]{8,}"
+    description: Hardcoded secret assignment
+  - pattern: (?:token|TOKEN|Token)\s*(?:=|:=)\s*"[^"]{8,}"
+    description: Hardcoded token assignment
+  - pattern: const\s+(?:\w*(?:Key|Secret|Token|Password)\w*)\s*=\s*"[^"]{8,}"
+    description: Constant with hardcoded credential
+  anti_patterns:
+  - pattern: os\.Getenv\(
+    description: Environment variable usage
+  - pattern: viper\.Get|viper\.GetString
+    description: Viper config library
+  - pattern: _test\.go|TestMain|func Test
+    description: Test file context
+  - pattern: \bplaceholder\b|\bexample\b|\bchangeme\b
+    description: Placeholder values
+  - pattern: vault\.Read|secretmanager
+    description: Secrets manager usage
+  - pattern: flag\.String|pflag\.String
+    description: Command-line flag for configuration
+  bypass_variants:
+  - variant: API key in struct literal or map literal
+    description: Credential embedded in composite literal
+  - variant: Base64-encoded credential in const block
+    description: Obfuscated constant credential
+  evasion_indicators:
+  - Credential in const block
+  - API key in init() function
+  - Token concatenation to avoid detection
+  encoding_variants:
+  - String literal assignment
+  - Const block declaration
+  multi_function_chain_patterns:
+  - const apiKey = 'hardcoded' -> http.NewRequest -> Header.Set('Authorization')
+  - secret := 'hardcoded' -> hmac.New -> token signing
+  privilege_context_flags:
+  - API authentication
+  - Service account credentials
+  business_logic_indicator:
+  - HTTP client configuration
+  - Service initialization
+  probable_taint_paths:
+  - source: Hardcoded string literal
+    sink: HTTP Authorization header or API call
+    through: Direct credential usage
+  impact: 'Hardcoded API keys in Go binaries can be extracted through reverse engineering or source code access. This provides
+    direct access to external APIs, cloud services, and authenticated endpoints.
+
+    '
+  remediation: 'Use os.Getenv() for environment variables, Viper for configuration files, or a secrets manager like HashiCorp
+    Vault. Never commit credentials to source control.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/798.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - package main
+    - func init()
+    - http.Client
+    taint_source_indicators:
+    - String literal
+    - Const declaration
+    taint_sink_indicators:
+    - http.NewRequest
+    - Header.Set
+    - grpc.Dial
+    sanitization_patterns:
+    - os.Getenv
+    - viper.Get
+    - vault.Read
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: production API key
+      modifier: '+0.5'
+    - condition: test context
+      modifier: '-4.0'
+  exploit_scenario: '1. Attacker accesses Go source code or decompiles binary. 2. Finds const ApiKey = "sk-prod-abc123..."
+    in source. 3. Uses extracted API key to access production cloud services. 4. Full access to external service with application
+    privileges.
+
+    '
+  confidence_factors:
+    increases:
+    - Long string in credential variable
+    - Const with Key/Secret/Token name
+    decreases:
+    - Test file
+    - Placeholder value
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-002
+    - AUTH-GO-009
+    dependency_chain: Hardcoded credentials provide direct authentication bypass
+    combined_risk_increase: Critical when combined with exposed endpoints
+- rule_id: AUTH-GO-002
+  title: JWT Validation Skip in Go
+  description: 'Detects insecure JWT handling in Go applications including skipped signature verification, missing claims
+    validation, acceptance of none algorithm, and improper use of jwt-go or golang-jwt libraries.
+
+    '
+  language: go
+  category: auth
+  severity: Critical
+  confidence: 0.85
+  cwe: CWE-347
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - jwt
+  - verification-bypass
+  - golang-jwt
+  - authentication
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: jwt\.Parse\(.*,\s*func.*\{[^}]*return\s+key.*\}\)(?!.*Valid)
+    description: JWT parsed without validation check
+  - pattern: jwt\.ParseUnverified
+    description: Explicitly unverified JWT parsing
+  - pattern: token\.Claims\..*(?!.*token\.Valid)
+    description: Claims accessed without checking Valid
+  - pattern: SigningMethodNone|alg.*none|UnsafeAllowNoneSignatureType
+    description: None algorithm allowed
+  anti_patterns:
+  - pattern: jwt\.SigningMethodRS256|jwt\.SigningMethodES256
+    description: Strong signing method specified
+  - pattern: token\.Valid
+    description: Token validity check
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: jwt\.NewWithClaims.*SignedString
+    description: Token creation, not validation
+  - pattern: VerifyExpiresAt|VerifyIssuedAt
+    description: Claims verification
+  - pattern: jwt\.StandardClaims|jwt\.RegisteredClaims
+    description: Standard claims with validation
+  bypass_variants:
+  - variant: Algorithm confusion attack using HMAC with RSA public key
+    description: RSA public key used as HMAC secret
+  - variant: Custom key function returning static key without algorithm check
+    description: KeyFunc not validating algorithm
+  evasion_indicators:
+  - ParseUnverified used in production
+  - Claims accessed before validity check
+  - Algorithm not pinned in KeyFunc
+  encoding_variants:
+  - jwt-go library syntax
+  - golang-jwt/jwt/v5 syntax
+  multi_function_chain_patterns:
+  - jwt.ParseUnverified -> claims extraction -> auth decision
+  - jwt.Parse with weak KeyFunc -> claims trusted -> privilege granted
+  privilege_context_flags:
+  - Authentication token validation
+  - API authorization middleware
+  business_logic_indicator:
+  - JWT middleware
+  - Authentication handler
+  probable_taint_paths:
+  - source: Authorization header
+    sink: Claims used for access control
+    through: Missing signature verification
+  impact: 'Attackers can forge JWT tokens with arbitrary claims, bypass authentication, and impersonate any user including
+    administrators when verification is skipped.
+
+    '
+  remediation: 'Always verify JWT signatures using jwt.Parse with a proper KeyFunc that validates the algorithm. Check token.Valid
+    before accessing claims. Pin algorithms to RS256 or ES256.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/347.html
+  - https://github.com/golang-jwt/jwt
+  - https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
+  context_awareness:
+    surrounding_context_patterns:
+    - import "github.com/golang-jwt/jwt"
+    - jwt.Parse
+    - jwt.Token
+    taint_source_indicators:
+    - Authorization header
+    - r.Header.Get("Authorization")
+    taint_sink_indicators:
+    - Claims map
+    - user ID from token
+    - role from claims
+    sanitization_patterns:
+    - token.Valid
+    - SigningMethodRS256
+    - VerifyExpiresAt
+  severity_scoring:
+    base_score: 9.5
+    exploitability: high
+    impact_score: 9.0
+    adjustments:
+    - condition: ParseUnverified in handler
+      modifier: '+0.5'
+    - condition: test file
+      modifier: '-5.0'
+  exploit_scenario: '1. Go API uses jwt.ParseUnverified to extract claims. 2. Attacker crafts JWT with admin role claim and
+    no signature. 3. Server extracts claims without verification. 4. Attacker gains admin access with forged token.
+
+    '
+  confidence_factors:
+    increases:
+    - ParseUnverified in production code
+    - Claims accessed without Valid check
+    decreases:
+    - Test context
+    - Strong signing method enforced
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-001
+    - AUTH-GO-003
+    dependency_chain: JWT bypass enables complete authentication circumvention
+    combined_risk_increase: Maximum when combined with missing auth middleware
+- rule_id: AUTH-GO-003
+  title: Missing Authentication Middleware in Go
+  description: 'Detects HTTP routes in Go web frameworks (Gin, Echo, Chi, net/http) that handle sensitive operations without
+    authentication middleware, leaving endpoints accessible to unauthenticated users.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-306
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - missing-auth
+  - middleware
+  - gin
+  - echo
+  - chi
+  - net-http
+  detection_layer: 2
+  attack_surface_type: authentication
+  patterns:
+  - pattern: r\.(?:POST|PUT|DELETE|PATCH)\("(?:/api)?/(?:admin|user|account|payment).*",\s*\w+\)
+    description: Sensitive route without middleware in Gin/Chi
+  - pattern: e\.(?:POST|PUT|DELETE)\("(?:/api)?/(?:admin|user|account).*",\s*\w+\)
+    description: Sensitive route without middleware in Echo
+  - pattern: http\.HandleFunc\("(?:/api)?/(?:admin|user|account).*",\s*\w+\)
+    description: Sensitive net/http handler without auth
+  - pattern: mux\.Handle(?:Func)?\("(?:DELETE|PUT|POST)".*(?:admin|user|account)
+    description: Gorilla mux sensitive route without auth
+  anti_patterns:
+  - pattern: Use\(.*(?:auth|Auth|jwt|JWT|middleware|Middleware).*\)
+    description: Auth middleware applied
+  - pattern: Group\(.*,\s*.*(?:auth|Auth|jwt).*\)
+    description: Route group with auth middleware
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: (?:login|register|signup|health|public|static)
+    description: Public endpoint
+  - pattern: authMiddleware|requireAuth|AuthRequired
+    description: Auth middleware reference
+  - pattern: r\.With\(.*auth.*\)
+    description: Chi middleware chain with auth
+  bypass_variants:
+  - variant: Auth middleware applied to group but specific route excluded
+    description: Route-level middleware exclusion
+  - variant: Middleware order placing auth after handler
+    description: Incorrect middleware ordering
+  evasion_indicators:
+  - Sensitive route registered without middleware
+  - Auth middleware applied to wrong route group
+  encoding_variants:
+  - Gin router syntax
+  - Echo router syntax
+  - Chi router syntax
+  - net/http mux syntax
+  multi_function_chain_patterns:
+  - http.HandleFunc('/admin/delete', handler) -> no auth check -> admin action
+  - r.POST('/api/users', createUser) -> no auth -> unauthorized user creation
+  privilege_context_flags:
+  - Admin operations
+  - User data modification
+  - Financial operations
+  business_logic_indicator:
+  - Router setup
+  - Route registration
+  probable_taint_paths:
+  - source: Unauthenticated HTTP request
+    sink: Handler performing privileged operation
+    through: Missing auth middleware
+  impact: 'Missing authentication middleware allows unauthenticated users to access admin panels, modify user data, and perform
+    privileged operations without any credentials.
+
+    '
+  remediation: 'Apply authentication middleware to all sensitive routes. Use route groups with auth middleware in Gin/Echo/Chi.
+    Implement middleware chains that verify authentication before handler execution.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/306.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - gin.Default()
+    - echo.New()
+    - chi.NewRouter()
+    - http.NewServeMux()
+    taint_source_indicators:
+    - http.Request
+    - gin.Context
+    - echo.Context
+    taint_sink_indicators:
+    - database query
+    - service call
+    - data modification
+    sanitization_patterns:
+    - Use(authMiddleware)
+    - Group with auth
+    - r.With(auth)
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: admin endpoint unprotected
+      modifier: '+0.5'
+    - condition: public-facing endpoint
+      modifier: '-3.0'
+  exploit_scenario: '1. Go API registers DELETE /api/admin/users/:id without auth middleware. 2. Attacker discovers endpoint
+    through API enumeration. 3. Sends DELETE request without any authentication. 4. User account deleted without credentials.
+
+    '
+  confidence_factors:
+    increases:
+    - Sensitive route without middleware reference
+    - Admin path without auth
+    decreases:
+    - Auth middleware applied at group level
+    - Public endpoint
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-002
+    - AUTH-GO-006
+    dependency_chain: Missing auth middleware makes all endpoints publicly accessible
+    combined_risk_increase: Maximum when combined with JWT bypass
+- rule_id: AUTH-GO-004
+  title: BCrypt Cost Factor Too Low in Go
+  description: 'Detects bcrypt password hashing in Go with a cost factor below the recommended minimum of 10, making brute-force
+    attacks significantly faster after a database breach.
+
+    '
+  language: go
+  category: auth
+  severity: Medium
+  confidence: 0.85
+  cwe: CWE-916
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - bcrypt
+  - password-hashing
+  - cost-factor
+  - brute-force
+  - go
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: bcrypt\.GenerateFromPassword\(.*,\s*[1-9]\)
+    description: BCrypt with cost below 10
+  - pattern: bcrypt\.GenerateFromPassword\(.*,\s*bcrypt\.MinCost\)
+    description: BCrypt with MinCost (4)
+  - pattern: cost\s*(?:=|:=)\s*[1-9]\b.*bcrypt
+    description: Low cost variable used with bcrypt
+  - pattern: bcrypt\.GenerateFromPassword\(.*,\s*4\)
+    description: BCrypt with minimum cost of 4
+  anti_patterns:
+  - pattern: bcrypt\.DefaultCost
+    description: Default cost (10)
+  - pattern: bcrypt\.GenerateFromPassword\(.*,\s*1[0-9]\)
+    description: Adequate cost factor (10+)
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: argon2\.IDKey|argon2\.Key
+    description: Argon2 password hashing
+  - pattern: scrypt\.Key
+    description: Scrypt password hashing
+  - pattern: \bbenchmark\b|\bBenchmark\b
+    description: Benchmark context
+  bypass_variants:
+  - variant: Cost factor from config defaulting to low value
+    description: Configurable cost with weak default
+  - variant: Custom wrapper hiding low cost parameter
+    description: Wrapper function with hardcoded low cost
+  evasion_indicators:
+  - MinCost used in production
+  - Cost factor below 10
+  encoding_variants:
+  - bcrypt.GenerateFromPassword direct
+  - Cost variable indirection
+  multi_function_chain_patterns:
+  - bcrypt.GenerateFromPassword(pw, 4) -> db.Store -> weak hash persisted
+  - MinCost -> password hash -> database breach -> fast cracking
+  privilege_context_flags:
+  - Password hashing
+  - User registration
+  business_logic_indicator:
+  - User service
+  - Authentication handler
+  probable_taint_paths:
+  - source: User password
+    sink: Database password column
+    through: Low-cost bcrypt hash
+  impact: 'Low bcrypt cost factor significantly reduces brute-force time. With MinCost (4), cracking is approximately 64x
+    faster than with DefaultCost (10).
+
+    '
+  remediation: 'Use bcrypt.DefaultCost (10) or higher. Consider cost factor 12-14 for production. For stronger protection,
+    use argon2.IDKey with recommended parameters.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/916.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  - https://pkg.go.dev/golang.org/x/crypto/bcrypt
+  context_awareness:
+    surrounding_context_patterns:
+    - import "golang.org/x/crypto/bcrypt"
+    - bcrypt.GenerateFromPassword
+    taint_source_indicators:
+    - User password input
+    - r.FormValue("password")
+    taint_sink_indicators:
+    - Database insert
+    - User record storage
+    sanitization_patterns:
+    - bcrypt.DefaultCost
+    - bcrypt.GenerateFromPassword(pw, 12)
+  severity_scoring:
+    base_score: 5.5
+    exploitability: medium
+    impact_score: 6.0
+    adjustments:
+    - condition: MinCost used
+      modifier: '+2.0'
+    - condition: test or benchmark context
+      modifier: '-3.0'
+  exploit_scenario: '1. Application uses bcrypt.MinCost (4) for password hashing. 2. Database breach exposes bcrypt hashes.
+    3. Attacker uses GPU-based cracking tool. 4. With cost 4, passwords crack 64x faster than cost 10.
+
+    '
+  confidence_factors:
+    increases:
+    - MinCost in production code
+    - Single-digit cost literal
+    decreases:
+    - Test or benchmark file
+    - DefaultCost used
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-001
+    - AUTH-GO-007
+    dependency_chain: Weak hashing with credential exposure enables fast password cracking
+    combined_risk_increase: High when database is exposed
+- rule_id: AUTH-GO-005
+  title: Insecure Session Cookie Flags in Go
+  description: 'Detects session cookies in Go applications set without Secure, HttpOnly, or SameSite flags, exposing session
+    tokens to interception, XSS theft, or CSRF attacks.
+
+    '
+  language: go
+  category: auth
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-614
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - session
+  - cookie
+  - httponly
+  - secure-flag
+  - samesite
+  - go
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: http\.Cookie\{[^}]*(?:Secure:\s*false|HttpOnly:\s*false)
+    description: Cookie with Secure or HttpOnly explicitly false
+  - pattern: http\.SetCookie\(.*&http\.Cookie\{[^}]*\}\)(?!.*Secure.*true)
+    description: SetCookie without Secure flag
+  - pattern: sessions\.Options\{[^}]*HttpOnly:\s*false
+    description: Gorilla sessions with HttpOnly disabled
+  - pattern: http\.Cookie\{[^}]*Name:\s*"(?:session|token|sid|auth)"[^}]*(?!.*SameSite)
+    description: Session cookie without SameSite
+  anti_patterns:
+  - pattern: Secure:\s*true
+    description: Secure flag enabled
+  - pattern: HttpOnly:\s*true
+    description: HttpOnly flag enabled
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: SameSite:\s*http\.SameSiteStrictMode
+    description: SameSite strict mode
+  - pattern: SameSite:\s*http\.SameSiteLaxMode
+    description: SameSite lax mode
+  - pattern: __Host-|__Secure-
+    description: Cookie prefix for secure cookies
+  bypass_variants:
+  - variant: Secure flag set but SameSite missing
+    description: Partial cookie protection
+  - variant: HttpOnly set but Secure missing with HTTP fallback
+    description: Cookie transmitted over HTTP
+  evasion_indicators:
+  - Session cookie without Secure flag
+  - HttpOnly explicitly set to false
+  encoding_variants:
+  - http.Cookie struct literal
+  - Gorilla sessions Options
+  multi_function_chain_patterns:
+  - 'http.Cookie{HttpOnly: false} -> XSS -> session theft'
+  - Cookie without Secure -> HTTP transmission -> session hijacking
+  privilege_context_flags:
+  - Session management
+  - Authentication persistence
+  business_logic_indicator:
+  - Authentication handler
+  - Login endpoint
+  probable_taint_paths:
+  - source: Session token
+    sink: HTTP response Set-Cookie header
+    through: Insecure cookie configuration
+  impact: 'Insecure session cookies can be stolen via XSS (missing HttpOnly), intercepted over HTTP (missing Secure), or used
+    in CSRF attacks (missing SameSite).
+
+    '
+  remediation: 'Set Secure: true, HttpOnly: true, and SameSite: http.SameSiteStrictMode on all session cookies. Use __Host-
+    prefix for additional protection.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/614.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - http.Cookie
+    - http.SetCookie
+    - sessions.NewCookieStore
+    taint_source_indicators:
+    - Session token
+    - Authentication result
+    taint_sink_indicators:
+    - Set-Cookie header
+    - HTTP response
+    sanitization_patterns:
+    - 'Secure: true'
+    - 'HttpOnly: true'
+    - SameSiteStrictMode
+  severity_scoring:
+    base_score: 7.0
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: HttpOnly false on session cookie
+      modifier: '+1.5'
+    - condition: internal application
+      modifier: '-1.5'
+  exploit_scenario: '1. Go app sets session cookie with HttpOnly: false. 2. XSS vulnerability exists in the application. 3.
+    Attacker injects script that reads document.cookie. 4. Session token exfiltrated; attacker hijacks user session.
+
+    '
+  confidence_factors:
+    increases:
+    - HttpOnly explicitly false
+    - Session cookie without Secure
+    decreases:
+    - Test file context
+    - All secure flags present
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-006
+    - AUTH-GO-003
+    dependency_chain: Insecure cookies amplify XSS and CSRF impacts
+    combined_risk_increase: High when combined with CORS misconfiguration
+- rule_id: AUTH-GO-006
+  title: CORS Wildcard with Credentials in Go
+  description: 'Detects CORS configurations in Go applications that allow wildcard origins with credentials, or reflect arbitrary
+    origins with Access-Control-Allow-Credentials, enabling cross-origin credential theft.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-346
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - cors
+  - credentials
+  - cross-origin
+  - wildcard
+  - go
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: Access-Control-Allow-Origin.*\*.*Access-Control-Allow-Credentials.*true
+    description: Wildcard origin with credentials
+  - pattern: AllowOrigins.*\*.*AllowCredentials.*true
+    description: CORS config with wildcard and credentials
+  - pattern: w\.Header\(\)\.Set\("Access-Control-Allow-Origin",\s*r\.Header\.Get\("Origin"\)\)
+    description: Origin reflection without validation
+  - pattern: AllowAllOrigins:\s*true.*AllowCredentials:\s*true
+    description: All origins allowed with credentials
+  anti_patterns:
+  - pattern: AllowOrigins:\s*\["https://.*"
+    description: Specific allowed origins
+  - pattern: AllowCredentials:\s*false
+    description: Credentials not allowed
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: isAllowedOrigin|validateOrigin
+    description: Origin validation function
+  - pattern: AllowOriginFunc
+    description: Custom origin validation function
+  - pattern: \blocalhost\b.*\bonly\b
+    description: Localhost-only CORS
+  bypass_variants:
+  - variant: AllowOriginFunc that returns true for all origins
+    description: Permissive custom origin validator
+  - variant: Origin header reflected directly without whitelist
+    description: Dynamic origin reflection
+  evasion_indicators:
+  - Wildcard origin with credentials
+  - Origin header reflection without validation
+  encoding_variants:
+  - net/http header setting
+  - Gin CORS middleware config
+  - Echo CORS middleware config
+  multi_function_chain_patterns:
+  - AllowAllOrigins + AllowCredentials -> cross-origin credential theft
+  - Origin reflection -> credentials allowed -> session hijacking
+  privilege_context_flags:
+  - Cross-origin API access
+  - Credential forwarding
+  business_logic_indicator:
+  - CORS middleware configuration
+  - API gateway setup
+  probable_taint_paths:
+  - source: Malicious cross-origin request
+    sink: Authenticated API response with credentials
+    through: Permissive CORS configuration
+  impact: 'Wildcard CORS with credentials allows any malicious website to make authenticated requests to the API and read
+    responses, enabling session hijacking and data theft.
+
+    '
+  remediation: 'Never use wildcard origins with credentials. Maintain a whitelist of allowed origins. Use AllowOriginFunc
+    with proper validation. Set AllowCredentials to false for public APIs.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/346.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+  context_awareness:
+    surrounding_context_patterns:
+    - cors.Config
+    - cors.New
+    - Access-Control-Allow
+    taint_source_indicators:
+    - Origin header
+    - Cross-origin request
+    taint_sink_indicators:
+    - Access-Control-Allow-Origin
+    - Access-Control-Allow-Credentials
+    sanitization_patterns:
+    - AllowOrigins whitelist
+    - AllowOriginFunc
+    - validateOrigin
+  severity_scoring:
+    base_score: 8.0
+    exploitability: high
+    impact_score: 7.5
+    adjustments:
+    - condition: wildcard with credentials on sensitive API
+      modifier: '+1.0'
+    - condition: public read-only API
+      modifier: '-3.0'
+  exploit_scenario: '1. Go API sets Access-Control-Allow-Origin to reflected Origin with credentials. 2. Attacker creates
+    malicious page on evil.com. 3. Victim visits evil.com while logged into the API. 4. JavaScript reads authenticated API
+    responses cross-origin.
+
+    '
+  confidence_factors:
+    increases:
+    - Wildcard with AllowCredentials true
+    - Origin reflection
+    decreases:
+    - Specific origin whitelist
+    - No credentials allowed
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-005
+    - AUTH-GO-003
+    dependency_chain: CORS misconfiguration enables cross-origin attack vectors
+    combined_risk_increase: Critical when combined with insecure cookies
+- rule_id: AUTH-GO-007
+  title: Password Comparison Timing Attack in Go
+  description: 'Detects password or token comparisons in Go using == or bytes.Equal instead of constant-time comparison functions,
+    enabling timing-based side-channel attacks to extract secrets.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-208
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - timing-attack
+  - constant-time
+  - password-comparison
+  - side-channel
+  - go
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: (?:password|token|secret|key|hash)\s*==\s*(?:password|token|secret|key|hash)
+    description: Direct string comparison for credentials
+  - pattern: bytes\.Equal\(.*(?:password|token|secret|hash)
+    description: bytes.Equal for credential comparison
+  - pattern: strings\.Compare\(.*(?:password|token|secret)
+    description: strings.Compare for credential comparison
+  - pattern: if\s+.*(?:apiKey|api_key)\s*==\s*
+    description: Direct API key comparison
+  anti_patterns:
+  - pattern: subtle\.ConstantTimeCompare
+    description: Constant-time comparison
+  - pattern: hmac\.Equal
+    description: HMAC-based constant-time comparison
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: bcrypt\.CompareHashAndPassword
+    description: BCrypt comparison (inherently constant-time)
+  - pattern: crypto/subtle
+    description: Subtle crypto package imported
+  - pattern: argon2\.IDKey|scrypt\.Key
+    description: Memory-hard KDF comparison
+  bypass_variants:
+  - variant: Constant-time comparison on hash but direct comparison on token
+    description: Inconsistent comparison methods
+  - variant: Short-circuit evaluation before constant-time check
+    description: Length check before comparison
+  evasion_indicators:
+  - Direct == comparison on secrets
+  - bytes.Equal on credential data
+  encoding_variants:
+  - String == operator
+  - bytes.Equal function
+  - strings.Compare function
+  multi_function_chain_patterns:
+  - r.Header.Get('X-API-Key') == storedKey -> timing leak
+  - password == hash -> timing-based password extraction
+  privilege_context_flags:
+  - Password verification
+  - API key validation
+  - Token comparison
+  business_logic_indicator:
+  - Authentication handler
+  - API key middleware
+  probable_taint_paths:
+  - source: User-provided credential
+    sink: Comparison with stored secret
+    through: Non-constant-time comparison
+  impact: 'Timing attacks allow attackers to extract secrets byte-by-byte by measuring response times. This can reveal API
+    keys, tokens, and password hashes.
+
+    '
+  remediation: 'Use subtle.ConstantTimeCompare for all credential comparisons. Use bcrypt.CompareHashAndPassword for password
+    verification. Never use == or bytes.Equal for secret comparison.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/208.html
+  - https://pkg.go.dev/crypto/subtle#ConstantTimeCompare
+  - https://codahale.com/a-lesson-in-timing-attacks/
+  context_awareness:
+    surrounding_context_patterns:
+    - func authenticate
+    - func verify
+    - func validate
+    taint_source_indicators:
+    - User input
+    - HTTP header
+    - Request body
+    taint_sink_indicators:
+    - Comparison operator
+    - Equality check
+    sanitization_patterns:
+    - subtle.ConstantTimeCompare
+    - hmac.Equal
+    - bcrypt.CompareHashAndPassword
+  severity_scoring:
+    base_score: 6.5
+    exploitability: medium
+    impact_score: 7.0
+    adjustments:
+    - condition: password comparison with ==
+      modifier: '+1.5'
+    - condition: test context
+      modifier: '-3.0'
+  exploit_scenario: '1. Go API validates API key with if apiKey == storedKey. 2. Attacker sends requests with varying key
+    prefixes. 3. Measures response time differences as correct bytes are found. 4. Extracts full API key byte-by-byte through
+    timing analysis.
+
+    '
+  confidence_factors:
+    increases:
+    - Direct == on credential variable
+    - bytes.Equal on secret
+    decreases:
+    - subtle.ConstantTimeCompare in scope
+    - bcrypt.CompareHashAndPassword used
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-001
+    - AUTH-GO-004
+    dependency_chain: Timing attack combined with weak hashing allows credential extraction
+    combined_risk_increase: High when API keys are exposed to timing analysis
+- rule_id: AUTH-GO-008
+  title: OAuth2 Token Reuse and Replay in Go
+  description: 'Detects OAuth2 implementations in Go that fail to properly validate token freshness, allow token reuse across
+    sessions, or do not verify audience and issuer claims, enabling token replay attacks.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.75
+  cwe: CWE-294
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - oauth2
+  - token-replay
+  - token-reuse
+  - go
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: oauth2\.Token\{.*AccessToken:.*\}(?!.*Expiry)
+    description: OAuth2 token without expiry check
+  - pattern: token\.AccessToken(?!.*token\.Valid\(\))
+    description: Access token used without validity check
+  - pattern: oauth2\.StaticTokenSource\(.*\)
+    description: Static token source (never refreshes)
+  - pattern: idToken\.Claims\(&claims\)(?!.*Audience|Issuer)
+    description: ID token claims without audience/issuer validation
+  anti_patterns:
+  - pattern: token\.Valid\(\)
+    description: Token validity check
+  - pattern: TokenSource.*ReuseTokenSource
+    description: Token source with refresh
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: Verifier.*Verify
+    description: Token verification
+  - pattern: oidc\.NewVerifier
+    description: OIDC verification
+  - pattern: token\.Expiry|ExpiresIn
+    description: Expiry handling
+  bypass_variants:
+  - variant: Refresh token stored insecurely and reused indefinitely
+    description: Persistent refresh token without rotation
+  - variant: Access token cached without expiry check
+    description: Stale token reuse
+  evasion_indicators:
+  - Static token source in production
+  - Token claims extracted without verification
+  encoding_variants:
+  - golang.org/x/oauth2 library
+  - coreos/go-oidc library
+  multi_function_chain_patterns:
+  - StaticTokenSource -> stale token -> API call with expired credentials
+  - idToken.Claims without audience check -> token from other app accepted
+  privilege_context_flags:
+  - OAuth2 authentication
+  - API authorization
+  business_logic_indicator:
+  - OAuth2 configuration
+  - Token handling
+  probable_taint_paths:
+  - source: OAuth2 access token
+    sink: API authorization decision
+    through: Missing token freshness validation
+  impact: 'Token replay attacks allow attackers to reuse stolen or expired tokens to maintain unauthorized access. Missing
+    audience validation allows tokens from one application to be used in another.
+
+    '
+  remediation: 'Always check token.Valid() before use. Use oauth2.ReuseTokenSource for automatic refresh. Validate audience,
+    issuer, and expiry claims on ID tokens. Implement token rotation for refresh tokens.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/294.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://pkg.go.dev/golang.org/x/oauth2
+  context_awareness:
+    surrounding_context_patterns:
+    - oauth2.Config
+    - oauth2.Token
+    - oidc.Verifier
+    taint_source_indicators:
+    - OAuth2 callback
+    - Token endpoint response
+    taint_sink_indicators:
+    - API client
+    - Resource access
+    - Authentication decision
+    sanitization_patterns:
+    - token.Valid()
+    - Verifier.Verify
+    - audience check
+  severity_scoring:
+    base_score: 7.5
+    exploitability: medium
+    impact_score: 7.5
+    adjustments:
+    - condition: static token source in production
+      modifier: '+1.0'
+    - condition: proper token refresh configured
+      modifier: '-3.0'
+  exploit_scenario: '1. Go app uses StaticTokenSource with a long-lived access token. 2. Token is leaked through logs or network
+    interception. 3. Attacker replays the static token months later. 4. Token never expires; attacker maintains persistent
+    access.
+
+    '
+  confidence_factors:
+    increases:
+    - StaticTokenSource in production
+    - Token used without Valid()
+    decreases:
+    - ReuseTokenSource configured
+    - OIDC verification present
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-002
+    - AUTH-GO-001
+    dependency_chain: Token replay with missing auth enables persistent unauthorized access
+    combined_risk_increase: High when combined with credential exposure
+- rule_id: AUTH-GO-009
+  title: API Key in URL Parameter in Go
+  description: 'Detects API keys and authentication tokens passed as URL query parameters in Go applications, exposing credentials
+    in server logs, browser history, referrer headers, and proxy logs.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-598
+  owasp: A07:2021 - Identification and Authentication Failures
+  tags:
+  - api-key
+  - url-parameter
+  - query-string
+  - credential-exposure
+  - go
+  detection_layer: 3
+  attack_surface_type: authentication
+  patterns:
+  - pattern: r\.URL\.Query\(\)\.Get\("(?:api_key|apiKey|token|access_token|secret)"
+    description: Auth credential read from URL query
+  - pattern: r\.FormValue\("(?:api_key|apiKey|token|access_token|secret)"\)
+    description: Credential from form value (may be query)
+  - pattern: \?(?:api_key|apiKey|token|access_token)=%s
+    description: API key in URL format string
+  - pattern: url\.Values.*(?:api_key|token|secret).*Encode\(\)
+    description: Credential added to URL query params
+  anti_patterns:
+  - pattern: r\.Header\.Get\("Authorization"\)
+    description: Header-based authentication
+  - pattern: r\.Header\.Get\("X-API-Key"\)
+    description: Custom header for API key
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: Bearer\s
+    description: Bearer token in header
+  - pattern: \bredact\b|\bmask\b
+    description: Credential redaction
+  - pattern: oauth2\.Token
+    description: OAuth2 token handling
+  bypass_variants:
+  - variant: API key in URL path segment instead of query parameter
+    description: Path-based credential passing
+  - variant: Token in URL fragment (still visible in some logs)
+    description: Fragment-based credential
+  evasion_indicators:
+  - API key in query string
+  - Token in URL format string
+  encoding_variants:
+  - r.URL.Query().Get() pattern
+  - fmt.Sprintf URL construction
+  multi_function_chain_patterns:
+  - r.URL.Query().Get('api_key') -> auth check -> credential in access log
+  - Sprintf('url?token=%s') -> HTTP request -> token in proxy log
+  privilege_context_flags:
+  - API authentication
+  - Token transmission
+  business_logic_indicator:
+  - API middleware
+  - HTTP client
+  probable_taint_paths:
+  - source: API key/token
+    sink: URL query parameter
+    through: Query string inclusion
+  impact: 'API keys in URLs are logged by web servers, proxies, CDNs, and stored in browser history. This exposes credentials
+    to log file access, referrer header leaks, and shoulder surfing.
+
+    '
+  remediation: 'Pass API keys in HTTP headers (Authorization or X-API-Key). Never include secrets in URL query parameters.
+    Use POST body for sensitive data transmission.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/598.html
+  - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+  - https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html
+  context_awareness:
+    surrounding_context_patterns:
+    - http.HandleFunc
+    - gin.Context
+    - echo.Context
+    taint_source_indicators:
+    - URL query parameter
+    - r.URL.Query()
+    taint_sink_indicators:
+    - Access log
+    - Referrer header
+    - Proxy log
+    sanitization_patterns:
+    - r.Header.Get
+    - Authorization header
+    - X-API-Key header
+  severity_scoring:
+    base_score: 7.0
+    exploitability: high
+    impact_score: 6.5
+    adjustments:
+    - condition: production API key in URL
+      modifier: '+1.0'
+    - condition: internal service only
+      modifier: '-2.0'
+  exploit_scenario: '1. Go API accepts api_key as URL query parameter. 2. Access logs contain full URL with API key: GET /api/data?api_key=secret123.
+    3. Attacker gains access to log files through log aggregation service. 4. Extracts API keys and uses them for unauthorized
+    API access.
+
+    '
+  confidence_factors:
+    increases:
+    - URL query parameter named api_key/token/secret
+    - URL format string with credential
+    decreases:
+    - Header-based authentication present
+    - Test context
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-001
+    - AUTH-GO-003
+    dependency_chain: URL credential exposure with log access enables credential theft
+    combined_risk_increase: High when combined with log exposure
+- rule_id: AUTH-GO-010
+  title: Insecure TLS Configuration in Go
+  description: 'Detects insecure TLS configurations in Go applications including disabled certificate verification, weak TLS
+    versions, insecure cipher suites, and skipped hostname verification enabling man-in-the-middle attacks.
+
+    '
+  language: go
+  category: auth
+  severity: High
+  confidence: 0.85
+  cwe: CWE-295
+  owasp: A02:2021 - Cryptographic Failures
+  tags:
+  - tls
+  - certificate-verification
+  - mitm
+  - transport-security
+  - go
+  detection_layer: 1
+  attack_surface_type: authentication
+  patterns:
+  - pattern: InsecureSkipVerify:\s*true
+    description: TLS certificate verification disabled
+  - pattern: MinVersion:\s*tls\.VersionTLS10
+    description: TLS 1.0 allowed (insecure)
+  - pattern: MinVersion:\s*tls\.VersionSSL30
+    description: SSL 3.0 allowed (insecure)
+  - pattern: tls\.Config\{\s*InsecureSkipVerify:\s*true
+    description: TLS config with skip verify
+  anti_patterns:
+  - pattern: MinVersion:\s*tls\.VersionTLS12
+    description: TLS 1.2 minimum
+  - pattern: MinVersion:\s*tls\.VersionTLS13
+    description: TLS 1.3 minimum
+  - pattern: _test\.go|func Test
+    description: Test file context
+  - pattern: InsecureSkipVerify:\s*false
+    description: Verification enabled
+  - pattern: \bdev\b|\bdevelopment\b|\blocal\b
+    description: Development context
+  - pattern: 'RootCAs:|ClientCAs:'
+    description: Custom CA configuration
+  bypass_variants:
+  - variant: InsecureSkipVerify with custom VerifyPeerCertificate that always returns nil
+    description: Custom verify function that does not validate
+  - variant: TLS 1.2 configured but weak cipher suites allowed
+    description: Strong version but weak ciphers
+  evasion_indicators:
+  - InsecureSkipVerify in production
+  - TLS 1.0 or SSL 3.0 allowed
+  encoding_variants:
+  - tls.Config struct literal
+  - http.Transport TLSClientConfig
+  multi_function_chain_patterns:
+  - 'InsecureSkipVerify: true -> HTTPS client -> MITM interception'
+  - TLS 1.0 -> POODLE/BEAST -> credential interception
+  privilege_context_flags:
+  - HTTPS client configuration
+  - Service-to-service communication
+  business_logic_indicator:
+  - HTTP client setup
+  - gRPC dial options
+  probable_taint_paths:
+  - source: Application credentials
+    sink: HTTPS connection to server
+    through: Disabled certificate verification
+  impact: 'Disabled TLS verification allows man-in-the-middle attackers to intercept all HTTPS traffic including authentication
+    credentials, API keys, and sensitive data transmitted between services.
+
+    '
+  remediation: 'Never set InsecureSkipVerify to true in production. Use MinVersion: tls.VersionTLS12 or tls.VersionTLS13.
+    Configure proper CA certificates. Use certificate pinning for critical connections.
+
+    '
+  references:
+  - https://cwe.mitre.org/data/definitions/295.html
+  - https://owasp.org/Top10/A02_2021-Cryptographic_Failures/
+  - https://pkg.go.dev/crypto/tls#Config
+  context_awareness:
+    surrounding_context_patterns:
+    - tls.Config
+    - http.Transport
+    - grpc.Dial
+    taint_source_indicators:
+    - Application secrets
+    - Auth credentials
+    taint_sink_indicators:
+    - HTTPS connection
+    - TLS handshake
+    sanitization_patterns:
+    - 'InsecureSkipVerify: false'
+    - 'MinVersion: tls.VersionTLS12'
+  severity_scoring:
+    base_score: 9.0
+    exploitability: high
+    impact_score: 8.5
+    adjustments:
+    - condition: InsecureSkipVerify in production code
+      modifier: '+0.5'
+    - condition: test or development context
+      modifier: '-4.0'
+  exploit_scenario: '1. Go microservice uses InsecureSkipVerify: true for HTTPS client. 2. Attacker performs ARP spoofing
+    on internal network. 3. Intercepts HTTPS traffic with self-signed certificate. 4. Reads all API keys and credentials in
+    transit.
+
+    '
+  confidence_factors:
+    increases:
+    - 'InsecureSkipVerify: true in non-test code'
+    - TLS 1.0 MinVersion
+    decreases:
+    - Test file
+    - Development-only config
+  metadata:
+    rule_version: 3.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: hardened
+    detection_complexity: contextual
+  cross_rule_intelligence:
+    related_rules:
+    - AUTH-GO-001
+    - AUTH-GO-002
+    dependency_chain: Insecure TLS with credential transmission enables full interception
+    combined_risk_increase: Critical when combined with hardcoded credentials

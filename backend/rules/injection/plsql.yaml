@@ -1,0 +1,294 @@
+rules:
+- rule_id: PLSQL-INJ-001
+  title: SQL Injection via EXECUTE IMMEDIATE
+  description: 'Detects dynamic SQL execution with string concatenation in PL/SQL.
+
+    '
+  language: plsql
+  category: injection
+  severity: Critical
+  confidence: 0.93
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - dynamic-sql
+  patterns:
+  - type: regex
+    pattern: EXECUTE\s+IMMEDIATE\s+(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: EXECUTE\s+IMMEDIATE\s+'[^']*'\s*\|\|\s*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: EXECUTE\s+IMMEDIATE\s+\w+\s*\|\|\s*(?:v_|l_|p_|g_)\w+
+  anti_patterns:
+  - USING
+  - DBMS_ASSERT
+  - DBMS_SQL
+  impact: 'PL/SQL injection can compromise the entire Oracle database,
+
+    including DBA-privileged operations.
+
+    '
+  remediation: "Use bind variables with EXECUTE IMMEDIATE:\n  EXECUTE IMMEDIATE 'SELECT * FROM users WHERE id = :1' USING p_user_id;\nOr use DBMS_ASSERT for validation:\n  l_safe := DBMS_ASSERT.ENQUOTE_LITERAL(p_input);\n"
+- rule_id: PLSQL-INJ-002
+  title: SQL Injection via DBMS_SQL
+  description: 'Detects unsafe DBMS_SQL usage with string concatenation.
+
+    '
+  language: plsql
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - dbms-sql
+  patterns:
+  - type: regex
+    pattern: DBMS_SQL\.PARSE\s*\(\s*\w+\s*,\s*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: DBMS_SQL\.PARSE\s*\(\s*\w+\s*,\s*'[^']*'\s*\|\|\s*(?:v_|l_|p_|g_)\w+
+  anti_patterns:
+  - DBMS_SQL.BIND_VARIABLE
+  - DBMS_ASSERT
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: PLSQL-INJ-003
+  title: SQL Injection in REF CURSOR
+  description: 'Detects dynamic SQL in REF CURSOR open statements.
+
+    '
+  language: plsql
+  category: injection
+  severity: Critical
+  confidence: 0.88
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - sql-injection
+  - ref-cursor
+  patterns:
+  - type: regex
+    pattern: OPEN\s+\w+\s+FOR\s+(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: OPEN\s+\w+\s+FOR\s+'[^']*'\s*\|\|\s*(?:v_|l_|p_|g_)\w+
+  anti_patterns:
+  - USING
+  - DBMS_ASSERT
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: PLSQL-INJ-004
+  title: OS Command Injection via UTL_* Packages
+  description: 'Detects OS command or file access via Oracle UTL packages.
+
+    '
+  language: plsql
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  detection_layer: 1
+  tags:
+  - command-injection
+  - utl-packages
+  patterns:
+  - type: regex
+    pattern: UTL_FILE\.FOPEN\s*\(\s*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: DBMS_SCHEDULER\.CREATE_JOB.*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: UTL_HTTP\.REQUEST\s*\(\s*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: DBMS_JAVA\.(?:LOADJAVA|SET_OUTPUT)\s*\(
+  anti_patterns:
+  - DBMS_ASSERT
+  - validate
+  - allowlist
+  impact: Injection attacks can lead to data breach, unauthorized access, or system compromise
+  remediation: Use parameterized queries, input validation, and output encoding
+- rule_id: PLSQL-XAUTH-001
+  title: Excessive Privileges (GRANT DBA)
+  description: 'Detects granting of excessive database privileges.
+
+    '
+  language: plsql
+  category: auth
+  severity: Critical
+  confidence: 0.95
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - excessive-privileges
+  - dba
+  patterns:
+  - type: regex
+    pattern: GRANT\s+DBA\s+TO\b
+  - type: regex
+    pattern: GRANT\s+ALL\s+PRIVILEGES\s+TO\b
+  - type: regex
+    pattern: GRANT\s+(?:CREATE\s+ANY|DROP\s+ANY|ALTER\s+ANY|EXECUTE\s+ANY)\b
+  - type: regex
+    pattern: GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE)\s+ON\s+\w+\s+TO\s+PUBLIC\b
+  anti_patterns:
+  - -- migration
+  - REVOKE
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: PLSQL-XAUTH-002
+  title: Hardcoded Database Credentials
+  description: 'Detects hardcoded credentials in PL/SQL code.
+
+    '
+  language: plsql
+  category: auth
+  severity: High
+  confidence: 0.9
+  cwe: CWE-798
+  owasp: A07:2021-Identification-and-Authentication-Failures
+  detection_layer: 1
+  tags:
+  - hardcoded-credentials
+  patterns:
+  - type: regex
+    pattern: (?:v_|l_|c_|g_)?(?:password|passwd)\s*(?::=|:=\s*'|VARCHAR2.*DEFAULT\s*')[^']{4,}
+  - type: regex
+    pattern: IDENTIFIED\s+BY\s+(?:'[^']{4,}'|[a-zA-Z]\w{3,})
+  - type: regex
+    pattern: UTL_HTTP\.SET_AUTHENTICATION\s*\([^,]+,\s*'[^']+'
+  anti_patterns:
+  - DBMS_RANDOM
+  - ENCRYPTED
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: PLSQL-XAUTH-003
+  title: Invoker Rights Missing
+  description: 'Detects stored procedures that run with definer rights instead of invoker rights.
+
+    '
+  language: plsql
+  category: auth
+  severity: Medium
+  confidence: 0.72
+  cwe: CWE-250
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 2
+  tags:
+  - invoker-rights
+  - privilege-escalation
+  patterns:
+  - type: regex
+    pattern: CREATE\s+(?:OR\s+REPLACE\s+)?(?:PROCEDURE|FUNCTION|PACKAGE)\s+\w+
+  anti_patterns:
+  - AUTHID CURRENT_USER
+  - AUTHID current_user
+  - INVOKER
+  impact: Authentication and authorization flaws can lead to unauthorized access and privilege escalation
+  remediation: Implement strong authentication, proper session management, and principle of least privilege
+- rule_id: PLSQL-XCRYPTO-001
+  title: Weak Encryption Algorithm
+  description: 'Detects use of weak encryption in DBMS_CRYPTO.
+
+    '
+  language: plsql
+  category: crypto
+  severity: High
+  confidence: 0.9
+  cwe: CWE-327
+  owasp: A02:2021-Cryptographic-Failures
+  detection_layer: 1
+  tags:
+  - weak-crypto
+  - dbms-crypto
+  patterns:
+  - type: regex
+    pattern: DBMS_CRYPTO\.(?:ENCRYPT|DECRYPT).*(?:DES_CBC_PKCS5|DES3_CBC_PKCS5)\b
+  - type: regex
+    pattern: DBMS_OBFUSCATION_TOOLKIT\b
+  - type: regex
+    pattern: DBMS_CRYPTO\.HASH.*(?:HASH_MD5|HASH_SH1)\b
+  anti_patterns:
+  - AES256
+  - AES_CBC_PKCS5
+  - HASH_SH256
+  impact: Weak cryptography can be broken, compromising data confidentiality and integrity
+  remediation: Use industry-standard algorithms (AES-256-GCM, SHA-256+, Argon2) and proper key management
+- rule_id: PLSQL-SSRF-001
+  title: Server-Side Request Forgery via UTL_HTTP
+  description: 'Detects HTTP requests with user-controlled URLs.
+
+    '
+  language: plsql
+  category: ssrf
+  severity: High
+  confidence: 0.85
+  cwe: CWE-918
+  owasp: A10:2021-Server-Side-Request-Forgery
+  detection_layer: 1
+  tags:
+  - ssrf
+  - utl-http
+  patterns:
+  - type: regex
+    pattern: UTL_HTTP\.(?:REQUEST|BEGIN_REQUEST)\s*\(\s*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: HTTPURITYPE\s*\(\s*(?:v_|l_|p_|g_)\w+
+  anti_patterns:
+  - validate_url
+  - allowed_hosts
+  impact: Server-side request forgery enables access to internal resources and cloud metadata
+  remediation: Validate and allowlist URLs, block private IP ranges and cloud metadata endpoints
+- rule_id: PLSQL-PATH-001
+  title: File Access via UTL_FILE
+  description: 'Detects file operations with user-controlled paths.
+
+    '
+  language: plsql
+  category: path_traversal
+  severity: High
+  confidence: 0.85
+  cwe: CWE-22
+  owasp: A01:2021-Broken-Access-Control
+  detection_layer: 1
+  tags:
+  - path-traversal
+  - utl-file
+  patterns:
+  - type: regex
+    pattern: UTL_FILE\.FOPEN\s*\(\s*(?:v_|l_|p_|g_)\w+\s*,\s*(?:v_|l_|p_|g_)\w+
+  - type: regex
+    pattern: BFILENAME\s*\(\s*(?:v_|l_|p_|g_)\w+
+  anti_patterns:
+  - validate
+  - allowed_dirs
+  - UTL_FILE_DIR
+  impact: Path traversal enables reading or writing arbitrary files on the server
+  remediation: Canonicalize paths and verify they remain within expected base directories
+- rule_id: PLSQL-XSEC-001
+  title: Sensitive Data Exposure via DBMS_OUTPUT
+  description: 'Detects output of sensitive data via DBMS_OUTPUT.
+
+    '
+  language: plsql
+  category: secrets
+  severity: Medium
+  confidence: 0.8
+  cwe: CWE-532
+  owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+  detection_layer: 1
+  tags:
+  - data-exposure
+  - logging
+  patterns:
+  - type: regex
+    pattern: DBMS_OUTPUT\.PUT_LINE\s*\(.*(?:password|passwd|secret|token|ssn|credit_card)\b
+  anti_patterns:
+  - mask
+  - '****'
+  impact: Exposed secrets enable unauthorized access to systems, APIs, and sensitive data
+  remediation: Use secret management systems, environment variables, and rotate exposed credentials immediately

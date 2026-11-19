@@ -1,0 +1,314 @@
+rules:
+
+  - rule_id: SCALA-INJ-001
+    title: SQL Injection via String Interpolation
+    description: >
+      Detects SQL queries built using Scala string interpolation (s"..." or f"...")
+      with user-controlled variables.
+    language: scala
+    category: injection
+    severity: Critical
+    confidence: 0.93
+    cwe: CWE-89
+    owasp: A03:2021-Injection
+    detection_layer: 1
+    tags: [sql-injection, string-interpolation]
+    patterns:
+      - type: regex
+        pattern: '(?:execute|executeQuery|executeUpdate|prepareStatement)\s*\(\s*s"(?:SELECT|INSERT|UPDATE|DELETE|DROP)\b'
+      - type: regex
+        pattern: '(?:execute|executeQuery|executeUpdate)\s*\(\s*s"[^"]*\$\{?(?:request|param|input|user|arg|data)\b'
+      - type: regex
+        pattern: 'sql"[^"]*\$\{?(?:request|param|input|user|arg|data)\b'
+      - type: regex
+        pattern: '(?:Slick|doobie|quill).*(?:sql|tsql)\s*"[^"]*\$\{?(?:request|param|input|user|arg|data)\b'
+    anti_patterns:
+      - "#$"
+      - "parameterized"
+      - "sql\"\"\".stripMargin"
+      - "fr\""
+    impact: |
+      Full SQL injection enabling data exfiltration, authentication bypass,
+      and potential remote code execution via database features.
+    remediation: |
+      Use parameterized queries with Slick, Doobie, or Quill:
+        // Slick
+        sql"SELECT * FROM users WHERE id = $userId".as[User]
+        // Doobie
+        sql"SELECT * FROM users WHERE id = $userId".query[User]
+      Never use s-string interpolation for SQL.
+    references:
+      - https://cwe.mitre.org/data/definitions/89.html
+
+  - rule_id: SCALA-INJ-002
+    title: Command Injection via Runtime.exec or Process
+    description: >
+      Detects OS command execution using Runtime.exec or scala.sys.process with
+      user-controlled input.
+    language: scala
+    category: injection
+    severity: Critical
+    confidence: 0.90
+    cwe: CWE-78
+    owasp: A03:2021-Injection
+    detection_layer: 1
+    tags: [command-injection, os-command]
+    patterns:
+      - type: regex
+        pattern: 'Runtime\.getRuntime\s*\(\s*\)\s*\.exec\s*\(\s*(?:s"|f"|request|param|input|user)'
+      - type: regex
+        pattern: '(?:Process|ProcessBuilder)\s*\(\s*(?:s"|f"|request|param|input|user)'
+      - type: regex
+        pattern: '(?:import\s+scala\.sys\.process\._|sys\.process).*[!#]'
+      - type: regex
+        pattern: '(?:s"|f").*(?:sh|bash|cmd|exec)\b[^"]*\$\{?(?:request|param|input|user|arg|data)\b'
+      - type: regex
+        pattern: '(?:stringToProcess|Seq\().*(?:request|param|input|user)\b.*(?:!|!!|run|lineStream)'
+    anti_patterns:
+      - "ProcessBuilder(List("
+      - "sanitize"
+      - "allowList"
+      - "whitelist"
+    impact: |
+      Remote code execution allowing an attacker to run arbitrary OS commands.
+    remediation: |
+      Use ProcessBuilder with argument lists instead of shell strings:
+        val pb = new ProcessBuilder(List("ls", "-la", safeDir).asJava)
+      Validate and sanitize all user input. Use allowlists.
+    references:
+      - https://cwe.mitre.org/data/definitions/78.html
+
+  - rule_id: SCALA-INJ-003
+    title: XML External Entity (XXE) Injection
+    description: >
+      Detects XML parsing without disabling external entity resolution in Scala.
+    language: scala
+    category: injection
+    severity: High
+    confidence: 0.85
+    cwe: CWE-611
+    owasp: A05:2021-Security-Misconfiguration
+    detection_layer: 1
+    tags: [xxe, xml-parsing]
+    patterns:
+      - type: regex
+        pattern: 'XML\.load(?:String|File)?\s*\('
+      - type: regex
+        pattern: 'SAXParserFactory\.newInstance'
+      - type: regex
+        pattern: 'DocumentBuilderFactory\.newInstance'
+      - type: regex
+        pattern: 'XMLInputFactory\.newInstance'
+    anti_patterns:
+      - "setFeature.*FEATURE_EXTERNAL"
+      - "setFeature.*disallow-doctype"
+      - "FEATURE_SECURE_PROCESSING"
+      - "setExpandEntityReferences(false)"
+    impact: |
+      XXE can lead to server-side request forgery, file disclosure,
+      denial of service, and remote code execution.
+    remediation: |
+      Disable external entities:
+        val factory = SAXParserFactory.newInstance()
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+    references:
+      - https://cwe.mitre.org/data/definitions/611.html
+
+  - rule_id: SCALA-INJ-004
+    title: LDAP Injection
+    description: >
+      Detects LDAP queries built with string interpolation or concatenation.
+    language: scala
+    category: injection
+    severity: High
+    confidence: 0.85
+    cwe: CWE-90
+    owasp: A03:2021-Injection
+    detection_layer: 1
+    tags: [ldap-injection]
+    patterns:
+      - type: regex
+        pattern: '(?:search|lookup|bind)\s*\(\s*s"[^"]*(?:cn=|uid=|ou=|dc=)[^"]*\$\{?(?:request|param|input|user)\b'
+      - type: regex
+        pattern: 'SearchFilter\s*\(\s*s"[^"]*\$\{?(?:request|param|input|user)\b'
+      - type: regex
+        pattern: '(?:NamingEnumeration|SearchControls).*[+]\s*(?:request|param|input|user)\b'
+    anti_patterns:
+      - "encodeForLDAP"
+      - "LdapEncoder"
+      - "escapeLDAP"
+    impact: |
+      LDAP injection can bypass authentication and access unauthorized data.
+    remediation: |
+      Use parameterized LDAP filters and encode special characters.
+    references:
+      - https://cwe.mitre.org/data/definitions/90.html
+
+  - rule_id: SCALA-INJ-005
+    title: XPath Injection
+    description: >
+      Detects XPath queries with user-controlled input in Scala.
+    language: scala
+    category: injection
+    severity: High
+    confidence: 0.85
+    cwe: CWE-643
+    owasp: A03:2021-Injection
+    detection_layer: 1
+    tags: [xpath-injection]
+    patterns:
+      - type: regex
+        pattern: '(?:compile|evaluate|selectNodes)\s*\(\s*s"[^"]*\$\{?(?:request|param|input|user)\b'
+      - type: regex
+        pattern: 'XPathFactory\.newInstance.*(?:compile|evaluate)\s*\(\s*(?:s"|f"|request|param|input)'
+    anti_patterns:
+      - "XPathExpression"
+      - "XPathVariableResolver"
+    impact: |
+      XPath injection can bypass authentication and extract XML data.
+    remediation: |
+      Use parameterized XPath queries with XPathVariableResolver.
+
+  - rule_id: SCALA-INJ-006
+    title: Template Injection (Server-Side)
+    description: >
+      Detects server-side template injection in Play Framework or Twirl.
+    language: scala
+    category: injection
+    severity: Critical
+    confidence: 0.82
+    cwe: CWE-94
+    owasp: A03:2021-Injection
+    detection_layer: 2
+    tags: [ssti, template-injection]
+    patterns:
+      - type: regex
+        pattern: 'Html\s*\(\s*(?:s"|f"|request|param|input|user)\b'
+      - type: regex
+        pattern: '@Html\s*\(\s*(?:request|param|input|user)\b'
+      - type: regex
+        pattern: '(?:play\.twirl|views\.html).*\.render\s*\(\s*(?:request\.body|request\.queryString)'
+    anti_patterns:
+      - "Html(escaped"
+      - "HtmlFormat.escape"
+      - "XssFilter"
+    impact: |
+      SSTI can lead to remote code execution on the server.
+    remediation: |
+      Use Play's built-in HTML escaping. Never pass raw user input to Html().
+      Use @Html only with properly sanitized content.
+
+  - rule_id: SCALA-INJ-007
+    title: NoSQL Injection (MongoDB)
+    description: >
+      Detects NoSQL injection in Scala MongoDB drivers.
+    language: scala
+    category: injection
+    severity: High
+    confidence: 0.85
+    cwe: CWE-943
+    owasp: A03:2021-Injection
+    detection_layer: 1
+    tags: [nosql-injection, mongodb]
+    patterns:
+      - type: regex
+        pattern: '(?:Document|BsonDocument)\s*\(\s*s"[^"]*\$\{?(?:request|param|input|user)\b'
+      - type: regex
+        pattern: '(?:find|aggregate|update|delete)\s*\(\s*(?:Document|BsonDocument)\s*\(\s*(?:s"|f")'
+      - type: regex
+        pattern: '(?:collection|db)\.(?:find|update|delete)\s*\(.*\$(?:regex|where|gt|lt|ne|in)\b'
+    anti_patterns:
+      - "Filters.eq"
+      - "Filters.and"
+      - "sanitize"
+    impact: |
+      NoSQL injection can bypass authentication and exfiltrate data.
+    remediation: |
+      Use the MongoDB Scala driver's type-safe query builders (Filters).
+
+  - rule_id: SCALA-INJ-008
+    title: Expression Language Injection
+    description: >
+      Detects Spring Expression Language (SpEL) injection in Scala Spring apps.
+    language: scala
+    category: injection
+    severity: Critical
+    confidence: 0.82
+    cwe: CWE-917
+    owasp: A03:2021-Injection
+    detection_layer: 2
+    tags: [el-injection, spel]
+    patterns:
+      - type: regex
+        pattern: 'SpelExpressionParser\s*\(\s*\)\.parseExpression\s*\(\s*(?:request|param|input|user)\b'
+      - type: regex
+        pattern: 'ExpressionParser.*parseExpression\s*\(\s*(?:s"|f"|request|param|input|user)'
+      - type: regex
+        pattern: '@Value\s*\(\s*"#\{.*(?:request|param|input)\b'
+    anti_patterns:
+      - "SimpleEvaluationContext"
+      - "StandardEvaluationContext"
+    impact: |
+      SpEL injection can lead to remote code execution.
+    remediation: |
+      Use SimpleEvaluationContext instead of StandardEvaluationContext.
+      Never pass user input directly to expression parsers.
+
+  - rule_id: SCALA-INJ-009
+    title: Log Injection / Log Forging
+    description: >
+      Detects unsanitized user input in log statements.
+    language: scala
+    category: injection
+    severity: Medium
+    confidence: 0.80
+    cwe: CWE-117
+    owasp: A09:2021-Security-Logging-and-Monitoring-Failures
+    detection_layer: 1
+    tags: [log-injection, log-forging]
+    patterns:
+      - type: regex
+        pattern: '(?:logger|log)\s*\.(?:info|warn|error|debug)\s*\(\s*s"[^"]*\$\{?(?:request|param|input|user|headers)\b'
+      - type: regex
+        pattern: '(?:Logger|log)\s*\.(?:info|warn|error|debug)\s*\(\s*(?:request|param|input|user)\b'
+    anti_patterns:
+      - "sanitize"
+      - "encode"
+      - "replace(\"\\n"
+      - "stripNewlines"
+    impact: |
+      Log injection enables log forging, CRLF injection in logs,
+      and can mislead forensic analysis.
+    remediation: |
+      Sanitize input before logging. Remove newlines and control characters.
+      Use structured logging (e.g., logback with MDC).
+
+  - rule_id: SCALA-INJ-010
+    title: Header Injection / HTTP Response Splitting
+    description: >
+      Detects HTTP header injection via unsanitized user input in response headers.
+    language: scala
+    category: injection
+    severity: High
+    confidence: 0.85
+    cwe: CWE-113
+    owasp: A03:2021-Injection
+    detection_layer: 1
+    tags: [header-injection, response-splitting]
+    patterns:
+      - type: regex
+        pattern: '(?:withHeaders|addHttpHeaders|Ok|Redirect).*\(\s*"[^"]*"\s*->\s*(?:request|param|input|user)\b'
+      - type: regex
+        pattern: '(?:setHeader|addHeader)\s*\([^,]+,\s*(?:request|param|input|user)\b'
+      - type: regex
+        pattern: 'Redirect\s*\(\s*(?:request|param|input|user)\b'
+    anti_patterns:
+      - "Uri.encode"
+      - "URLEncoder"
+      - "sanitize"
+    impact: |
+      Header injection enables response splitting, cache poisoning, and XSS.
+    remediation: |
+      Validate and encode all user input before placing in HTTP headers.
+      Reject input containing CR/LF characters.
